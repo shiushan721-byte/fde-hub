@@ -40,6 +40,7 @@ interface SidebarProps {
   favoritesCount?: number;
   onOpenBecomeCreator?: () => void;
   onOpenBecomeFDE?: () => void;
+  onOpenMyExpertHome?: () => void;
   currentTier?: 1 | 2 | 3;
   currentRole?: UserIdentityRole;
 }
@@ -53,6 +54,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   favoritesCount = 0,
   onOpenBecomeCreator,
   onOpenBecomeFDE,
+  onOpenMyExpertHome,
   currentTier = 1,
   currentRole = 'normal'
 }) => {
@@ -77,7 +79,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       key: 'orders',
-      label: '订单中心',
+      label: '我的定制',
       icon: ClipboardList
     },
     {
@@ -86,6 +88,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Users
     }
   ];
+
+  // Expert users get "我的专家主页" right below "AI 专家库"
+  if (isExpert) {
+    menuItems.push({
+      key: 'creator-center',
+      label: '我的专家主页',
+      icon: Crown
+    });
+  }
 
   return (
     <aside
@@ -140,7 +151,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={item.key}
                 id={`sidebar-nav-${item.key}`}
-                onClick={() => onNavigate(item.key)}
+                onClick={() => {
+                  if (item.key === 'creator-center') {
+                    onOpenMyExpertHome?.();
+                    // Fallback to normal navigation if callback is not provided.
+                    if (!onOpenMyExpertHome) onNavigate(item.key);
+                    return;
+                  }
+                  onNavigate(item.key);
+                }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer relative group ${
                   isActive
                     ? item.isHighlight

@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   XCircle,
+  ScanSearch,
   Play,
   RotateCw,
   Sparkles,
@@ -31,7 +32,6 @@ import {
   Lock,
   ExternalLink,
   Gift,
-  HelpCircle,
   CheckCheck,
   Download
 } from 'lucide-react';
@@ -54,14 +54,204 @@ import {
 interface AgentPublishWizardModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccessPublish: (agentData: any) => void;
+  onSuccessPublish: (agentData: any) => void | Promise<void>;
   tokenRebateRate?: number; // 如 20%
   agentToUpdate?: CreatorAgentItem | null;
-  mode?: 'create' | 'replace_skill';
+  mode?: 'create' | 'replace_skill' | 'custom_delivery';
   skillReplaceHint?: string;
 }
 
 type WizardStep = 'upload' | 'verifying' | 'fix_center' | 'audit_launch';
+type HostPrecheckStatus = 'idle' | 'running' | 'passed' | 'failed';
+type ScaffoldLang = 'python' | 'node';
+
+function crc32(data: Uint8Array) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < data.length; i++) {
+    crc ^= data[i];
+    for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipBytes(n: number, size: 2 | 4) {
+  const b = new Uint8Array(size);
+  const v = new DataView(b.buffer);
+  if (size === 2) v.setUint16(0, n, true);
+  else v.setUint32(0, n, true);
+  return b;
+}
+
+function concatBytes(parts: Uint8Array[]) {
+  const out = new Uint8Array(parts.reduce((sum, p) => sum + p.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+function createZipBlob(files: { path: string; content: string }[]) {
+  const encoder = new TextEncoder();
+  const locals: Uint8Array[] = [];
+  const centrals: Uint8Array[] = [];
+  let offset = 0;
+  for (const file of files) {
+    const name = encoder.encode(file.path);
+    const data = encoder.encode(file.content);
+    const crc = crc32(data);
+    const local = concatBytes([
+      zipBytes(0x04034b50, 4),
+      zipBytes(20, 2),
+      zipBytes(0, 2),
+      zipBytes(0, 2),
+      zipBytes(0, 2),
+      zipBytes(0, 2),
+      zipBytes(crc, 4),
+      zipBytes(data.length, 4),
+      zipBytes(data.length, 4),
+      zipBytes(name.length, 2),
+      zipBytes(0, 2),
+      name,
+      data
+    ]);
+    const central = concatBytes([
+      zipBytes(0x02014b50, 4),
+      zipBytes(20, 2),
+      zipBytes(20, 2),
+      zipBytes(0, 2),
+      zipBytes(0, 2),
+      zipBytes(0, 2),
+      zipBytes(0, 2),
+      zipBytes(crc, 4),
+      zipBytes(data.length, 4),
+      zipBytes(data.length, 4),
+      zipBytes(name.length, 2),
+      zipBytes(0, 2),
+      zipBytes(0, 2),
+      zipBytes(0, 2),
+      zipBytes(0, 2),
+      zipBytes(0, 4),
+      zipBytes(offset, 4),
+      name
+    ]);
+    locals.push(local);
+    centrals.push(central);
+    offset += local.length;
+  }
+  const centralDir = concatBytes(centrals);
+  const end = concatBytes([
+    zipBytes(0x06054b50, 4),
+    zipBytes(0, 2),
+    zipBytes(0, 2),
+    zipBytes(files.length, 2),
+    zipBytes(files.length, 2),
+    zipBytes(centralDir.length, 4),
+    zipBytes(offset, 4),
+    zipBytes(0, 2)
+  ]);
+  return new Blob([concatBytes([...locals, centralDir, end])], { type: 'application/zip' });
+}
+
+function scaffoldFiles(lang: ScaffoldLang): { path: string; content: string }[] {
+  const isPython = lang === 'python';
+  const entry = isPython ? 'entrypoint.py' : 'entrypoint.js';
+  return [
+    {
+      path: 'README.md',
+      content: `# Hellome Skill 脚手架（${isPython ? 'Python' : 'Node.js'}）
+
+1. 按 SKILL.md 填写能力说明与输入输出契约
+2. 在 ${entry} 实现入口逻辑
+3. 打包为 zip 后回到发布向导上传并检测
+`
+    },
+    {
+      path: 'SKILL.md',
+      content: `# Skill Name
+
+## 适用场景
+描述该 Skill 解决的问题。
+
+## 输入参数
+- query: string（必填）
+
+## 输出结果
+- answer: string
+
+## 权限与依赖
+- 无外部密钥
+
+## 验收标准
+给定样例输入可稳定产出结构化结果。
+`
+    },
+    {
+      path: 'manifest.json',
+      content: JSON.stringify(
+        {
+          name: isPython ? 'hellome-python-skill' : 'hellome-node-skill',
+          version: '1.0.0',
+          runtime: isPython ? 'python3.10' : 'node20',
+          entrypoint: entry,
+          hermesMinVersion: '>=2.3.0'
+        },
+        null,
+        2
+      )
+    },
+    {
+      path: 'hermes.config.yaml',
+      content: `runtime: ${isPython ? 'python' : 'node'}
+entrypoint: ${entry}
+timeout_sec: 15
+`
+    },
+    {
+      path: 'schemas/input.schema.json',
+      content: JSON.stringify(
+        {
+          type: 'object',
+          required: ['query'],
+          properties: { query: { type: 'string', minLength: 1 } }
+        },
+        null,
+        2
+      )
+    },
+    {
+      path: 'schemas/output.schema.json',
+      content: JSON.stringify(
+        {
+          type: 'object',
+          required: ['answer'],
+          properties: { answer: { type: 'string' } }
+        },
+        null,
+        2
+      )
+    },
+    isPython
+      ? {
+          path: 'entrypoint.py',
+          content: `def main(input):\n    return {"answer": f"echo: {input.get('query', '')}"}\n`
+        }
+      : {
+          path: 'entrypoint.js',
+          content: `export async function main(input) {\n  return { answer: \`echo: \${input?.query || ''}\` };\n}\n`
+        }
+  ];
+}
+
+const HOST_PRECHECK_FAILURES = [
+  { code: 'HOST_8_9_DUAL_OS', detail: '双端真机未由 FDE 判定' },
+  { code: 'HOST_7_7_TOKEN', detail: '词元 L1-L4 未由 FDE 判定' },
+  { code: 'HOST_2_2_INSTALL_TREE', detail: '不写安装目录未由 FDE 判定' },
+  { code: 'HOST_8_8_PRESENCE', detail: 'presence 关页停服未由 FDE 判定' },
+  { code: 'HOST_8_2_1_OPEN_BROWSER', detail: '上架 open_browser 未由 FDE 判定' },
+  { code: 'HOST_8_9_NO_SINGLE_OS', detail: '启动指令双端未由 FDE 判定' }
+];
 
 export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = ({
   isOpen,
@@ -72,17 +262,20 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
   mode = 'create',
   skillReplaceHint
 }) => {
+  const skillOnlyMode = mode === 'replace_skill' || mode === 'custom_delivery';
   // Skill Package Upload
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string>(
-    agentToUpdate?.skillPackage?.fileName || 'crossborder-ecommerce-copywriter-v1.2.0.zip'
+    agentToUpdate?.skillPackage?.fileName || ''
   );
   const [uploadedFileSize, setUploadedFileSize] = useState<string>(
-    agentToUpdate?.skillPackage?.size || '2.4 MB'
+    agentToUpdate?.skillPackage?.size || ''
   );
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedPresetId, setSelectedPresetId] = useState<string>('preset_ecommerce_perfect');
   const [skillPackageMode, setSkillPackageMode] = useState<'has_package' | 'no_package'>('has_package');
+  const [scaffoldLang, setScaffoldLang] = useState<ScaffoldLang | null>(null);
+  const [scaffoldDownloaded, setScaffoldDownloaded] = useState(false);
 
   // Basic Info Form State
   const [agentTitle, setAgentTitle] = useState(agentToUpdate?.title || '跨境电商海外多语种爆款文案 Agent');
@@ -141,11 +334,17 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
   const [isSubmittingAudit, setIsSubmittingAudit] = useState(false);
   const [isAuditPassed, setIsAuditPassed] = useState(false);
   const [showSkillDocModal, setShowSkillDocModal] = useState(false);
+  const [hostPrecheck, setHostPrecheck] = useState<HostPrecheckStatus>('idle');
+  const [hostDebugOutcome, setHostDebugOutcome] = useState<'passed' | 'failed'>('passed');
 
   // Initialize selected package data
   useEffect(() => {
     if (isOpen) {
       setSkillPackageMode('has_package');
+      setScaffoldLang(null);
+      setScaffoldDownloaded(false);
+      setHostPrecheck('idle');
+      setHostDebugOutcome('passed');
     }
   }, [isOpen]);
 
@@ -178,6 +377,7 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
     const sizeInMb = (file.size / (1024 * 1024)).toFixed(1);
     setUploadedFileName(file.name);
     setUploadedFileSize(`${sizeInMb} MB`);
+    setHostPrecheck('idle');
     const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
     if (cleanName && cleanName.length > 2 && (!agentTitle || agentTitle === '跨境电商海外多语种爆款文案 Agent')) {
       setAgentTitle(cleanName);
@@ -199,6 +399,17 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
   };
 
   if (!isOpen) return null;
+
+  const showUploadArea =
+    skillOnlyMode || skillPackageMode === 'has_package' || scaffoldDownloaded;
+
+  const handleStartHostPrecheck = () => {
+    if (!uploadedFileName || hostPrecheck === 'running') return;
+    setHostPrecheck('running');
+    window.setTimeout(() => {
+      setHostPrecheck(hostDebugOutcome);
+    }, 800);
+  };
 
   // Handler: Start Verification Pipeline
   const handleStartVerification = () => {
@@ -366,8 +577,19 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
   };
 
   // Handler: Submit Audit & Launch
-  const handleSubmitAudit = () => {
+  const handleSubmitAudit = async () => {
     setIsSubmittingAudit(true);
+    if (mode === 'custom_delivery') {
+      try {
+        await Promise.resolve(onSuccessPublish(buildAgentPayload('published')));
+        onClose();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : '提交平台审核失败');
+      } finally {
+        setIsSubmittingAudit(false);
+      }
+      return;
+    }
     setTimeout(() => {
       setIsSubmittingAudit(false);
       setIsAuditPassed(true);
@@ -426,6 +648,19 @@ your-skill-v1.0.0/
     URL.revokeObjectURL(url);
   };
 
+  const handleDownloadScaffold = (lang: ScaffoldLang) => {
+    const blob = createZipBlob(scaffoldFiles(lang));
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = lang === 'python' ? 'hellome-python-skill-scaffold.zip' : 'hellome-node-skill-scaffold.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setScaffoldDownloaded(true);
+  };
+
   // Cost calculation based on sandbox metrics
   const unitTokens = currentMetrics?.avgExecutionTokens || 1850;
   const unitCostYuan = currentMetrics?.avgExecutionCostYuan || 0.038;
@@ -452,11 +687,15 @@ your-skill-v1.0.0/
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-base sm:text-lg font-bold text-slate-900">
-                    {mode === 'replace_skill' ? '替换 Skill 源码包' : '发布智能体'}
+                    {mode === 'custom_delivery'
+                      ? '上传 Skill 交付'
+                      : mode === 'replace_skill'
+                        ? '替换 Skill 源码包'
+                        : '发布智能体'}
                   </h2>
-                  {mode === 'replace_skill' ? (
+                  {skillOnlyMode ? (
                     <span className="px-2.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-[11px] font-semibold">
-                      Skill 升级更新
+                      {mode === 'custom_delivery' ? '定制交付校验' : 'Skill 升级更新'}
                     </span>
                   ) : (
                     <button
@@ -468,10 +707,12 @@ your-skill-v1.0.0/
                     </button>
                   )}
                 </div>
-                {mode === 'replace_skill' && (
+                {skillOnlyMode && (
                   <p className="text-xs text-slate-500 mt-0.5">
                     {skillReplaceHint ||
-                      `当前智能体处于已下架状态，正在为【${agentToUpdate?.title || agentTitle}】更新 Skill 包`}
+                      (mode === 'custom_delivery'
+                        ? '上传 Skill 包并通过校验后，将提交平台审核'
+                        : `当前智能体处于已下架状态，正在为【${agentToUpdate?.title || agentTitle}】更新 Skill 包`)}
                   </p>
                 )}
               </div>
@@ -492,116 +733,6 @@ your-skill-v1.0.0/
           {/* ======================= STEP 1: UPLOAD & BASIC INFO ======================= */}
           {currentStep === 'upload' && (
             <div className="space-y-6">
-              {/* Skill Package Upload Area */}
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3.5">
-                {mode !== 'replace_skill' && (
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSkillPackageMode('has_package')}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                        skillPackageMode === 'has_package'
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                          : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700'
-                      }`}
-                    >
-                      我已有 skill 包
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSkillPackageMode('no_package')}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                        skillPackageMode === 'no_package'
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                          : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700'
-                      }`}
-                    >
-                      我没有 skill 包
-                    </button>
-                  </div>
-                )}
-
-                {skillPackageMode === 'has_package' || mode === 'replace_skill' ? (
-                  <>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 flex items-center gap-2">
-                    <Sparkles size={15} className="text-blue-600" />
-                    <span>上传 Skill 技能压缩包 (.zip / .tar.gz)</span>
-                  </span>
-                </div>
-
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept=".zip,.tar.gz,.tar"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
-
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setIsDragOver(true);
-                  }}
-                  onDragLeave={() => setIsDragOver(false)}
-                  onDrop={handleDrop}
-                  className={`border-2 border-dashed rounded-2xl p-7 text-center transition-all cursor-pointer group ${
-                    isDragOver
-                      ? 'border-blue-500 bg-blue-50/60 scale-[0.99]'
-                      : 'border-slate-300 hover:border-blue-500 bg-white hover:bg-slate-50/50'
-                  }`}
-                >
-                  <UploadCloud
-                    size={36}
-                    className={`mx-auto transition-colors mb-2 ${
-                      isDragOver ? 'text-blue-600 scale-110' : 'text-slate-400 group-hover:text-blue-600'
-                    }`}
-                  />
-                  <div className="text-xs font-bold text-slate-800">
-                    点击上传或将 Skill 压缩包拖拽至此处
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-1">
-                    支持 .zip, .tar.gz 格式 (将自动识别 SKILL.md、entrypoint 与依赖清单)
-                  </div>
-
-                  {uploadedFileName && (
-                    <div className="mt-3.5 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-mono border border-slate-200 shadow-2xs">
-                      <FileCode size={14} className="text-blue-600 shrink-0" />
-                      <span className="font-semibold">{uploadedFileName}</span>
-                      <span className="text-slate-500">({uploadedFileSize})</span>
-                      <span className="ml-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-sans font-bold">
-                        ✓ 校验准备就绪
-                      </span>
-                    </div>
-                  )}
-                </div>
-                  </>
-                ) : (
-                  <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white p-8 sm:p-10 text-center space-y-3">
-                    <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
-                      <HelpCircle size={24} />
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-sm font-bold text-slate-900">暂无 Skill 包创建向导</p>
-                      <p className="text-xs text-slate-500 leading-relaxed max-w-md mx-auto">
-                        「我没有 skill 包」的引导式创建流程正在建设中。若你已有打包好的 Skill，可切换至「我已有 skill 包」继续上传与校验。
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowSkillDocModal(true)}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold border border-blue-200 cursor-pointer transition-colors"
-                    >
-                      <FileText size={14} />
-                      <span>查看标准版 Skill 文档</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {(skillPackageMode === 'has_package' || mode === 'replace_skill') && (
-              <>
               <div className="space-y-4">
                 <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                   <FileText size={15} className="text-blue-600" />
@@ -651,34 +782,278 @@ your-skill-v1.0.0/
                 </div>
               </div>
 
-              {/* File manifest preview */}
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                    <Boxes size={15} className="text-indigo-600" />
-                    <span>Skill 包已识别文件结构 ({filesList.length} 个文件)</span>
+              {/* Skill Package Upload Area */}
+              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3.5">
+                {mode !== 'replace_skill' && mode !== 'custom_delivery' && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSkillPackageMode('has_package');
+                        setScaffoldLang(null);
+                        setScaffoldDownloaded(false);
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        skillPackageMode === 'has_package'
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700'
+                      }`}
+                    >
+                      我已有 skill 包
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSkillPackageMode('no_package');
+                        setScaffoldLang(null);
+                        setScaffoldDownloaded(false);
+                        setUploadedFileName('');
+                        setHostPrecheck('idle');
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        skillPackageMode === 'no_package'
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700'
+                      }`}
+                    >
+                      我没有 skill 包
+                    </button>
+                  </div>
+                )}
+
+                {showUploadArea ? (
+                  <>
+                {skillPackageMode === 'no_package' && scaffoldLang && (
+                  <p className="text-[11px] text-slate-500">
+                    已选择 {scaffoldLang === 'python' ? 'Python' : 'Node.js'} 脚手架。开发完成后打包 zip 上传即可。
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadScaffold(scaffoldLang)}
+                      className="ml-2 text-blue-600 font-bold cursor-pointer"
+                    >
+                      再次下载
+                    </button>
+                  </p>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-2">
+                    <Sparkles size={15} className="text-blue-600" />
+                    <span>上传 Skill 技能压缩包 (.zip / .tar.gz)</span>
                   </span>
-                  <span className="text-[11px] text-slate-500 font-mono">SemVer: v{agentVersion}</span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
-                  {filesList.map((file, idx) => (
-                    <div
-                      key={idx}
-                      className="p-2.5 rounded-xl bg-white border border-slate-200 flex items-center justify-between text-[11px] shadow-2xs"
-                    >
-                      <div className="flex items-center gap-1.5 truncate">
-                        <FileCode size={14} className={file.status === 'error' ? 'text-rose-600' : 'text-blue-600'} />
-                        <span className="text-slate-800 truncate font-mono font-medium">{file.name}</span>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".zip,.tar.gz,.tar"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+
+                {uploadedFileName ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-mono border border-slate-200 min-w-0">
+                        <FileCode size={14} className="text-blue-600 shrink-0" />
+                        <span className="font-semibold truncate">{uploadedFileName}</span>
+                        {uploadedFileSize && <span className="text-slate-500 shrink-0">({uploadedFileSize})</span>}
                       </div>
-                      <span className="text-[10px] text-slate-400 shrink-0 font-mono">{file.size}</span>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="text-[11px] font-bold text-blue-600 cursor-pointer shrink-0"
+                      >
+                        重新上传
+                      </button>
                     </div>
-                  ))}
+                    <button
+                      type="button"
+                      disabled={hostPrecheck === 'running'}
+                      onClick={handleStartHostPrecheck}
+                      className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
+                    >
+                      {hostPrecheck === 'running' ? (
+                        <>
+                          <RotateCw size={16} className="animate-spin" />
+                          检测中…
+                        </>
+                      ) : (
+                        <>
+                          <ScanSearch size={16} />
+                          开始检测
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragOver(true);
+                  }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-2xl p-7 text-center transition-all cursor-pointer group ${
+                    isDragOver
+                      ? 'border-blue-500 bg-blue-50/60 scale-[0.99]'
+                      : 'border-slate-300 hover:border-blue-500 bg-white hover:bg-slate-50/50'
+                  }`}
+                >
+                  <UploadCloud
+                    size={36}
+                    className={`mx-auto transition-colors mb-2 ${
+                      isDragOver ? 'text-blue-600 scale-110' : 'text-slate-400 group-hover:text-blue-600'
+                    }`}
+                  />
+                  <div className="text-xs font-bold text-slate-800">
+                    点击上传或将 Skill 压缩包拖拽至此处
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    支持 .zip, .tar.gz 格式 (将自动识别 SKILL.md、entrypoint 与依赖清单)
+                  </div>
                 </div>
+                )}
+                  </>
+                ) : (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">选择运行语言</p>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        下载对应脚手架后，按目录开发并打包 zip，再回到这里上传检测。
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {([
+                        { id: 'python' as const, title: 'Python', desc: 'entrypoint.py' },
+                        { id: 'node' as const, title: 'Node.js', desc: 'entrypoint.js' }
+                      ]).map((lang) => (
+                        <button
+                          key={lang.id}
+                          type="button"
+                          onClick={() => {
+                            setScaffoldLang(lang.id);
+                            setScaffoldDownloaded(false);
+                          }}
+                          className={`p-4 rounded-2xl border text-left cursor-pointer transition-all ${
+                            scaffoldLang === lang.id
+                              ? 'border-blue-600 bg-blue-50 shadow-xs'
+                              : 'border-slate-200 bg-slate-50 hover:border-blue-300'
+                          }`}
+                        >
+                          <div className="text-sm font-bold text-slate-900">{lang.title}</div>
+                          <div className="text-[11px] text-slate-500 mt-1 font-mono">{lang.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                    {scaffoldLang && (
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadScaffold(scaffoldLang)}
+                        className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <Download size={16} />
+                        下载{scaffoldLang === 'python' ? ' Python' : ' Node.js'} 脚手架
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
+              {showUploadArea && (
+              <>
+              {uploadedFileName && (hostPrecheck === 'passed' || hostPrecheck === 'failed') && (
+              <div className="space-y-3">
+                <div
+                  className={`rounded-2xl border ${
+                    hostPrecheck === 'passed'
+                      ? 'bg-emerald-50 border-emerald-200 p-8 sm:p-10 text-center'
+                      : 'bg-rose-50 border-rose-200 p-5 sm:p-6 text-center'
+                  }`}
+                >
+                  <div
+                    className={`font-black tracking-tight ${
+                      hostPrecheck === 'passed'
+                        ? 'text-3xl sm:text-4xl text-emerald-700'
+                        : 'text-2xl sm:text-3xl text-rose-700'
+                    }`}
+                  >
+                    {hostPrecheck === 'passed' ? '检测通过' : '检测不通过'}
+                  </div>
+                  {hostPrecheck === 'failed' && (
+                    <div className="mt-4 rounded-xl bg-slate-950 text-left px-4 py-3 space-y-2">
+                      {HOST_PRECHECK_FAILURES.map((item) => (
+                        <div key={item.code} className="text-xs sm:text-[13px] leading-relaxed">
+                          <span className="text-rose-400 font-bold">未过</span>
+                          <span className="text-white/50"> · </span>
+                          <span className="font-mono text-white underline underline-offset-2 decoration-white/40">
+                            {item.code}
+                          </span>
+                          <span className="text-white/50"> · </span>
+                          <span className="text-white">{item.detail}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {hostPrecheck === 'passed' && (
+                    <button
+                      type="button"
+                      onClick={handleStartVerification}
+                      className="mt-5 px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/20 inline-flex items-center gap-2 cursor-pointer"
+                    >
+                      <Play size={14} fill="currentColor" />
+                      去测试
+                    </button>
+                  )}
+                </div>
+
+                {process.env.NODE_ENV === 'development' && (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold tracking-wide text-slate-500 uppercase">
+                        调试面板
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-slate-800 text-white text-[9px] font-mono">
+                        DEV
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHostDebugOutcome('passed');
+                          setHostPrecheck('passed');
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer border ${
+                          hostPrecheck === 'passed'
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300'
+                        }`}
+                      >
+                        检测通过
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHostDebugOutcome('failed');
+                          setHostPrecheck('failed');
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer border ${
+                          hostPrecheck === 'failed'
+                            ? 'bg-rose-600 text-white border-rose-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300'
+                        }`}
+                      >
+                        检测不通过
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              )}
+
               {/* Action Bar */}
-              <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+              <div className="flex items-center gap-2.5 pt-4 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={onClose}
@@ -686,7 +1061,7 @@ your-skill-v1.0.0/
                 >
                   取消
                 </button>
-                <div className="flex items-center gap-2.5">
+                {mode !== 'custom_delivery' && (
                   <button
                     type="button"
                     onClick={handleSaveDraft}
@@ -694,20 +1069,12 @@ your-skill-v1.0.0/
                   >
                     保存
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleStartVerification}
-                    className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/20 flex items-center gap-2 cursor-pointer active:scale-95"
-                  >
-                    <Play size={14} fill="currentColor" />
-                    <span>去测试</span>
-                  </button>
-                </div>
+                )}
               </div>
               </>
               )}
 
-              {skillPackageMode === 'no_package' && mode !== 'replace_skill' && (
+              {skillPackageMode === 'no_package' && !skillOnlyMode && !scaffoldDownloaded && (
                 <div className="flex items-center justify-end pt-4 border-t border-slate-100">
                   <button
                     type="button"
@@ -1147,7 +1514,7 @@ your-skill-v1.0.0/
                     </div>
                   </div>
                   <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-200">
-                    全项校验通过 · 可直接发布
+                    全项校验通过 · {mode === 'custom_delivery' ? '可提交平台审核' : '可直接发布'}
                   </span>
                 </div>
 
@@ -1206,7 +1573,17 @@ your-skill-v1.0.0/
                 </div>
               </div>
 
-              {/* Release Strategy Card (Free to market with token rebate) */}
+              {mode === 'custom_delivery' ? (
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                  <ShieldCheck size={15} className="text-blue-600" />
+                  提交平台审核
+                </span>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Skill 包已通过结构检查、Hermes 兼容与沙箱试运行。确认后将进入「平台审核中」，运营通过后才会推送给客户验收。
+                </p>
+              </div>
+              ) : (
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3.5">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
@@ -1261,6 +1638,7 @@ your-skill-v1.0.0/
                   </label>
                 </div>
               </div>
+              )}
 
               {/* Action Bar */}
               <div className="flex items-center justify-between pt-4 border-t border-slate-100">
@@ -1282,12 +1660,18 @@ your-skill-v1.0.0/
                   {isSubmittingAudit ? (
                     <>
                       <RotateCw size={14} className="animate-spin" />
-                      <span>正在向平台安全中心提交审核与签名...</span>
+                      <span>
+                        {mode === 'custom_delivery'
+                          ? '正在提交平台审核…'
+                          : '正在向平台安全中心提交审核与签名...'}
+                      </span>
                     </>
                   ) : (
                     <>
                       <Send size={14} />
-                      <span>提交发布审核并正式上架</span>
+                      <span>
+                        {mode === 'custom_delivery' ? '确认提交平台审核' : '提交发布审核并正式上架'}
+                      </span>
                     </>
                   )}
                 </button>

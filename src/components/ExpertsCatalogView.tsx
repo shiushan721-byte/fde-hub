@@ -25,7 +25,6 @@ export const ExpertsCatalogView: React.FC<ExpertsCatalogViewProps> = ({
   onToggleFavorite,
   favoriteExpertIds = [],
   onOpenBecomeCreator,
-  onOpenMyExpertHome,
   isExpert = false
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -68,17 +67,16 @@ export const ExpertsCatalogView: React.FC<ExpertsCatalogViewProps> = ({
               </button>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              if (isExpert) onOpenMyExpertHome?.();
-              else onOpenBecomeCreator?.();
-            }}
-            className="shrink-0 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-          >
-            <UserRound size={14} />
-            <span>{isExpert ? '我的专家主页' : '申请成为 AI 专家'}</span>
-          </button>
+          {!isExpert && (
+            <button
+              type="button"
+              onClick={() => onOpenBecomeCreator?.()}
+              className="shrink-0 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <UserRound size={14} />
+              <span>申请成为 AI 专家</span>
+            </button>
+          )}
         </div>
       </div>
 

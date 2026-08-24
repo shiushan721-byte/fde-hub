@@ -51,7 +51,7 @@ export default function App() {
   const [consultationReferenceAgent, setConsultationReferenceAgent] = useState<AgentSolution | null>(null);
   const [consultationInitialPrompt, setConsultationInitialPrompt] = useState<string>('');
 
-  // 咨询提交后写入创作者中心「咨询线索」，进度通过消息提醒通知用户
+  // 咨询提交后写入创作者中心「定制服务」，进度通过消息提醒通知用户
   const [sessionConsultationLeads, setSessionConsultationLeads] = useState<CustomerLeadItem[]>([]);
   const [isMessagesDrawerOpen, setIsMessagesDrawerOpen] = useState(false);
   const [saveToastVisible, setSaveToastVisible] = useState(false);
@@ -294,6 +294,11 @@ export default function App() {
         fdeExpertCount={catalog.experts.length}
         favoritesCount={favoriteAgentIds.length + favoriteExpertIds.length}
         onOpenBecomeCreator={() => setIsCreatorOnboardingOpen(true)}
+        onOpenMyExpertHome={() => {
+          setCreatorCenterBackRoute('fde-experts');
+          setCurrentRoute('creator-center');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
         currentRole={userRole}
       />
 
@@ -461,7 +466,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ROUTE: 买家订单中心（所有身份可见） */}
+          {/* ROUTE: 买家「我的定制」（所有身份可见） */}
           {currentRoute === 'orders' && (
             <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
               <OrderCenterView />

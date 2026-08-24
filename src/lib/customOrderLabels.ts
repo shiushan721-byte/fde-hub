@@ -121,6 +121,38 @@ export function statusBadgeClass(status: string) {
 
 export type OrderFilterKey = 'all' | 'active' | 'proposal' | 'pay' | 'accept' | 'done';
 
+export type CustomServiceFilterKey =
+  | 'all'
+  | 'consulting'
+  | 'awaiting_proposal_confirm'
+  | 'awaiting_payment'
+  | 'in_delivery'
+  | 'in_review'
+  | 'pending_acceptance'
+  | 'completed'
+  | 'closed';
+
+export const CUSTOM_SERVICE_FILTERS: { key: CustomServiceFilterKey; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'consulting', label: '咨询中' },
+  { key: 'awaiting_proposal_confirm', label: '待确认方案' },
+  { key: 'awaiting_payment', label: '待支付' },
+  { key: 'in_delivery', label: '交付中' },
+  { key: 'in_review', label: '平台审核中' },
+  { key: 'pending_acceptance', label: '待验收' },
+  { key: 'completed', label: '已完成' },
+  { key: 'closed', label: '已关闭/争议中' }
+];
+
+export function matchesCustomServiceFilter(
+  stageKey: string,
+  filter: CustomServiceFilterKey
+) {
+  if (filter === 'all') return true;
+  if (filter === 'closed') return stageKey === 'closed' || stageKey === 'dispute';
+  return stageKey === filter;
+}
+
 export function matchesOrderFilter(status: string, filter: OrderFilterKey) {
   if (filter === 'all') return true;
   if (filter === 'proposal') return status === 'awaiting_proposal_confirm';

@@ -341,8 +341,43 @@ async function ensureDemoUserAndCertifications() {
       });
     }
 
+    // In some partial-seed states, Expert row may be missing but ExpertCertification creation
+    // will still run. If Expert doesn't exist, create it first to satisfy foreign keys.
     const row = await prisma.expert.findUnique({ where: { id: expert.id } });
-    if (row && !row.userId) {
+    if (!row) {
+      await prisma.expert.create({
+        data: {
+          id: expert.id,
+          userId,
+          name: expert.name,
+          avatar: expert.avatar,
+          title: expert.title,
+          verifyType: EXPERT_VERIFY_META.verifyType,
+          verifyLabel: EXPERT_VERIFY_META.verifyLabel,
+          expertLevel: 1,
+          roleTag: expert.roleTag,
+          domainTags: toJson(expert.domainTags),
+          rating: expert.rating,
+          ordersCount: expert.ordersCount,
+          praiseRate: expert.praiseRate,
+          responseTime: expert.responseTime,
+          bio: expert.bio,
+          location: expert.location,
+          serviceModes: toJson(expert.serviceModes),
+          guarantees: toJson(expert.guarantees),
+          skills: toJson(expert.skills),
+          stats: toJson(expert.stats),
+          experienceYears: expert.experienceYears,
+          featuredQuote: expert.featuredQuote,
+          socialLinks: toJson(expert.socialLinks ?? {}),
+          listed: true,
+          featured: false,
+          paused: false,
+          sortOrder: 0,
+          status: 'active'
+        }
+      });
+    } else if (!row.userId) {
       await prisma.expert.update({ where: { id: expert.id }, data: { userId } });
     }
 

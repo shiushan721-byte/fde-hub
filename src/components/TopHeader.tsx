@@ -165,7 +165,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         ) : (
           <div className="text-xs font-bold text-slate-700">
             {currentRoute === 'workspace' && '我的智能体'}
-            {currentRoute === 'orders' && '订单中心'}
+            {currentRoute === 'orders' && '我的定制'}
             {currentRoute === 'account' && '账户总览 · 词元充值与流水'}
             {currentRoute === 'apikey' && 'API Key 管理中心'}
           </div>

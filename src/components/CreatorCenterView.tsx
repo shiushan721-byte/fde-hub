@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Home,
   Bot,
-  MessageSquare,
   Users,
   ShieldCheck,
   Award,
@@ -19,7 +18,6 @@ import {
   Search,
   Filter,
   Package,
-  FileText,
   Building2,
   Cpu,
   Lock,
@@ -36,7 +34,6 @@ import {
   RefreshCw,
   Eye,
   SlidersHorizontal,
-  ChevronRight,
   Bookmark,
   ThumbsUp,
   Crown,
@@ -60,20 +57,9 @@ import {
 import { AgentPublishWizardModal } from './AgentPublishWizardModal';
 import { CustomerInstancesPanel } from './CustomerInstancesPanel';
 import { CreatorCustomOrdersPanel } from './CustomOrderPanels';
-import { DeliveryProposalForm } from './DeliveryProposalForm';
 import { mockCustomerAgentInstances } from '../data/agentInstanceMockData';
 import { CustomerAgentInstance } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
-import { formatOrderTime } from '../lib/customOrderLabels';
-import { api } from '../lib/api';
-import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
-import { DeliveryProposal } from '../types/deliveryProposal';
-
-function formatConsultedAt(value?: string) {
-  if (!value) return '—';
-  const formatted = formatOrderTime(value);
-  return formatted === '—' ? value : formatted;
-}
 
 function platformSupportLabel(support: CreatorAgentItem['platformSupport']) {
   switch (support) {
@@ -99,24 +85,12 @@ function platformSupportBadgeClass(support: CreatorAgentItem['platformSupport'])
   }
 }
 
-function leadStatusBadge(status: CustomerLeadItem['status']) {
-  if (status === 'new') {
-    return { label: '待处理', className: 'bg-rose-100 text-rose-800' };
-  }
-  if (status === 'contacted') {
-    return { label: '沟通中', className: 'bg-blue-100 text-blue-800' };
-  }
-  if (status === 'quoted' || status === 'signed') {
-    return { label: '已创建订单', className: 'bg-emerald-100 text-emerald-800' };
-  }
-  return { label: '已关闭', className: 'bg-slate-100 text-slate-600' };
-}
-
 export type CreatorCenterTab =
   | 'profile-editor'   // 1. 主页编辑
   | 'my-agents'        // 2. 智能体管理（含通用 / 专属子 Tab）
-  | 'customer-leads'   // 3. 咨询线索
-  | 'orders'           // 4. 定制订单
+  | 'custom-services'  // 3. 定制服务（咨询 + 订单同一流程）
+  | 'customer-leads'   // 兼容旧入口：映射到定制服务
+  | 'orders'           // 兼容旧入口：映射到定制服务
   | 'customer-instances' // 兼容旧入口：映射到智能体管理 · 专属
   | 'realname-verify'; // 兼容旧入口：打开实名弹窗
 
@@ -151,6 +125,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<CreatorCenterTab>(() => {
     if (initialTab === 'realname-verify' || initialTab === 'customer-instances') return 'my-agents';
+    if (initialTab === 'customer-leads' || initialTab === 'orders') return 'custom-services';
     return initialTab;
   });
   const [agentMgmtSubTab, setAgentMgmtSubTab] = useState<AgentMgmtSubTab>(
@@ -167,6 +142,10 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     if (initialTab === 'customer-instances') {
       setActiveTab('my-agents');
       setAgentMgmtSubTab('private');
+      return;
+    }
+    if (initialTab === 'customer-leads' || initialTab === 'orders') {
+      setActiveTab('custom-services');
       return;
     }
     setActiveTab(initialTab);
@@ -239,9 +218,8 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     };
   };
 
-  // Leads State (咨询线索)
+  // Leads State（专属实例面板仍会用到）
   const [leadsList, setLeadsList] = useState<CustomerLeadItem[]>(() => mockCustomerLeads);
-  const [selectedLead, setSelectedLead] = useState<CustomerLeadItem | null>(null);
 
   useEffect(() => {
     if (!sessionLeads.length) return;
@@ -256,93 +234,12 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       return [...merged, ...rest];
     });
   }, [sessionLeads]);
-  const [leadStatusFilter, setLeadStatusFilter] = useState<'all' | 'new' | 'contacted' | 'closed'>('all');
-  const [leadLinkedOrder, setLeadLinkedOrder] = useState<{
-    id: string;
-    status: string;
-    baseAgentId: string;
-    baseAgentTitle: string;
-    baseAgentVersion: string;
-    title: string;
-    deliveryProposal?: DeliveryProposal;
-  } | null>(null);
-  const [leadOrderLoading, setLeadOrderLoading] = useState(false);
-  const [creatingDeliveryOrder, setCreatingDeliveryOrder] = useState(false);
-  const [showLeadProposal, setShowLeadProposal] = useState(false);
 
   // 客户专属实例
   const [instancesList, setInstancesList] = useState<CustomerAgentInstance[]>(
     () => mockCustomerAgentInstances
   );
 
-  useEffect(() => {
-    if (!selectedLead?.id) {
-      setLeadLinkedOrder(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setLeadOrderLoading(true);
-      try {
-        await ensureMarketplaceSession();
-        const order = await api<typeof leadLinkedOrder>(`/api/custom-orders/by-lead/${selectedLead.id}`);
-        if (!cancelled) {
-          setLeadLinkedOrder(order);
-          if (order && selectedLead.status !== 'quoted' && selectedLead.status !== 'signed') {
-            const leadId = selectedLead.id;
-            setLeadsList((prev) =>
-              prev.map((l) => (l.id === leadId ? { ...l, status: 'quoted' as const } : l))
-            );
-            setSelectedLead((prev) => (prev?.id === leadId ? { ...prev, status: 'quoted' } : prev));
-          }
-        }
-      } catch {
-        if (!cancelled) setLeadLinkedOrder(null);
-      } finally {
-        if (!cancelled) setLeadOrderLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedLead?.id]);
-
-  const handleCreateDeliveryOrderFromLead = async (lead: CustomerLeadItem) => {
-    if (leadLinkedOrder) {
-      setShowLeadProposal(true);
-      return;
-    }
-    setCreatingDeliveryOrder(true);
-    try {
-      await ensureMarketplaceSession();
-      const order = await api<NonNullable<typeof leadLinkedOrder>>(`/api/custom-orders/from-lead/${lead.id}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          clientName: lead.clientName,
-          clientCompany: lead.clientCompany,
-          agentId: lead.agentId,
-          agentTitle: lead.agentTitle,
-          baseAgentVersion: lead.standardVersionAtRequest,
-          customizationSummary: lead.customizationSummary,
-          notes: lead.notes
-        })
-      });
-      setLeadLinkedOrder(order);
-      setLeadsList((prev) =>
-        prev.map((l) => (l.id === lead.id ? { ...l, status: 'quoted' as const } : l))
-      );
-      if (selectedLead?.id === lead.id) {
-        setSelectedLead((prev) => (prev ? { ...prev, status: 'quoted' } : null));
-      }
-      setShowLeadProposal(true);
-    } catch (error) {
-      alert(error instanceof Error ? error.message : '创建交付订单失败');
-    } finally {
-      setCreatingDeliveryOrder(false);
-    }
-  };
-
-  // Verification form extra state
   const [certOrg, setCertOrg] = useState('中国计算机学会 CCF 架构师认证 / Hermes 认证开发者');
 
   // Handle Profile Save
@@ -363,25 +260,6 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       prev.map((a) => (a.id === agentId ? { ...a, status: targetStatus, updatedAt: '刚刚' } : a))
     );
   };
-
-  // Handle Lead Status Change
-  const handleUpdateLeadStatus = (leadId: string, newStatus: CustomerLeadItem['status']) => {
-    setLeadsList((prev) =>
-      prev.map((lead) => (lead.id === leadId ? { ...lead, status: newStatus } : lead))
-    );
-    if (selectedLead?.id === leadId) {
-      setSelectedLead((prev) => (prev ? { ...prev, status: newStatus } : null));
-    }
-  };
-
-  // Filtered Leads
-  const filteredLeads = leadsList.filter((lead) => {
-    if (leadStatusFilter === 'all') return true;
-    if (leadStatusFilter === 'new') return lead.status === 'new';
-    if (leadStatusFilter === 'contacted') return lead.status === 'contacted' || lead.status === 'quoted' || lead.status === 'signed';
-    if (leadStatusFilter === 'closed') return lead.status === 'closed';
-    return true;
-  });
 
   return (
     <div id="creator-center-view" className="space-y-6 pb-20">
@@ -494,8 +372,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
         {[
           { key: 'profile-editor', label: '1. 主页编辑', icon: Edit3, count: null },
           { key: 'my-agents', label: '2. 智能体管理', icon: Bot, count: agentsList.length + instancesList.length },
-          { key: 'customer-leads', label: '3. 咨询线索', icon: MessageSquare, count: leadsList.filter((l) => l.status === 'new').length, badgeColor: 'bg-rose-500 text-white' },
-          { key: 'orders', label: '4. 定制订单', icon: Package, count: null }
+          { key: 'custom-services', label: '3. 定制服务', icon: Package, count: leadsList.filter((l) => l.status === 'new').length, badgeColor: 'bg-rose-500 text-white' }
         ].map((tab) => {
           const Icon = tab.icon;
           const isCurrent = activeTab === tab.key;
@@ -821,244 +698,11 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       )}
 
       {/* ========================================================= */}
-      {/* MODULE 3: 咨询线索 (Leads: New, In-contact, Closed)       */}
+      {/* MODULE 3: 定制服务（咨询 + 订单同一流程）                  */}
       {/* ========================================================= */}
-      {activeTab === 'customer-leads' && (
+      {activeTab === 'custom-services' && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-extrabold text-slate-900">客户商机与咨询线索 ({leadsList.length})</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                完整记录咨询来源、关联智能体、客户需求描述与咨询时间
-              </p>
-            </div>
-
-            {/* Status Filter */}
-            <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 text-xs">
-              {[
-                { key: 'all', label: '全部线索' },
-                { key: 'new', label: '待处理' },
-                { key: 'contacted', label: '沟通中' },
-                { key: 'closed', label: '已关闭' }
-              ].map((f) => (
-                <button
-                  key={f.key}
-                  onClick={() => setLeadStatusFilter(f.key as any)}
-                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                    leadStatusFilter === f.key
-                      ? 'bg-blue-600 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left 2 Cols: Leads List */}
-            <div className="lg:col-span-2 space-y-3">
-              {filteredLeads.map((lead) => (
-                <div
-                  key={lead.id}
-                  onClick={() => setSelectedLead(lead)}
-                  className={`p-5 bg-white rounded-3xl border transition-all cursor-pointer space-y-3 ${
-                    selectedLead?.id === lead.id
-                      ? 'border-blue-500 shadow-md ring-2 ring-blue-500/10'
-                      : 'border-slate-200 hover:border-slate-300 shadow-xs'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={lead.clientAvatar}
-                        alt={lead.clientName}
-                        className="w-11 h-11 rounded-2xl object-cover ring-1 ring-slate-200"
-                      />
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-slate-900 text-sm">{lead.clientName}</h4>
-                          {(() => {
-                            const badge = leadStatusBadge(lead.status);
-                            return (
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${badge.className}`}>
-                                {badge.label}
-                              </span>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="text-right">
-                      <span className="text-xs font-extrabold text-blue-600 block">
-                        咨询时间: {formatConsultedAt(lead.consultedAt)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 text-xs text-slate-700 leading-relaxed">
-                    <strong>需求概述：</strong>{lead.notes}
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3 text-[11px] pt-1">
-                    <span className="inline-flex items-center gap-1 text-slate-600 min-w-0">
-                      <Bot size={12} className="text-blue-600 shrink-0" />
-                      <span className="truncate">
-                        {lead.agentId ? (
-                          <>
-                            来源智能体：
-                            <strong className="text-blue-700">{lead.agentTitle}</strong>
-                          </>
-                        ) : (
-                          <strong className="text-slate-700">直接向专家咨询</strong>
-                        )}
-                      </span>
-                    </span>
-                    <span className="text-blue-600 font-bold flex items-center gap-1 shrink-0">
-                      <span>查看详情</span>
-                      <ChevronRight size={13} />
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Right 1 Col: Lead Action Drawer */}
-            <div className="space-y-4">
-              {selectedLead ? (
-                <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs space-y-4 sticky top-24">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <h3 className="font-bold text-slate-900 text-sm">商机咨询详情与跟进</h3>
-                    <span className="text-[10px] font-mono text-slate-400">ID: {selectedLead.id}</span>
-                  </div>
-
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between py-1 border-b border-slate-50">
-                      <span className="text-slate-500">客户名称:</span>
-                      <span className="font-bold text-slate-800">{selectedLead.clientName}</span>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-slate-50">
-                      <span className="text-slate-500">所属企业:</span>
-                      <span className="font-bold text-slate-800">{selectedLead.clientCompany}</span>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-slate-50 gap-3">
-                      <span className="text-slate-500 shrink-0">咨询类型:</span>
-                      <span className="font-bold text-blue-700 text-right flex items-center gap-1 justify-end">
-                        <Bot size={12} className="shrink-0" />
-                        {selectedLead.agentId ? selectedLead.agentTitle : '直接向专家咨询'}
-                      </span>
-                    </div>
-                    {selectedLead.standardVersionAtRequest && (
-                      <div className="flex justify-between py-1 border-b border-slate-50">
-                        <span className="text-slate-500">咨询时标准版:</span>
-                        <span className="font-bold text-slate-800">{selectedLead.standardVersionAtRequest}</span>
-                      </div>
-                    )}
-                    {selectedLead.customizationSummary && (
-                      <div className="py-2 border-b border-slate-50">
-                        <span className="text-slate-500 block mb-1">定制改造摘要:</span>
-                        <p className="text-[11px] text-slate-700 leading-relaxed bg-slate-50 p-2 rounded-lg">
-                          {selectedLead.customizationSummary}
-                        </p>
-                      </div>
-                    )}
-                    <div className="flex justify-between py-1 border-b border-slate-50">
-                      <span className="text-slate-500">咨询时间:</span>
-                      <span className="font-bold text-slate-800">{formatConsultedAt(selectedLead.consultedAt)}</span>
-                    </div>
-                  </div>
-
-                  {/* Status update buttons */}
-                  <div className="space-y-2 pt-2 border-t border-slate-100">
-                    <label className="text-[11px] font-bold text-slate-700 block">更新商机状态：</label>
-                    <div className="grid grid-cols-2 gap-1.5 text-xs font-bold">
-                      <button
-                        onClick={() => handleUpdateLeadStatus(selectedLead.id, 'contacted')}
-                        className={`p-2 rounded-xl border text-center cursor-pointer ${
-                          selectedLead.status === 'contacted' ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-slate-50 border-slate-200 text-slate-600'
-                        }`}
-                      >
-                        沟通中
-                      </button>
-                      <button
-                        onClick={() => handleUpdateLeadStatus(selectedLead.id, 'closed')}
-                        className={`p-2 rounded-xl border text-center cursor-pointer ${
-                          selectedLead.status === 'closed' ? 'bg-slate-200 border-slate-300 text-slate-800' : 'bg-slate-50 border-slate-200 text-slate-600'
-                        }`}
-                      >
-                        已关闭
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-100 space-y-2">
-                    {leadOrderLoading ? (
-                      <p className="text-[11px] text-slate-400">正在查询关联订单…</p>
-                    ) : leadLinkedOrder ? (
-                      <>
-                        <p className="text-[11px] text-slate-500">
-                          关联订单 · {leadLinkedOrder.id.slice(0, 12)}… ·{' '}
-                          {leadLinkedOrder.status === 'consulting' || leadLinkedOrder.status === 'pending_quote'
-                            ? '咨询中，可发起交付方案'
-                            : leadLinkedOrder.status}
-                        </p>
-                        {['consulting', 'pending_quote', 'revision'].includes(leadLinkedOrder.status) && (
-                          <button
-                            type="button"
-                            onClick={() => setShowLeadProposal(true)}
-                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                          >
-                            <FileText size={13} />
-                            <span>发起定制交付方案</span>
-                          </button>
-                        )}
-                        {leadLinkedOrder.status === 'awaiting_proposal_confirm' && (
-                          <p className="text-[11px] text-violet-600 font-bold">方案已提交，等待用户确认</p>
-                        )}
-                      </>
-                    ) : (
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        尚未创建交付订单。点击下方按钮为当前线索创建订单并发起定制方案。
-                      </p>
-                    )}
-                    {!leadLinkedOrder && !leadOrderLoading && (
-                      selectedLead.agentId ? (
-                        <button
-                          type="button"
-                          onClick={() => handleCreateDeliveryOrderFromLead(selectedLead)}
-                          disabled={creatingDeliveryOrder}
-                          className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          <Package size={13} />
-                          <span>{creatingDeliveryOrder ? '创建中…' : '创建交付订单'}</span>
-                        </button>
-                      ) : (
-                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                          该咨询未关联智能体，请先与客户沟通确认方案；如需交付，请从定制订单模块手动创建。
-                        </p>
-                      )
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center text-xs text-slate-400 space-y-2">
-                  <MessageSquare size={32} className="mx-auto text-slate-300" />
-                  <p>请在左侧点击任意咨询线索查看详情</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* MODULE 4: 定制订单管理                                     */}
-      {/* ========================================================= */}
-      {activeTab === 'orders' && (
-        <div className="space-y-6">
-          <CreatorCustomOrdersPanel />
+          <CreatorCustomOrdersPanel sessionLeads={sessionLeads} />
         </div>
       )}
 
@@ -1657,27 +1301,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
         }}
       />
 
-      {showLeadProposal && leadLinkedOrder && selectedLead && (
-        <DeliveryProposalForm
-          isOpen
-          onClose={() => setShowLeadProposal(false)}
-          baseAgentId={leadLinkedOrder.baseAgentId}
-          baseAgentTitle={leadLinkedOrder.baseAgentTitle}
-          baseAgentVersion={leadLinkedOrder.baseAgentVersion}
-          initialCustomization={
-            selectedLead.customizationSummary || selectedLead.notes || leadLinkedOrder.title
-          }
-          onSubmit={async (proposal) => {
-            await api(`/api/custom-orders/${leadLinkedOrder.id}/proposal`, {
-              method: 'POST',
-              body: JSON.stringify(proposal)
-            });
-            setShowLeadProposal(false);
-            setLeadLinkedOrder((prev) => (prev ? { ...prev, status: 'awaiting_proposal_confirm' } : prev));
-            alert('已发起定制交付方案，等待用户确认。');
-          }}
-        />
-      )}
+
     </div>
   );
 };

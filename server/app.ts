@@ -15,6 +15,7 @@ import { meRouter } from './routes/me';
 import { customOrderRouter } from './routes/customOrders';
 import { seedDatabase, ensureExpertApplicationSeed } from './db/seed';
 import { startCustomOrderJobScheduler } from './services/customOrderJobs';
+import { customServicesRouter } from './routes/customServices';
 
 
 dotenv.config();
@@ -41,6 +42,7 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/me', meRouter);
 app.use('/api/custom-orders', customOrderRouter);
+app.use('/api/custom-services', customServicesRouter);
 app.use('/api/public', publicRouter);
 app.use('/api/consultations', consultationRouter);
 app.use('/api/expert-applications', expertApplicationRouter);

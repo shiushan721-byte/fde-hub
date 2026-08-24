@@ -103,7 +103,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
         <div>
           <h2 className="font-bold text-slate-900 text-base">专属智能体</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            运营审核通过并推送后才会出现在此；订单进度请前往侧边栏「订单中心」
+            运营审核通过并推送后才会出现在此；进度请前往侧边栏「我的定制」
           </p>
         </div>
         <BuyerExclusiveAgentsPanel />

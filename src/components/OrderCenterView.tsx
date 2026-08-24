@@ -7,64 +7,33 @@ import {
   RotateCcw,
   ClipboardList,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  X
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
 import {
-  buyerStageText,
   buyerStatusText,
+  CUSTOM_SERVICE_FILTERS,
+  CustomServiceFilterKey,
   formatOrderTime,
-  matchesOrderFilter,
-  OrderFilterKey,
+  matchesCustomServiceFilter,
   statusBadgeClass,
   yuan
 } from '../lib/customOrderLabels';
 import { DeliveryProposalReviewPanel } from './DeliveryProposalReviewPanel';
 import { DeliveryProposal } from '../types/deliveryProposal';
+import { CustomServiceDeal } from '../types/customService';
 
-type OrderRow = {
-  id: string;
-  orderNo: string;
-  status: string;
-  title: string;
-  baseAgentTitle: string;
-  baseAgentVersion: string;
-  priceCents?: number;
-  deliveryDays?: number;
-  serviceScope?: string;
-  quoteNote?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  paymentDeadlineAt?: string;
-  acceptanceDeadlineAt?: string;
-  settlementEligibleAt?: string;
-  deliveryProposal?: DeliveryProposal;
-  proposalVersion?: number;
-  proposalSubmittedAt?: string;
-  settlementStatus?: string;
-  disputeStatus?: string;
-  disputeReason?: string;
-  creator?: { name?: string };
-};
-
-const FILTERS: { key: OrderFilterKey; label: string }[] = [
-  { key: 'all', label: '全部' },
-  { key: 'active', label: '进行中' },
-  { key: 'proposal', label: '待确认方案' },
-  { key: 'pay', label: '待付款' },
-  { key: 'accept', label: '待验收' },
-  { key: 'done', label: '已完成' }
-];
-
-/** 买家视角：定制订单中心 */
+/** 买家视角：我的定制（咨询 → 方案 → 支付 → 交付 → 验收） */
 export const OrderCenterView: React.FC = () => {
-  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [deals, setDeals] = useState<CustomServiceDeal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
-  const [filter, setFilter] = useState<OrderFilterKey>('all');
+  const [filter, setFilter] = useState<CustomServiceFilterKey>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detailDeal, setDetailDeal] = useState<CustomServiceDeal | null>(null);
 
   const reload = async () => {
     setLoading(true);
@@ -82,11 +51,11 @@ export const OrderCenterView: React.FC = () => {
       } catch {
         /* keep current session */
       }
-      const mine = await api<OrderRow[]>('/api/custom-orders/mine');
-      setOrders(mine);
+      const mine = await api<CustomServiceDeal[]>('/api/custom-services/mine');
+      setDeals(mine);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败');
-      setOrders([]);
+      setDeals([]);
     } finally {
       setLoading(false);
     }
@@ -96,9 +65,18 @@ export const OrderCenterView: React.FC = () => {
     reload();
   }, []);
 
+  useEffect(() => {
+    if (!detailDeal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDetailDeal(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [detailDeal]);
+
   const filtered = useMemo(
-    () => orders.filter((o) => matchesOrderFilter(o.status, filter)),
-    [orders, filter]
+    () => deals.filter((d) => matchesCustomServiceFilter(d.stageKey, filter)),
+    [deals, filter]
   );
 
   const payAndEscrow = async (id: string) => {
@@ -203,10 +181,10 @@ export const OrderCenterView: React.FC = () => {
         <div>
           <h1 className="text-2xl font-black text-slate-900 font-display flex items-center gap-2">
             <ClipboardList size={22} className="text-blue-600" />
-            订单中心
+            我的定制
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            确认交付方案 → 付款托管 → 验收专属智能体；演示买家 user@hellome.art
+            咨询 → 确认方案 → 支付 → 开发 → 审核 → 验收，同一条流程跟进
           </p>
         </div>
         <button
@@ -221,7 +199,7 @@ export const OrderCenterView: React.FC = () => {
       </div>
 
       <div className="flex flex-wrap gap-1.5 bg-white p-1 rounded-xl border border-slate-200 w-fit">
-        {FILTERS.map((f) => (
+        {CUSTOM_SERVICE_FILTERS.map((f) => (
           <button
             key={f.key}
             type="button"
@@ -247,12 +225,12 @@ export const OrderCenterView: React.FC = () => {
         {loading ? (
           <div className="py-16 text-center text-sm text-slate-500 flex items-center justify-center gap-2">
             <Loader2 size={16} className="animate-spin" />
-            加载订单…
+            加载定制服务…
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-16 text-center space-y-2 px-6">
-            <p className="text-sm font-bold text-slate-800">暂无订单</p>
-            <p className="text-xs text-slate-500">提交定制咨询后，订单会出现在这里</p>
+            <p className="text-sm font-bold text-slate-800">暂无定制服务</p>
+            <p className="text-xs text-slate-500">向专家发起咨询后，会出现在这里</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -260,8 +238,8 @@ export const OrderCenterView: React.FC = () => {
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
                   <th className="px-4 py-3 font-bold w-8" />
-                  <th className="px-4 py-3 font-bold">下单时间</th>
-                  <th className="px-4 py-3 font-bold">订单号</th>
+                  <th className="px-4 py-3 font-bold">时间</th>
+                  <th className="px-4 py-3 font-bold">编号</th>
                   <th className="px-4 py-3 font-bold">基础智能体</th>
                   <th className="px-4 py-3 font-bold">定制需求</th>
                   <th className="px-4 py-3 font-bold">阶段</th>
@@ -271,20 +249,22 @@ export const OrderCenterView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map((o) => {
-                  const expanded = expandedId === o.id;
+                {filtered.map((deal) => {
+                  const o = deal.order;
+                  const expanded = expandedId === deal.dealId;
+                  const status = o?.status || '';
                   const hasProposal =
-                    o.status === 'awaiting_proposal_confirm' &&
-                    o.deliveryProposal &&
+                    status === 'awaiting_proposal_confirm' &&
+                    o?.deliveryProposal &&
                     (o.deliveryProposal as DeliveryProposal).customizationItems?.length;
                   return (
-                    <React.Fragment key={o.id}>
+                    <React.Fragment key={deal.dealId}>
                       <tr className="hover:bg-slate-50/80 transition-colors">
                         <td className="px-2 py-3.5">
-                          {(hasProposal || o.status === 'awaiting_proposal_confirm') && (
+                          {(hasProposal || status === 'awaiting_proposal_confirm') && (
                             <button
                               type="button"
-                              onClick={() => toggleExpand(o.id)}
+                              onClick={() => toggleExpand(deal.dealId)}
                               className="p-1 rounded-lg hover:bg-slate-100 cursor-pointer text-slate-500"
                             >
                               {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -292,55 +272,71 @@ export const OrderCenterView: React.FC = () => {
                           )}
                         </td>
                         <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">
-                          {formatOrderTime(o.createdAt)}
+                          {formatOrderTime(o?.createdAt)}
                         </td>
                         <td className="px-4 py-3.5 font-mono text-[11px] text-slate-500 whitespace-nowrap">
-                          {o.orderNo}
+                          {o?.orderNo || '咨询未成单'}
                         </td>
                         <td className="px-4 py-3.5">
-                          <div className="font-bold text-slate-900">{o.baseAgentTitle}</div>
-                          <div className="text-[11px] text-slate-500 mt-0.5">锁定 {o.baseAgentVersion}</div>
+                          <div className="font-bold text-slate-900">{deal.agentTitle || o?.baseAgentTitle || '—'}</div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {o?.baseAgentVersion
+                              ? `锁定 ${o.baseAgentVersion}`
+                              : deal.standardVersionAtRequest
+                                ? `咨询时 ${deal.standardVersionAtRequest}`
+                                : '未锁定版本'}
+                          </div>
                         </td>
                         <td className="px-4 py-3.5 max-w-[180px]">
-                          <div className="font-medium text-slate-800 truncate" title={o.title}>
-                            {o.title}
-                          </div>
-                          {o.creator?.name && (
-                            <div className="text-[11px] text-slate-500 mt-0.5">专家 · {o.creator.name}</div>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => setDetailDeal(deal)}
+                            className="text-left w-full cursor-pointer group"
+                          >
+                            <div className="font-medium text-slate-800 truncate group-hover:text-blue-700">
+                              {deal.requirement || o?.title || '—'}
+                            </div>
+                            {o?.creator?.name && (
+                              <div className="text-[11px] text-slate-500 mt-0.5">专家 · {o.creator.name}</div>
+                            )}
+                            <span className="text-[10px] text-blue-600 font-bold mt-0.5 inline-block">
+                              查看详情
+                            </span>
+                          </button>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span className="text-slate-700 font-semibold">
-                            {buyerStageText[o.status] || '—'}
-                          </span>
+                          <span className="text-slate-700 font-semibold">{deal.stageLabel}</span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           <span
-                            className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ring-1 ring-inset ${statusBadgeClass(o.status)}`}
+                            className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ring-1 ring-inset ${statusBadgeClass(
+                              status || 'consulting'
+                            )}`}
                           >
-                            {buyerStatusText[o.status] || o.status}
+                            {status ? buyerStatusText[status] || status : '咨询沟通中'}
                           </span>
                         </td>
                         <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                          <span className="font-bold text-slate-900 tabular-nums">{yuan(o.priceCents)}</span>
-                          {(o.priceCents || 0) > 0 && o.deliveryDays ? (
+                          <span className="font-bold text-slate-900 tabular-nums">{yuan(o?.priceCents)}</span>
+                          {(o?.priceCents || 0) > 0 && o?.deliveryDays ? (
                             <div className="text-[10px] text-slate-500 mt-0.5">{o.deliveryDays} 天交付</div>
                           ) : null}
                         </td>
                         <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                          {['consulting', 'pending_quote'].includes(o.status) && (
+                          {!o && <span className="text-[11px] text-slate-400">等待专家回复</span>}
+                          {o && ['consulting', 'pending_quote'].includes(status) && (
                             <span className="text-[11px] text-slate-400">等待交付方案</span>
                           )}
-                          {o.status === 'awaiting_proposal_confirm' && !expanded && (
+                          {status === 'awaiting_proposal_confirm' && !expanded && (
                             <button
                               type="button"
-                              onClick={() => toggleExpand(o.id)}
+                              onClick={() => toggleExpand(deal.dealId)}
                               className="text-[11px] text-violet-600 font-bold cursor-pointer"
                             >
                               查看方案
                             </button>
                           )}
-                          {o.status === 'pending_acceptance' && (
+                          {status === 'pending_acceptance' && o && (
                             <div className="inline-flex flex-col items-end gap-1">
                               <div className="inline-flex gap-1.5">
                                 <button
@@ -377,12 +373,12 @@ export const OrderCenterView: React.FC = () => {
                               )}
                             </div>
                           )}
-                          {o.status === 'dispute' && (
-                            <span className="text-[11px] text-rose-600 font-bold" title={o.disputeReason}>
+                          {status === 'dispute' && (
+                            <span className="text-[11px] text-rose-600 font-bold" title={o?.disputeReason}>
                               争议处理中
                             </span>
                           )}
-                          {o.status === 'awaiting_payment' && (
+                          {status === 'awaiting_payment' && o && (
                             <div className="inline-flex flex-col items-end gap-1">
                               <button
                                 type="button"
@@ -404,7 +400,7 @@ export const OrderCenterView: React.FC = () => {
                               )}
                             </div>
                           )}
-                          {o.status === 'pending_settlement' && (
+                          {status === 'pending_settlement' && o && (
                             <span className="text-[11px] text-indigo-600 font-bold">
                               待结算
                               {o.settlementEligibleAt
@@ -412,17 +408,25 @@ export const OrderCenterView: React.FC = () => {
                                 : ''}
                             </span>
                           )}
-                          {o.status === 'closed' && (
+                          {status === 'closed' && (
                             <span className="text-[11px] text-slate-400">已关闭</span>
                           )}
-                          {!['consulting', 'pending_quote', 'awaiting_proposal_confirm', 'awaiting_payment', 'pending_acceptance', 'pending_settlement', 'dispute', 'closed'].includes(
-                            o.status
-                          ) && (
-                            <span className="text-[11px] text-slate-400">—</span>
-                          )}
+                          {o &&
+                            ![
+                              'consulting',
+                              'pending_quote',
+                              'awaiting_proposal_confirm',
+                              'awaiting_payment',
+                              'pending_acceptance',
+                              'pending_settlement',
+                              'dispute',
+                              'closed'
+                            ].includes(status) && (
+                              <span className="text-[11px] text-slate-400">—</span>
+                            )}
                         </td>
                       </tr>
-                      {expanded && hasProposal && (
+                      {expanded && hasProposal && o && (
                         <tr>
                           <td colSpan={9} className="px-4 py-4 bg-slate-50/50">
                             <DeliveryProposalReviewPanel
@@ -472,8 +476,82 @@ export const OrderCenterView: React.FC = () => {
       {!loading && filtered.length > 0 && (
         <p className="text-[11px] text-slate-400 text-right">
           共 {filtered.length} 条
-          {filter !== 'all' ? `（筛选：${FILTERS.find((f) => f.key === filter)?.label}）` : ''}
+          {filter !== 'all' ? `（筛选：${CUSTOM_SERVICE_FILTERS.find((f) => f.key === filter)?.label}）` : ''}
         </p>
+      )}
+
+      {detailDeal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+          onClick={() => setDetailDeal(null)}
+        >
+          <div
+            className="bg-white w-full max-w-lg rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-labelledby="custom-requirement-title"
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 id="custom-requirement-title" className="text-sm font-bold text-slate-900">
+                定制需求详情
+              </h3>
+              <button
+                type="button"
+                onClick={() => setDetailDeal(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+                aria-label="关闭"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                <div>
+                  <div className="text-slate-400">编号</div>
+                  <div className="font-mono text-slate-800 mt-0.5">
+                    {detailDeal.order?.orderNo || '咨询未成单'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-400">阶段</div>
+                  <div className="font-semibold text-slate-800 mt-0.5">{detailDeal.stageLabel}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400">基础智能体</div>
+                  <div className="font-semibold text-slate-800 mt-0.5">
+                    {detailDeal.agentTitle || detailDeal.order?.baseAgentTitle || '—'}
+                    {detailDeal.order?.baseAgentVersion
+                      ? ` · ${detailDeal.order.baseAgentVersion}`
+                      : detailDeal.standardVersionAtRequest
+                        ? ` · ${detailDeal.standardVersionAtRequest}`
+                        : ''}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-400">专家</div>
+                  <div className="font-semibold text-slate-800 mt-0.5">
+                    {detailDeal.order?.creator?.name || '—'}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="text-slate-400 mb-1.5">需求描述</div>
+                <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-xl p-3 border border-slate-100">
+                  {detailDeal.requirement || detailDeal.order?.title || '暂无需求描述'}
+                </p>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setDetailDeal(null)}
+                className="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold cursor-pointer"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
