@@ -1,0 +1,389 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    String                 @id
+  email                 String                 @unique
+  passwordHash          String
+  name                  String
+  role                  String
+  avatar                String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  sessions              Session[]
+  expert                Expert?
+  leads                 ConsultationLead[]
+  auditLogs             AuditLog[]
+  expertApplications    ExpertApplication[]
+  realNameVerifications RealNameVerification[]
+  certifications        ExpertCertification[]
+  customOrdersAsBuyer   CustomOrder[]          @relation("OrderBuyer")
+  customOrdersAsCreator CustomOrder[]          @relation("OrderCreator")
+  privateInstances      PrivateAgentInstance[] @relation("InstanceCustomer")
+  notifications         UserNotification[]
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model SiteSetting {
+  key   String @id
+  value String
+}
+
+model HomeBanner {
+  id        String  @id
+  slot      String
+  eyebrow   String  @default("")
+  title     String
+  subtitle  String  @default("")
+  ctaLabel  String  @default("")
+  ctaTarget String  @default("")
+  sortOrder Int     @default(0)
+  visible   Boolean @default(true)
+}
+
+model Category {
+  id        String  @id
+  name      String
+  sortOrder Int     @default(0)
+  visible   Boolean @default(true)
+}
+
+model Agent {
+  id              String   @id
+  kind            String   @default("catalog")
+  title           String
+  desc            String
+  category        String
+  coverImage      String
+  gradient        String   @default("")
+  tagColor        String   @default("")
+  badge           String?
+  canFDECustom    Boolean  @default(true)
+  authorId        String?
+  authorName      String?
+  price           Int?
+  pricingPlans    String   @default("{}")
+  likesCount      String   @default("0")
+  favoritesCount  String   @default("0")
+  commentsCount   String   @default("0")
+  usageCount      String?
+  rating          Float?
+  status          String   @default("published")
+  showOnHome      Boolean  @default(true)
+  featured        Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  solutionPayload String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Expert {
+  id              String   @id
+  userId          String?  @unique
+  user            User?    @relation(fields: [userId], references: [id])
+  name            String
+  avatar          String
+  title           String
+  verifyType      String
+  verifyLabel     String
+  expertLevel     Int      @default(1)
+  roleTag         String   @default("")
+  domainTags      String   @default("[]")
+  rating          Float    @default(5)
+  ordersCount     Int      @default(0)
+  praiseRate      Int      @default(100)
+  responseTime    String   @default("")
+  bio             String   @default("")
+  location        String   @default("")
+  serviceModes    String   @default("[]")
+  guarantees      String   @default("[]")
+  skills          String   @default("[]")
+  stats           String   @default("{}")
+  experienceYears Int      @default(0)
+  featuredQuote   String   @default("")
+  socialLinks     String   @default("{}")
+  listed          Boolean  @default(true)
+  featured        Boolean  @default(false)
+  paused          Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  status          String   @default("active")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  certification   ExpertCertification?
+}
+
+model ExpertCase {
+  id       String @id
+  expertId String
+  payload  String
+}
+
+model ExpertReview {
+  id       String @id
+  expertId String
+  payload  String
+}
+
+model ExpertService {
+  id       String @id
+  expertId String
+  payload  String
+}
+
+model ConsultationLead {
+  id             String   @id
+  clientName     String
+  clientCompany  String   @default("")
+  clientAvatar   String   @default("")
+  expertId       String?
+  agentId        String   @default("")
+  agentTitle     String   @default("")
+  summary        String   @default("")
+  contactPhone   String   @default("")
+  budgetEstimate String   @default("")
+  status         String   @default("new")
+  notes          String   @default("")
+  payload        String   @default("{}")
+  assigneeId     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
+  messages       ConsultationMessage[]
+}
+
+model ConsultationMessage {
+  id         String           @id
+  leadId     String
+  lead       ConsultationLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  sender     String
+  senderName String
+  text       String
+  createdAt  DateTime         @default(now())
+}
+
+model RealNameVerification {
+  id             String    @id
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status         String    @default("unverified")
+  provider       String    @default("mock")
+  providerRef    String    @default("")
+  realNameMasked String    @default("")
+  idCardMasked   String    @default("")
+  failReason     String    @default("")
+  verifiedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model ExpertApplication {
+  id                       String    @id
+  userId                   String
+  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                     String    @default("onboarding")
+  status                   String    @default("pending")
+  submittedProfileSnapshot String    @default("{}")
+  realNameVerificationId   String?
+  agreementVersion         String    @default("v1")
+  agreementAcceptedAt      DateTime?
+  reviewerId               String?
+  reviewStartedAt          DateTime?
+  reviewedAt               DateTime?
+  decisionReason           String    @default("")
+  supplementRequest        String    @default("")
+  supplementSubmittedAt    DateTime?
+  expertId                 String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+}
+
+model ExpertCertification {
+  id                  String    @id
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expertId            String    @unique
+  expert              Expert    @relation(fields: [expertId], references: [id], onDelete: Cascade)
+  status              String    @default("active")
+  sourceApplicationId String
+  certifiedAt         DateTime
+  frozenAt            DateTime?
+  freezeReason        String    @default("")
+  frozenBy            String?
+  unfrozenAt          DateTime?
+  unfrozenBy          String?
+  updatedAt           DateTime  @updatedAt
+}
+
+model ExpertCertificationEvent {
+  id               String   @id
+  userId           String
+  expertId         String?
+  applicationId    String?
+  certificationId  String?
+  eventType        String
+  actorId          String?
+  fromStatus       String   @default("")
+  toStatus         String   @default("")
+  reason           String   @default("")
+  payload          String   @default("{}")
+  createdAt        DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String
+  targetType String
+  targetId   String
+  diff       String   @default("{}")
+  createdAt  DateTime @default(now())
+}
+
+/** 二次定制正式订单：绑定通用智能体当时版本 */
+model CustomOrder {
+  id                    String    @id
+  orderNo               String    @unique
+  /** consulting → awaiting_proposal_confirm → awaiting_payment → paid_pending_start → in_development → in_review → revision → pending_acceptance → pending_settlement → completed | closed */
+  status                String    @default("consulting")
+  buyerUserId           String
+  buyer                 User      @relation("OrderBuyer", fields: [buyerUserId], references: [id])
+  creatorUserId         String?
+  creator               User?     @relation("OrderCreator", fields: [creatorUserId], references: [id])
+  expertId              String?
+  baseAgentId           String
+  baseAgentTitle        String
+  baseAgentVersion      String    @default("v1.0.0")
+  title                 String
+  customizationSpec     String    @default("{}")
+  priceCents            Int       @default(0)
+  currency              String    @default("CNY")
+  deliveryDays          Int       @default(14)
+  serviceScope          String    @default("")
+  quoteNote             String    @default("")
+  /** 结构化定制交付方案 JSON */
+  deliveryProposal      String    @default("{}")
+  proposalVersion       Int       @default(0)
+  proposalSubmittedAt   DateTime?
+  proposalConfirmedAt   DateTime?
+  quotedAt              DateTime?
+  paymentId             String    @default("")
+  paymentStatus         String    @default("none")
+  paymentDeadlineAt     DateTime?
+  paidAt                DateTime?
+  escrowedAt            DateTime?
+  acceptanceDeadlineAt  DateTime?
+  acceptanceStartedAt   DateTime?
+  /** 已发送的验收提醒标记 JSON，如 ["day1","day5","day7"] */
+  acceptanceRemindersSent String @default("[]")
+  revisionQuota         Int       @default(2)
+  revisionsUsed         Int       @default(0)
+  settlementStatus      String    @default("none")
+  /** 验收后进入待结算，满此时刻才可自动结算（默认验收后 24h） */
+  settlementEligibleAt  DateTime?
+  platformFeeCents      Int       @default(0)
+  creatorPayoutCents    Int       @default(0)
+  settledAt             DateTime?
+  /** none | open | continue_delivery | partial_refund | full_refund | confirmed_complete */
+  disputeStatus         String    @default("none")
+  disputeReason         String    @default("")
+  disputeOpenedAt       DateTime?
+  disputeResolvedAt     DateTime?
+  closedAt              DateTime?
+  closeReason           String    @default("")
+  leadId                String?
+  instanceId            String?
+  currentDeliveryId     String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  instance              PrivateAgentInstance?
+  deliveries            DeliveryVersion[]
+  events                CustomOrderEvent[]
+}
+
+/** 客户专属智能体实例（不进公共市场） */
+model PrivateAgentInstance {
+  id                 String   @id
+  orderId            String   @unique
+  order              CustomOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerUserId     String
+  customer           User     @relation("InstanceCustomer", fields: [customerUserId], references: [id])
+  creatorUserId      String
+  expertId           String?
+  baseAgentId        String
+  baseAgentTitle     String
+  baseAgentVersion   String
+  title              String
+  currentVersion     String   @default("")
+  status             String   @default("draft")
+  visibility         String   @default("customer_only")
+  customizationSpec  String   @default("{}")
+  publishedAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  deliveries         DeliveryVersion[]
+}
+
+/** 每一次交付审核版本（运营审的是版本，不是整单） */
+model DeliveryVersion {
+  id                 String   @id
+  orderId            String
+  order              CustomOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  instanceId         String
+  instance           PrivateAgentInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  version            String
+  status             String   @default("draft")
+  changelog          String   @default("")
+  completedItems     String   @default("[]")
+  skillPayload       String   @default("{}")
+  hermesReport       String   @default("{}")
+  hermesPassed       Boolean  @default(false)
+  hermesCheckedAt    DateTime?
+  submittedAt        DateTime?
+  reviewerId         String?
+  reviewedAt         DateTime?
+  rejectReason       String   @default("")
+  publishedAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model CustomOrderEvent {
+  id        String   @id
+  orderId   String
+  order     CustomOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actorId   String?
+  eventType String
+  fromStatus String  @default("")
+  toStatus  String   @default("")
+  reason    String   @default("")
+  payload   String   @default("{}")
+  createdAt DateTime @default(now())
+}
+
+model UserNotification {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String   @default("")
+  link      String   @default("")
+  payload   String   @default("{}")
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}

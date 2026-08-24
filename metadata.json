@@ -1,0 +1,6 @@
+{
+  "name": "FDE Hub - AI Agent Service Marketplace",
+  "description": "HelloMe FDE 专家智库与创作者平台（一期）：认证创作者通过免费、可运行的智能体建立作品与口碑，用户通过平台内咨询直连专家与创作者进行需求对接与工程交付",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

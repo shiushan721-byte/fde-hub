@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fde
+      POSTGRES_PASSWORD: fde
+      POSTGRES_DB: fde_hub
+    ports:
+      - "5432:5432"
+    volumes:
+      - fde_pg_data:/var/lib/postgresql/data
+
+volumes:
+  fde_pg_data:
