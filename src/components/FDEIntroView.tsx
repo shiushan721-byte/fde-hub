@@ -3,7 +3,6 @@ import {
   Award,
   ShieldCheck,
   Sparkles,
-  ArrowLeft,
   ArrowRight,
   CheckCircle2,
   DollarSign,
@@ -20,7 +19,7 @@ import { isExpertRole } from '../utils/expertIdentity';
 
 interface FDEIntroViewProps {
   userRole: UserIdentityRole;
-  onBack: () => void;
+  onBack?: () => void;
   onOpenBecomeCreator: () => void;
   onOpenBecomeFDEModal: () => void;
   onNavigateToCreatorCenter?: () => void;
@@ -55,7 +54,6 @@ const FAQ_ITEMS: { q: string; a: string }[] = [
 
 export const FDEIntroView: React.FC<FDEIntroViewProps> = ({
   userRole,
-  onBack,
   onOpenBecomeCreator,
   onOpenBecomeFDEModal,
   onNavigateToCreatorCenter
@@ -64,30 +62,6 @@ export const FDEIntroView: React.FC<FDEIntroViewProps> = ({
 
   return (
     <div id="fde-intro-view" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-10">
-      <div className="flex items-center justify-between">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-blue-600 bg-white hover:bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200 shadow-2xs transition-colors cursor-pointer"
-        >
-          <ArrowLeft size={14} />
-          <span>返回首页</span>
-        </button>
-
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-slate-400">当前身份:</span>
-          {!isExpert ? (
-            <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 font-bold border border-slate-200">
-              普通用户
-            </span>
-          ) : (
-            <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-200 flex items-center gap-1">
-              <Award size={13} />
-              <span>AI 应用专家</span>
-            </span>
-          )}
-        </div>
-      </div>
-
       {/* Hero */}
       <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white p-8 md:p-12 border border-slate-800 shadow-xl">
         <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-amber-500/15 via-blue-500/10 to-transparent rounded-full blur-3xl pointer-events-none" />
