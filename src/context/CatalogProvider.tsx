@@ -10,7 +10,8 @@ import {
   mockAgentSolutions,
   HellomeAgentItem
 } from '../data/mockData';
-import { AgentSolution, FDEExpert } from '../types';
+import { AgentSolution } from '../types';
+import { sortExpertsForPublic } from '../lib/sortExperts';
 
 const defaultSettings: HomeSettings = {
   heroBrand: 'Hellome',
@@ -58,7 +59,7 @@ export const CatalogProvider: React.FC<{ children: React.ReactNode }> = ({ child
       banners: live ? query.data!.home.banners : defaultHomeBanners,
       categories: live ? query.data!.home.categories : defaultHomeCategories,
       homeAgents: live ? query.data!.home.agents : mockHellomeHomeAgents,
-      experts: live ? query.data!.experts : mockExperts,
+      experts: sortExpertsForPublic(live ? query.data!.experts : mockExperts),
       solutions: live ? query.data!.agents.solutions : mockAgentSolutions,
       settings: live ? query.data!.home.settings : defaultSettings,
       refresh: () => {

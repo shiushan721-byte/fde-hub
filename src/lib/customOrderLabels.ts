@@ -157,6 +157,41 @@ export function matchesCustomServiceFilter(
   return stageKey === filter;
 }
 
+/** 与创作者「定制服务」筛选条一致的订单阶段 */
+export function creatorOrderStage(status?: string): {
+  stageKey: CustomServiceFilterKey | 'dispute' | 'unknown';
+  stageLabel: string;
+} {
+  switch (status) {
+    case 'consulting':
+    case 'pending_quote':
+      return { stageKey: 'consulting', stageLabel: '咨询中' };
+    case 'awaiting_proposal_confirm':
+      return { stageKey: 'awaiting_proposal_confirm', stageLabel: '待确认方案' };
+    case 'awaiting_payment':
+      return { stageKey: 'awaiting_payment', stageLabel: '待支付' };
+    case 'paid_pending_start':
+    case 'escrowed':
+    case 'in_development':
+      return { stageKey: 'in_delivery', stageLabel: '待提交交付' };
+    case 'revision':
+      return { stageKey: 'in_delivery', stageLabel: '需修改' };
+    case 'in_review':
+      return { stageKey: 'in_review', stageLabel: '平台审核中' };
+    case 'pending_acceptance':
+      return { stageKey: 'pending_acceptance', stageLabel: '待验收' };
+    case 'completed':
+    case 'pending_settlement':
+      return { stageKey: 'completed', stageLabel: '已完成' };
+    case 'dispute':
+      return { stageKey: 'dispute', stageLabel: '已关闭/争议中' };
+    case 'closed':
+      return { stageKey: 'closed', stageLabel: '已关闭/争议中' };
+    default:
+      return { stageKey: 'unknown', stageLabel: status || '—' };
+  }
+}
+
 export function matchesOrderFilter(status: string, filter: OrderFilterKey) {
   if (filter === 'all') return true;
   if (filter === 'proposal') return status === 'awaiting_proposal_confirm';

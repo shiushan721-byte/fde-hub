@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { toJson } from '../lib/json';
 import { EXPERT_VERIFY_META } from '../lib/mappers';
+import { formatExpertNo, ensureExpertNos } from '../lib/expertNo';
 import { defaultHomeBanners, defaultHomeCategories } from '../../shared/homeDefaults';
 import {
   mockHellomeHomeAgents,
@@ -22,6 +23,7 @@ export async function seedDatabase(force = false) {
     await ensureDemoUserAndCertifications();
     await ensureSampleExpertApplications();
     await ensureSampleCustomOrders();
+    await ensureExpertNos();
     return { seeded: false, agents: existing };
   }
 
@@ -201,6 +203,7 @@ export async function seedDatabase(force = false) {
       data: {
         id: expert.id,
         userId,
+        expertNo: formatExpertNo(index + 1),
         name: expert.name,
         avatar: expert.avatar,
         title: expert.title,
@@ -283,6 +286,7 @@ export async function seedDatabase(force = false) {
   await ensureDemoUserRealName();
   await ensureSampleExpertApplications();
   await ensureSampleCustomOrders();
+  await ensureExpertNos();
 
   const count = await prisma.agent.count();
   return { seeded: true, agents: count };
@@ -349,6 +353,7 @@ async function ensureDemoUserAndCertifications() {
         data: {
           id: expert.id,
           userId,
+          expertNo: formatExpertNo(mockExperts.findIndex((e) => e.id === expert.id) + 1 || 1),
           name: expert.name,
           avatar: expert.avatar,
           title: expert.title,

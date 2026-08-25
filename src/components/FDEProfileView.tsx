@@ -153,6 +153,10 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
                   </span>
                 </div>
 
+                {expert.expertNo && (
+                  <p className="text-xs font-mono text-slate-500 mt-1">{expert.expertNo}</p>
+                )}
+
                 <p className="text-xs sm:text-sm font-medium text-slate-600 mt-1.5">{expert.title}</p>
 
                 {/* Subtitle indicators */}

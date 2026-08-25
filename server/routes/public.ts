@@ -62,10 +62,42 @@ publicRouter.get('/agents/:id', async (req, res) => {
 
 publicRouter.get('/experts', async (_req, res) => {
   const experts = await prisma.expert.findMany({
-    where: { listed: true, status: 'active', paused: false },
-    orderBy: [{ featured: 'desc' }, { sortOrder: 'asc' }]
+    where: { listed: true, status: 'active', paused: false }
   });
-  return ok(res, experts.map(expertToPublic));
+  const expertIds = experts.map((e) => e.id);
+  const publishedCounts =
+    expertIds.length === 0
+      ? []
+      : await prisma.agent.groupBy({
+          by: ['authorId'],
+          where: { authorId: { in: expertIds }, status: 'published' },
+          _count: { _all: true }
+        });
+  const countByAuthor = new Map(
+    publishedCounts.map((row) => [row.authorId || '', row._count._all])
+  );
+
+  // 前台排序：推荐优先，同档再按已上架智能体数量降序，最后用 sortOrder 兜底
+  experts.sort((a, b) => {
+    if (a.featured !== b.featured) return a.featured ? -1 : 1;
+    const countA = countByAuthor.get(a.id) || 0;
+    const countB = countByAuthor.get(b.id) || 0;
+    if (countA !== countB) return countB - countA;
+    return a.sortOrder - b.sortOrder;
+  });
+
+  return ok(
+    res,
+    experts.map((expert) => {
+      const pub = expertToPublic(expert);
+      const publishedAgentsCount = countByAuthor.get(expert.id) || 0;
+      const stats =
+        pub.stats && typeof pub.stats === 'object' && !Array.isArray(pub.stats)
+          ? { ...(pub.stats as Record<string, unknown>), publishedAgentsCount }
+          : { publishedAgentsCount };
+      return { ...pub, stats };
+    })
+  );
 });
 
 publicRouter.get('/experts/:id', async (req, res) => {

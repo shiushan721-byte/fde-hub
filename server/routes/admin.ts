@@ -169,26 +169,58 @@ adminRouter.patch('/settings/:key', async (req, res) => {
 adminRouter.get('/agents', async (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const authorId = typeof req.query.authorId === 'string' ? req.query.authorId.trim() : '';
   const agents = await prisma.agent.findMany({
     where: {
       ...(status ? { status } : {}),
+      ...(authorId ? { authorId } : {}),
       ...(q
         ? {
             OR: [
+              { id: { contains: q } },
               { title: { contains: q } },
               { authorName: { contains: q } },
-              { category: { contains: q } }
+              { category: { contains: q } },
+              { desc: { contains: q } }
             ]
           }
         : {})
     },
-    orderBy: { sortOrder: 'asc' }
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
   });
-  return ok(res, agents.map((agent) => ({
-    ...agent,
-    catalog: agentToCatalog(agent),
-    solution: agent.kind === 'solution' ? agentToSolution(agent) : null
-  })));
+  const authorIds = Array.from(
+    new Set(agents.map((a) => a.authorId).filter((id): id is string => Boolean(id)))
+  );
+  const authors = authorIds.length
+    ? await prisma.expert.findMany({
+        where: { id: { in: authorIds } },
+        select: { id: true, expertNo: true, name: true }
+      })
+    : [];
+  const authorById = new Map(authors.map((a) => [a.id, a]));
+
+  return ok(
+    res,
+    agents.map((agent) => {
+      const payload = parseJson<Record<string, unknown>>(agent.solutionPayload, {});
+      const skillPackage =
+        payload.skillPackage && typeof payload.skillPackage === 'object'
+          ? (payload.skillPackage as Record<string, unknown>)
+          : null;
+      const versionRaw =
+        (typeof payload.version === 'string' && payload.version.trim()) ||
+        (typeof skillPackage?.version === 'string' && skillPackage.version.trim()) ||
+        'v1.0.0';
+      const author = agent.authorId ? authorById.get(agent.authorId) : null;
+      return {
+        ...agent,
+        version: versionRaw.startsWith('v') ? versionRaw : `v${versionRaw}`,
+        authorExpertNo: author?.expertNo || null,
+        catalog: agentToCatalog(agent),
+        solution: agent.kind === 'solution' ? agentToSolution(agent) : null
+      };
+    })
+  );
 });
 
 const agentPatch = z.object({
@@ -323,13 +355,44 @@ adminRouter.post('/agents/:id/offline', async (req, res) => {
 
 adminRouter.get('/experts', async (_req, res) => {
   const experts = await prisma.expert.findMany({
-    orderBy: { sortOrder: 'asc' },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     include: { certification: true }
   });
+  const expertIds = experts.map((e) => e.id);
+  const [publishedCounts, applications] = await Promise.all([
+    expertIds.length
+      ? prisma.agent.groupBy({
+          by: ['authorId'],
+          where: { authorId: { in: expertIds }, status: 'published' },
+          _count: { _all: true }
+        })
+      : Promise.resolve([]),
+    expertIds.length
+      ? prisma.expertApplication.findMany({
+          where: { expertId: { in: expertIds }, status: 'approved' },
+          orderBy: { createdAt: 'asc' },
+          select: { expertId: true, createdAt: true, reviewedAt: true }
+        })
+      : Promise.resolve([])
+  ]);
+  const countByAuthor = new Map(
+    publishedCounts.map((row) => [row.authorId || '', row._count._all])
+  );
+  const appliedAtByExpert = new Map<string, Date>();
+  for (const app of applications) {
+    if (!app.expertId || appliedAtByExpert.has(app.expertId)) continue;
+    appliedAtByExpert.set(app.expertId, app.createdAt);
+  }
+
   return ok(
     res,
     experts.map((expert) => ({
       ...expertToPublic(expert),
+      publishedAgentsCount: countByAuthor.get(expert.id) || 0,
+      appliedAt:
+        appliedAtByExpert.get(expert.id)?.toISOString() ||
+        expert.certification?.certifiedAt?.toISOString() ||
+        expert.createdAt.toISOString(),
       certification: expert.certification
         ? {
             id: expert.certification.id,
@@ -380,12 +443,159 @@ adminRouter.patch('/experts/:id', async (req, res) => {
 
 adminRouter.get('/leads', async (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-  const leads = await prisma.consultationLead.findMany({
-    where: status ? { status } : undefined,
-    orderBy: { createdAt: 'desc' },
-    include: { messages: true }
+  const CONSULTING = new Set(['consulting', 'pending_quote']);
+
+  const [leads, allOrders] = await Promise.all([
+    prisma.consultationLead.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        messages: { orderBy: { createdAt: 'asc' }, take: 3 }
+      }
+    }),
+    prisma.customOrder.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        buyer: { select: { id: true, name: true, email: true } },
+        creator: { select: { id: true, name: true, email: true } },
+        instance: { select: { id: true, status: true, title: true } }
+      }
+    })
+  ]);
+
+  const expertIds = Array.from(
+    new Set(
+      [
+        ...leads.map((l) => l.expertId),
+        ...allOrders.map((o) => o.expertId)
+      ].filter((id): id is string => Boolean(id))
+    )
+  );
+  const experts = expertIds.length
+    ? await prisma.expert.findMany({
+        where: { id: { in: expertIds } },
+        select: { id: true, name: true, title: true, userId: true }
+      })
+    : [];
+  const expertById = new Map(experts.map((e) => [e.id, e]));
+
+  const orderByLeadId = new Map<string, (typeof allOrders)[number]>();
+  allOrders.forEach((o) => {
+    if (o.leadId) orderByLeadId.set(o.leadId, o);
   });
-  return ok(res, leads);
+
+  function funnelFromOrder(order: {
+    status: string;
+    instanceId: string | null;
+    instance?: { id: string } | null;
+    proposalVersion: number;
+  } | null): 'open' | 'converted' | 'closed' {
+    if (!order) return 'open';
+    if (order.status === 'closed' || order.status === 'dispute') return 'closed';
+    if (
+      Boolean(order.instanceId || order.instance) ||
+      !CONSULTING.has(order.status) ||
+      (order.proposalVersion || 0) > 0
+    ) {
+      return 'converted';
+    }
+    return 'open';
+  }
+
+  const fromLeads = leads.map((lead) => {
+    const order = orderByLeadId.get(lead.id) || null;
+    const expert = lead.expertId ? expertById.get(lead.expertId) || null : null;
+    const payload = parseJson<Record<string, unknown>>(lead.payload, {});
+    const requirement =
+      lead.notes?.trim() ||
+      lead.summary?.trim() ||
+      (typeof payload.businessProblem === 'string' && payload.businessProblem.trim()) ||
+      lead.messages[0]?.text?.trim() ||
+      order?.serviceScope?.trim() ||
+      order?.title?.trim() ||
+      '';
+
+    let funnelStatus = funnelFromOrder(order);
+    if (lead.status === 'closed') funnelStatus = 'closed';
+
+    return {
+      id: lead.id,
+      source: 'lead' as const,
+      createdAt: lead.createdAt,
+      clientName: lead.clientName,
+      clientCompany: lead.clientCompany,
+      contactPhone: lead.contactPhone,
+      user: lead.user,
+      expertId: lead.expertId,
+      expertName: expert?.name || null,
+      expertTitle: expert?.title || null,
+      agentId: lead.agentId || order?.baseAgentId || '',
+      agentTitle: lead.agentTitle || order?.baseAgentTitle || '',
+      requirement,
+      summary: lead.summary,
+      leadStatus: lead.status,
+      funnelStatus,
+      order: order
+        ? {
+            id: order.id,
+            orderNo: order.orderNo,
+            status: order.status,
+            title: order.title,
+            hasInstance: Boolean(order.instanceId || order.instance)
+          }
+        : null
+    };
+  });
+
+  const leadIdSet = new Set(leads.map((l) => l.id));
+
+  // 前台创作者端会把无 lead / lead 缺失的定制订单也展示为咨询卡片，后台对齐捞取
+  const orderOnlyRows = allOrders
+    .filter((order) => !order.leadId || !leadIdSet.has(order.leadId))
+    .map((order) => {
+      const expert = order.expertId ? expertById.get(order.expertId) || null : null;
+      const requirement =
+        order.serviceScope?.trim() ||
+        order.quoteNote?.trim() ||
+        order.title?.trim() ||
+        '';
+      return {
+        id: `order:${order.id}`,
+        source: 'order' as const,
+        createdAt: order.createdAt,
+        clientName: order.buyer?.name || '—',
+        clientCompany: '',
+        contactPhone: '',
+        user: order.buyer,
+        expertId: order.expertId,
+        expertName: expert?.name || order.creator?.name || null,
+        expertTitle: expert?.title || null,
+        agentId: order.baseAgentId,
+        agentTitle: order.baseAgentTitle,
+        requirement,
+        summary: order.title,
+        leadStatus: order.status === 'closed' ? 'closed' : 'new',
+        funnelStatus: funnelFromOrder(order),
+        order: {
+          id: order.id,
+          orderNo: order.orderNo,
+          status: order.status,
+          title: order.title,
+          hasInstance: Boolean(order.instanceId || order.instance)
+        }
+      };
+    });
+
+  const mapped = [...fromLeads, ...orderOnlyRows].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  const filtered =
+    status === 'converted' || status === 'closed' || status === 'open'
+      ? mapped.filter((item) => item.funnelStatus === status)
+      : mapped;
+
+  return ok(res, filtered);
 });
 
 const leadPatch = z.object({
@@ -412,26 +622,29 @@ adminRouter.patch('/leads/:id', async (req, res) => {
   return ok(res, lead);
 });
 
-function mapAdminApplication(item: {
-  id: string;
-  userId: string;
-  type: string;
-  status: string;
-  submittedProfileSnapshot: string;
-  realNameVerificationId: string | null;
-  agreementVersion: string;
-  agreementAcceptedAt: Date | null;
-  reviewerId: string | null;
-  reviewStartedAt: Date | null;
-  reviewedAt: Date | null;
-  decisionReason: string;
-  supplementRequest: string;
-  supplementSubmittedAt: Date | null;
-  expertId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  user?: { id: string; name: string; email: string; role: string } | null;
-}) {
+function mapAdminApplication(
+  item: {
+    id: string;
+    userId: string;
+    type: string;
+    status: string;
+    submittedProfileSnapshot: string;
+    realNameVerificationId: string | null;
+    agreementVersion: string;
+    agreementAcceptedAt: Date | null;
+    reviewerId: string | null;
+    reviewStartedAt: Date | null;
+    reviewedAt: Date | null;
+    decisionReason: string;
+    supplementRequest: string;
+    supplementSubmittedAt: Date | null;
+    expertId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    user?: { id: string; name: string; email: string; role: string } | null;
+  },
+  expertMeta?: { expertNo?: string | null; name?: string | null } | null
+) {
   const snapshot = parseJson<Record<string, unknown>>(item.submittedProfileSnapshot, {});
   return {
     ...item,
@@ -442,7 +655,9 @@ function mapAdminApplication(item: {
     contactPhone: String(snapshot.contactPhone || ''),
     contactEmail: String(snapshot.contactEmail || ''),
     profile: snapshot,
-    rejectReason: item.decisionReason
+    rejectReason: item.decisionReason,
+    /** 仅审核通过并落库专家后才有 */
+    expertNo: expertMeta?.expertNo || null
   };
 }
 
@@ -453,7 +668,22 @@ adminRouter.get('/expert-applications', async (req, res) => {
     orderBy: { createdAt: 'desc' },
     include: { user: { select: { id: true, name: true, email: true, role: true } } }
   });
-  return ok(res, items.map(mapAdminApplication));
+  const expertIds = Array.from(
+    new Set(items.map((item) => item.expertId).filter((id): id is string => Boolean(id)))
+  );
+  const experts = expertIds.length
+    ? await prisma.expert.findMany({
+        where: { id: { in: expertIds } },
+        select: { id: true, expertNo: true, name: true }
+      })
+    : [];
+  const expertById = new Map(experts.map((e) => [e.id, e]));
+  return ok(
+    res,
+    items.map((item) =>
+      mapAdminApplication(item, item.expertId ? expertById.get(item.expertId) : null)
+    )
+  );
 });
 
 adminRouter.get('/expert-applications/:id', async (req, res) => {
@@ -669,6 +899,111 @@ adminRouter.get('/expert-certifications/:id/events', async (req, res) => {
     take: 100
   });
   return ok(res, events.map((e) => ({ ...e, payload: parseJson(e.payload, {}) })));
+});
+
+adminRouter.get('/private-instances', async (req, res) => {
+  const status = typeof req.query.status === 'string' ? req.query.status : '';
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+
+  const orderStatusesByStage: Record<string, string[]> = {
+    consulting: ['consulting', 'pending_quote'],
+    awaiting_proposal_confirm: ['awaiting_proposal_confirm'],
+    awaiting_payment: ['awaiting_payment'],
+    in_delivery: ['paid_pending_start', 'escrowed', 'in_development', 'revision'],
+    in_review: ['in_review'],
+    pending_acceptance: ['pending_acceptance'],
+    completed: ['completed', 'pending_settlement'],
+    closed: ['closed', 'dispute']
+  };
+  const orderStatuses = status ? orderStatusesByStage[status] : undefined;
+
+  const items = await prisma.privateAgentInstance.findMany({
+    where: {
+      ...(orderStatuses
+        ? { order: { status: { in: orderStatuses } } }
+        : status
+          ? { order: { status } }
+          : {}),
+      ...(q
+        ? {
+            OR: [
+              { id: { contains: q } },
+              { title: { contains: q } },
+              { baseAgentTitle: { contains: q } },
+              { order: { orderNo: { contains: q } } },
+              { customer: { name: { contains: q } } }
+            ]
+          }
+        : {})
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    include: {
+      customer: { select: { id: true, name: true, email: true } },
+      order: {
+        select: {
+          id: true,
+          orderNo: true,
+          status: true,
+          title: true,
+          serviceScope: true,
+          quoteNote: true,
+          baseAgentTitle: true,
+          baseAgentVersion: true,
+          priceCents: true,
+          deliveryDays: true,
+          proposalVersion: true,
+          proposalSubmittedAt: true,
+          deliveryProposal: true,
+          customizationSpec: true,
+          creator: { select: { id: true, name: true, email: true } }
+        }
+      },
+      deliveries: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { id: true, version: true, status: true, publishedAt: true }
+      }
+    }
+  });
+  return ok(
+    res,
+    items.map((item) => {
+      const instanceSpec = parseJson<Record<string, unknown>>(item.customizationSpec, {});
+      const orderSpec = parseJson<Record<string, unknown>>(item.order?.customizationSpec || '{}', {});
+      const requirement =
+        (typeof instanceSpec.need === 'string' && instanceSpec.need.trim()) ||
+        (typeof orderSpec.need === 'string' && orderSpec.need.trim()) ||
+        (typeof orderSpec.unsatisfiedAreas === 'string' && orderSpec.unsatisfiedAreas.trim()) ||
+        (typeof orderSpec.businessProblem === 'string' && orderSpec.businessProblem.trim()) ||
+        item.order?.serviceScope?.trim() ||
+        item.order?.quoteNote?.trim() ||
+        item.order?.title?.trim() ||
+        '';
+      const versionRaw =
+        item.currentVersion ||
+        item.deliveries[0]?.version ||
+        item.baseAgentVersion ||
+        'v1.0.0';
+      return {
+        ...item,
+        version: versionRaw.startsWith('v') ? versionRaw : `v${versionRaw}`,
+        requirement,
+        desc: requirement,
+        category: '定制专属',
+        authorName: item.order?.creator?.name || null,
+        customizationSpec: instanceSpec,
+        latestDelivery: item.deliveries[0] || null,
+        deliveries: undefined,
+        order: item.order
+          ? {
+              ...item.order,
+              customizationSpec: orderSpec,
+              deliveryProposal: parseJson(item.order.deliveryProposal, {})
+            }
+          : null
+      };
+    })
+  );
 });
 
 adminRouter.get('/delivery-versions', async (req, res) => {

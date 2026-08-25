@@ -19,6 +19,8 @@ export interface AgentPricingPlans {
 
 export interface FDEExpert {
   id: string;
+  /** 对外专家编号，如 AI-EXP-000001 */
+  expertNo?: string;
   name: string;
   avatar: string;
   title: string;
@@ -47,6 +49,8 @@ export interface FDEExpert {
   };
   experienceYears: number;
   featuredQuote: string;
+  /** 后台「设为推荐」；前台排序时推荐优先 */
+  featured?: boolean;
   socialLinks?: {
     github?: string;
     wechat?: string;

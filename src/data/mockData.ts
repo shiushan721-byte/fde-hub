@@ -214,6 +214,7 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
 export const mockExperts: FDEExpert[] = [
   {
     id: 'fde-linran',
+    expertNo: 'AI-EXP-000001',
     name: '林然',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80',
     title: '电商 AI 解决方案架构师',
@@ -245,6 +246,7 @@ export const mockExperts: FDEExpert[] = [
       publishedAgentsCount: 4
     },
     experienceYears: 6,
+    featured: true,
     featuredQuote: '“不搞虚浮 Demo，只做能直接嵌入业务闭环、产生真实订单转化的工业级智能体。”',
     socialLinks: {
       github: 'linran-ai',
@@ -254,6 +256,7 @@ export const mockExperts: FDEExpert[] = [
   },
   {
     id: 'fde-yunfan',
+    expertNo: 'AI-EXP-000002',
     name: '云帆',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&auto=format&fit=crop&q=80',
     title: '制造业 & 工业视觉AI团队负责人',
@@ -289,6 +292,7 @@ export const mockExperts: FDEExpert[] = [
   },
   {
     id: 'fde-maya',
+    expertNo: 'AI-EXP-000003',
     name: 'Maya (苏晴)',
     avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=300&auto=format&fit=crop&q=80',
     title: '内容增长 & 全域营销智能体专家',
@@ -320,10 +324,12 @@ export const mockExperts: FDEExpert[] = [
       publishedAgentsCount: 5
     },
     experienceYears: 5,
+    featured: true,
     featuredQuote: '“AI 不仅是提效工具，更是让 1 个人拥有 100 人创意内容中台的杠杆。”'
   },
   {
     id: 'fde-zhangheng',
+    expertNo: 'AI-EXP-000004',
     name: '张恒',
     avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&auto=format&fit=crop&q=80',
     title: '金融合规与研报深度解析架构师',
@@ -354,6 +360,7 @@ export const mockExperts: FDEExpert[] = [
   },
   {
     id: 'fde-chenzimo',
+    expertNo: 'AI-EXP-000005',
     name: '陈子墨',
     avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=300&auto=format&fit=crop&q=80',
     title: '法务科技与政企协同 AI 架构师',
@@ -384,6 +391,7 @@ export const mockExperts: FDEExpert[] = [
   },
   {
     id: 'fde-emily',
+    expertNo: 'AI-EXP-000006',
     name: '艾米丽 (Emily)',
     avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80',
     title: '医疗健康与就医导诊智能体架构师',
@@ -414,6 +422,7 @@ export const mockExperts: FDEExpert[] = [
   },
   {
     id: 'fde-zhouchen',
+    expertNo: 'AI-EXP-000007',
     name: '周晨',
     avatar: 'https://images.unsplash.com/photo-1519345182560-3f2917c472ef?w=300&auto=format&fit=crop&q=80',
     title: '企业流程自动化与智能体方案顾问',

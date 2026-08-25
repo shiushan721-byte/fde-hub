@@ -1,34 +1,36 @@
 import React, { useEffect, useState } from 'react';
 import {
-  LayoutDashboard,
-  Home,
   Bot,
   Users,
-  MessageSquare,
-  ScrollText,
   LogOut,
   Shield,
-  Eye,
-  EyeOff,
   Check,
   Loader2,
-  UserPlus,
   X,
-  Download
+  Download,
+  ChevronDown
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import {
+  CUSTOM_SERVICE_FILTERS,
+  creatorOrderStage,
+  type CustomServiceFilterKey
+} from '../lib/customOrderLabels';
+import {
+  DeliveryProposalModal,
+  DeliveryProposalReviewPanel,
+  hasViewableProposal
+} from '../components/DeliveryProposalReviewPanel';
+import type { DeliveryProposal } from '../types/deliveryProposal';
 
 type AdminPage =
-  | 'overview'
-  | 'home'
   | 'agents'
+  | 'custom-agents'
+  | 'deliveries'
   | 'experts'
   | 'applications'
-  | 'deliveries'
-  | 'disputes'
   | 'leads'
-  | 'users'
-  | 'logs';
+  | 'users';
 
 type AdminUser = { id: string; email: string; name: string; role: string };
 
@@ -36,18 +38,47 @@ function isAdminRole(role: string) {
   return role === 'super_admin' || role === 'operator';
 }
 
-const nav: { key: AdminPage; label: string; icon: React.ElementType; superOnly?: boolean }[] = [
-  { key: 'overview', label: '概览', icon: LayoutDashboard },
-  { key: 'home', label: '首页配置', icon: Home },
-  { key: 'agents', label: '智能体', icon: Bot },
-  { key: 'experts', label: '专家', icon: Users },
-  { key: 'applications', label: '专家申请', icon: UserPlus },
-  { key: 'deliveries', label: '智能体审核', icon: Check },
-  { key: 'disputes', label: '争议处理', icon: MessageSquare },
-  { key: 'leads', label: '咨询线索', icon: MessageSquare },
-  { key: 'users', label: '管理员', icon: Shield, superOnly: true },
-  { key: 'logs', label: '操作日志', icon: ScrollText }
+type NavLeaf = { key: AdminPage; label: string };
+type NavEntry =
+  | { type: 'link'; key: AdminPage; label: string; icon: React.ElementType; superOnly?: boolean }
+  | {
+      type: 'group';
+      id: string;
+      label: string;
+      icon: React.ElementType;
+      children: NavLeaf[];
+    };
+
+const nav: NavEntry[] = [
+  {
+    type: 'group',
+    id: 'agent-mgmt',
+    label: '智能体管理',
+    icon: Bot,
+    children: [
+      { key: 'agents', label: '通用智能体' },
+      { key: 'custom-agents', label: '定制智能体' },
+      { key: 'deliveries', label: '智能体审核' },
+      { key: 'leads', label: '咨询线索' }
+    ]
+  },
+  {
+    type: 'group',
+    id: 'expert-mgmt',
+    label: '专家库管理',
+    icon: Users,
+    children: [
+      { key: 'experts', label: '专家管理' },
+      { key: 'applications', label: '专家审核' }
+    ]
+  },
+  { type: 'link', key: 'users', label: '管理员', icon: Shield, superOnly: true }
 ];
+
+const GROUP_PAGE_KEYS: Record<string, AdminPage[]> = {
+  'agent-mgmt': ['agents', 'custom-agents', 'deliveries', 'leads'],
+  'expert-mgmt': ['experts', 'applications']
+};
 
 const statusLabel: Record<string, string> = {
   draft: '草稿',
@@ -67,8 +98,9 @@ const statusLabel: Record<string, string> = {
   withdrawn: '已撤回',
   onboarding: '入驻申请',
   upgrade: '晋升申请',
-  active: '有效',
+  active: '已生效',
   frozen: '已冻结',
+  revision: '修改中',
   pending_ops_review: '待运营审核',
   ops_rejected: '运营已驳回',
   published_to_customer: '已推送客户',
@@ -78,8 +110,16 @@ const statusLabel: Record<string, string> = {
 export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const [me, setMe] = useState<AdminUser | null>(null);
   const [checking, setChecking] = useState(true);
-  const [page, setPage] = useState<AdminPage>('overview');
+  const [page, setPage] = useState<AdminPage>('agents');
+  const [agentsAuthorFilter, setAgentsAuthorFilter] = useState<{
+    authorId: string;
+    label: string;
+  } | null>(null);
   const [nonAdminHint, setNonAdminHint] = useState('');
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    'agent-mgmt': true,
+    'expert-mgmt': true
+  });
 
   const loadMe = async () => {
     try {
@@ -103,6 +143,14 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     loadMe();
   }, []);
 
+  useEffect(() => {
+    for (const [groupId, keys] of Object.entries(GROUP_PAGE_KEYS)) {
+      if (keys.includes(page)) {
+        setOpenGroups((prev) => ({ ...prev, [groupId]: true }));
+      }
+    }
+  }, [page]);
+
   if (checking) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center text-slate-500">
@@ -124,7 +172,10 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     );
   }
 
-  const visibleNav = nav.filter((item) => !item.superOnly || me.role === 'super_admin');
+  const visibleNav = nav.filter((item) => {
+    if (item.type === 'link' && item.superOnly) return me.role === 'super_admin';
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex">
@@ -135,6 +186,56 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         </div>
         <nav className="flex-1 p-2 space-y-1">
           {visibleNav.map((item) => {
+            if (item.type === 'group') {
+              const groupActive = item.children.some((c) => c.key === page);
+              const open = openGroups[item.id] ?? groupActive;
+              const Icon = item.icon;
+              return (
+                <div key={item.id} className="space-y-0.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenGroups((prev) => ({
+                        ...prev,
+                        [item.id]: !(prev[item.id] ?? true)
+                      }))
+                    }
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold cursor-pointer ${
+                      groupActive ? 'bg-white/15 text-white' : 'text-slate-300 hover:bg-white/10'
+                    }`}
+                  >
+                    <Icon size={14} />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    <ChevronDown
+                      size={13}
+                      className={`opacity-70 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`}
+                    />
+                  </button>
+                  {open &&
+                    item.children.map((child) => {
+                      const active = page === child.key;
+                      return (
+                        <button
+                          key={child.key}
+                          type="button"
+                          onClick={() => {
+                            if (child.key === 'agents') setAgentsAuthorFilter(null);
+                            setPage(child.key);
+                          }}
+                          className={`w-full flex items-center gap-2 pl-9 pr-3 py-1.5 rounded-xl text-[11px] font-bold cursor-pointer ${
+                            active
+                              ? 'bg-white text-slate-950'
+                              : 'text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                          }`}
+                        >
+                          {child.label}
+                        </button>
+                      );
+                    })}
+                </div>
+              );
+            }
+
             const Icon = item.icon;
             const active = page === item.key;
             return (
@@ -175,16 +276,25 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
       </aside>
 
       <main className="flex-1 min-w-0 p-6 overflow-auto">
-        {page === 'overview' && <OverviewPage />}
-        {page === 'home' && <HomePage />}
-        {page === 'agents' && <AgentsPage />}
-        {page === 'experts' && <ExpertsPage />}
-        {page === 'applications' && <ApplicationsPage />}
+        {page === 'agents' && (
+          <AgentsPage
+            authorFilter={agentsAuthorFilter}
+            onClearAuthorFilter={() => setAgentsAuthorFilter(null)}
+          />
+        )}
+        {page === 'custom-agents' && <CustomAgentsPage />}
         {page === 'deliveries' && <AgentReviewPage />}
-        {page === 'disputes' && <DisputesPage />}
+        {page === 'experts' && (
+          <ExpertsPage
+            onOpenPublishedAgents={(authorId, label) => {
+              setAgentsAuthorFilter({ authorId, label });
+              setPage('agents');
+            }}
+          />
+        )}
+        {page === 'applications' && <ApplicationsPage />}
         {page === 'leads' && <LeadsPage />}
         {page === 'users' && me.role === 'super_admin' && <UsersPage />}
-        {page === 'logs' && <LogsPage />}
       </main>
     </div>
   );
@@ -297,293 +407,83 @@ function useAdminQuery<T>(path: string, extraKey = '') {
   return { data, error, loading, reload: load, setData };
 }
 
-const OverviewPage = () => {
-  const { data, error, loading } = useAdminQuery<{
-    metrics: Record<string, number>;
-    recentLeads: Array<{ id: string; clientName: string; agentTitle: string; status: string }>;
-    recentLogs: Array<{ id: string; action: string; targetType: string; createdAt: string; actor?: { name: string } }>;
-    recentApplications?: Array<{ id: string; applicantName: string; type: string; targetLevel: number; status: string }>;
-  }>('/api/admin/dashboard');
-  const [jobBusy, setJobBusy] = useState(false);
-  const [jobResult, setJobResult] = useState('');
-
-  if (loading) return <p className="text-sm text-slate-500">加载中…</p>;
-  if (error) return <p className="text-sm text-rose-600">{error}</p>;
-  if (!data) return null;
-
-  const cards = [
-    ['已发布智能体', data.metrics.publishedAgents],
-    ['已下架', data.metrics.offlineAgents],
-    ['待审专家申请', data.metrics.pendingApplications],
-    ['公开专家', data.metrics.listedExperts],
-    ['新线索', data.metrics.newLeads],
-    ['后台账号', data.metrics.users]
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-black">运营概览</h1>
-          <p className="text-xs text-slate-500 mt-1">定制订单定时任务默认每 5 分钟执行</p>
-        </div>
-        <button
-          type="button"
-          disabled={jobBusy}
-          className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
-          onClick={async () => {
-            setJobBusy(true);
-            setJobResult('');
-            try {
-              const result = await api<{
-                unpaidClosed: number;
-                remindersSent: number;
-                autoAccepted: number;
-                settled: number;
-              }>('/api/admin/jobs/custom-orders/run', { method: 'POST', body: '{}' });
-              setJobResult(
-                `超时关闭 ${result.unpaidClosed} · 提醒 ${result.remindersSent} · 自动验收 ${result.autoAccepted} · 结算 ${result.settled}`
-              );
-            } catch (err) {
-              setJobResult(err instanceof Error ? err.message : '执行失败');
-            } finally {
-              setJobBusy(false);
-            }
-          }}
-        >
-          {jobBusy ? '执行中…' : '立即跑订单定时任务'}
-        </button>
-      </div>
-      {jobResult && (
-        <p className="text-xs text-slate-600 bg-white border border-slate-200 rounded-xl px-3 py-2">{jobResult}</p>
-      )}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {cards.map(([label, value]) => (
-          <div key={String(label)} className="bg-white rounded-2xl border border-slate-200 p-4">
-            <div className="text-xs text-slate-500">{label}</div>
-            <div className="text-2xl font-black mt-1">{value}</div>
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
-          <h2 className="text-sm font-bold mb-3">待审专家申请</h2>
-          <div className="space-y-2 text-xs">
-            {(data.recentApplications || []).length === 0 && <p className="text-slate-400">暂无待审申请</p>}
-            {(data.recentApplications || []).map((app) => (
-              <div key={app.id} className="flex justify-between gap-2">
-                <span>{app.applicantName} · {statusLabel[app.type] || app.type}</span>
-                <span className="text-slate-500">申请{app.targetLevel}级</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
-          <h2 className="text-sm font-bold mb-3">最新线索</h2>
-          <div className="space-y-2 text-xs">
-            {data.recentLeads.length === 0 && <p className="text-slate-400">暂无线索</p>}
-            {data.recentLeads.map((lead) => (
-              <div key={lead.id} className="flex justify-between gap-2">
-                <span>{lead.clientName} · {lead.agentTitle}</span>
-                <span className="text-slate-500">{statusLabel[lead.status] || lead.status}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const HomePage = () => {
-  const { data, error, loading, reload } = useAdminQuery<{
-    banners: Array<{ id: string; slot: string; eyebrow: string; title: string; subtitle: string; ctaLabel: string; visible: boolean }>;
-    categories: Array<{ id: string; name: string; visible: boolean; sortOrder: number }>;
-    settings: Array<{ key: string; value: string }>;
-  }>('/api/admin/home');
-
-  if (loading) return <p className="text-sm text-slate-500">加载中…</p>;
-  if (error) return <p className="text-sm text-rose-600">{error}</p>;
-  if (!data) return null;
-
-  return (
-    <div className="space-y-6">
-      <h1 className="text-xl font-black">首页配置</h1>
-      <p className="text-xs text-slate-500">修改后，前台切到「后台数据」即可看到结果，无需重新部署。</p>
-
-      <section className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
-        <h2 className="text-sm font-bold">文案设置</h2>
-        {data.settings.filter((s) => s.key.startsWith('home.')).map((s) => (
-          <label key={s.key} className="block text-xs space-y-1">
-            <span className="font-bold text-slate-600">{s.key}</span>
-            <input
-              defaultValue={s.value}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200"
-              onBlur={async (e) => {
-                if (e.target.value === s.value) return;
-                await api(`/api/admin/settings/${encodeURIComponent(s.key)}`, {
-                  method: 'PATCH',
-                  body: JSON.stringify({ value: e.target.value })
-                });
-                reload();
-              }}
-            />
-          </label>
-        ))}
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-bold">Banner</h2>
-        {data.banners.map((banner) => (
-          <div key={banner.id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold">{banner.slot}</span>
-              <button
-                type="button"
-                className="text-xs font-bold flex items-center gap-1 cursor-pointer"
-                onClick={async () => {
-                  await api(`/api/admin/home/banners/${banner.id}`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ visible: !banner.visible })
-                  });
-                  reload();
-                }}
-              >
-                {banner.visible ? <Eye size={13} /> : <EyeOff size={13} />}
-                {banner.visible ? '显示中' : '已隐藏'}
-              </button>
-            </div>
-            <input
-              defaultValue={banner.title}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold"
-              onBlur={async (e) => {
-                if (e.target.value === banner.title) return;
-                await api(`/api/admin/home/banners/${banner.id}`, {
-                  method: 'PATCH',
-                  body: JSON.stringify({ title: e.target.value })
-                });
-                reload();
-              }}
-            />
-            <textarea
-              defaultValue={banner.subtitle}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs min-h-16"
-              onBlur={async (e) => {
-                if (e.target.value === banner.subtitle) return;
-                await api(`/api/admin/home/banners/${banner.id}`, {
-                  method: 'PATCH',
-                  body: JSON.stringify({ subtitle: e.target.value })
-                });
-                reload();
-              }}
-            />
-          </div>
-        ))}
-      </section>
-
-      <section className="bg-white rounded-2xl border border-slate-200 p-4 space-y-2">
-        <h2 className="text-sm font-bold">分类</h2>
-        {data.categories.map((cat) => (
-          <div key={cat.id} className="flex items-center justify-between text-xs">
-            <span>{cat.name}</span>
-            <button
-              type="button"
-              className="font-bold cursor-pointer"
-              onClick={async () => {
-                await api(`/api/admin/home/categories/${cat.id}`, {
-                  method: 'PATCH',
-                  body: JSON.stringify({ visible: !cat.visible })
-                });
-                reload();
-              }}
-            >
-              {cat.visible ? '显示' : '隐藏'}
-            </button>
-          </div>
-        ))}
-      </section>
-    </div>
-  );
-};
-
-const AgentsPage = () => {
-  const [q, setQ] = useState('');
-  const [publishTarget, setPublishTarget] = useState<{
+type CustomAgentRow = {
+  id: string;
+  title: string;
+  requirement?: string;
+  desc?: string;
+  status: string;
+  version?: string;
+  currentVersion: string;
+  baseAgentTitle: string;
+  baseAgentVersion: string;
+  authorName?: string | null;
+  createdAt: string;
+  customer?: { name: string; email: string };
+  order?: {
     id: string;
-    title: string;
-    category: string;
-  } | null>(null);
-  const [publishCategory, setPublishCategory] = useState('');
-  const [publishing, setPublishing] = useState(false);
-  const { data, error, loading, reload } = useAdminQuery<Array<{
-    id: string;
-    kind: string;
-    title: string;
-    category: string;
-    authorName: string | null;
+    orderNo: string;
     status: string;
-    showOnHome: boolean;
-    featured: boolean;
-  }>>(`/api/admin/agents${q ? `?q=${encodeURIComponent(q)}` : ''}`, q);
-  const { data: homeData } = useAdminQuery<{
-    categories: Array<{ id: string; name: string; visible: boolean; sortOrder: number }>;
-  }>('/api/admin/home');
+    title: string;
+    baseAgentTitle?: string;
+    baseAgentVersion?: string;
+    proposalVersion?: number;
+    proposalSubmittedAt?: string;
+    deliveryProposal?: DeliveryProposal | Record<string, unknown>;
+    creator?: { name: string; email: string };
+  } | null;
+  latestDelivery?: { version: string; status: string; publishedAt?: string } | null;
+};
 
-  const industryOptions = Array.from(
-    new Set([
-      ...(homeData?.categories || [])
-        .map((c) => c.name)
-        .filter((name) => name && name !== '全部'),
-      '内容营销',
-      '创作工具',
-      '办公协同',
-      '图片视频',
-      '电商零售',
-      '智能制造',
-      '金融投研'
-    ])
+const CustomAgentsPage = () => {
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState<CustomServiceFilterKey | ''>('');
+  const [detailItem, setDetailItem] = useState<CustomAgentRow | null>(null);
+  const [proposalItem, setProposalItem] = useState<CustomAgentRow | null>(null);
+  const { data, error, loading, reload } = useAdminQuery<CustomAgentRow[]>(
+    `/api/admin/private-instances?${new URLSearchParams({
+      ...(status ? { status } : {}),
+      ...(q.trim() ? { q: q.trim() } : {})
+    }).toString()}`,
+    `${status}|${q}`
   );
 
-  const openPublishModal = (agent: { id: string; title: string; category: string }) => {
-    setPublishTarget(agent);
-    setPublishCategory(
-      agent.category && industryOptions.includes(agent.category)
-        ? agent.category
-        : industryOptions[0] || ''
-    );
-  };
-
-  const confirmPublish = async () => {
-    if (!publishTarget) return;
-    if (!publishCategory.trim()) {
-      alert('请选择行业分类');
-      return;
-    }
-    setPublishing(true);
-    try {
-      await api(`/api/admin/agents/${publishTarget.id}/publish`, {
-        method: 'POST',
-        body: JSON.stringify({ category: publishCategory.trim() })
-      });
-      setPublishTarget(null);
-      reload();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : '发布失败');
-    } finally {
-      setPublishing(false);
-    }
-  };
+  const total = data?.length || 0;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-black">智能体</h1>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="搜索标题 / 作者 / 分类"
-          className="px-3 py-2 rounded-xl border border-slate-200 text-xs w-64 bg-white"
-        />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-black">定制智能体</h1>
+          <p className="text-xs text-slate-500 mt-1">客户专属实例（由定制订单交付产生，不对市场公开）</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as CustomServiceFilterKey | '')}
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+          >
+            <option value="">全部状态</option>
+            {CUSTOM_SERVICE_FILTERS.filter((f) => f.key !== 'all').map((f) => (
+              <option key={f.key} value={f.key}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="搜索 ID / 名称 / 订单号 / 用户"
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs w-64 bg-white"
+          />
+          <button
+            type="button"
+            onClick={reload}
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+          >
+            刷新
+          </button>
+        </div>
       </div>
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
@@ -591,27 +491,318 @@ const AgentsPage = () => {
         <table className="w-full text-xs">
           <thead className="bg-slate-50 text-slate-500">
             <tr>
-              <th className="text-left p-3">标题</th>
-              <th className="text-left p-3">类型</th>
-              <th className="text-left p-3">分类</th>
+              <th className="text-left p-3 w-14">序号</th>
+              <th className="text-left p-3">智能体 ID</th>
+              <th className="text-left p-3 whitespace-nowrap">版本号</th>
+              <th className="text-left p-3">智能体名称</th>
+              <th className="text-left p-3 whitespace-nowrap">订单编号</th>
+              <th className="text-left p-3 whitespace-nowrap">专属用户</th>
               <th className="text-left p-3">状态</th>
-              <th className="text-left p-3">首页</th>
+              <th className="text-left p-3 whitespace-nowrap">创建时间</th>
               <th className="text-right p-3">操作</th>
             </tr>
           </thead>
           <tbody>
-            {(data || []).map((agent) => (
-              <tr key={agent.id} className="border-t border-slate-100">
+            {(data || []).map((item, index) => {
+              const version =
+                item.version ||
+                item.currentVersion ||
+                item.latestDelivery?.version ||
+                'v1.0.0';
+              const orderStage = creatorOrderStage(item.order?.status);
+              const isConsulting =
+                orderStage.stageKey === 'consulting' ||
+                ['consulting', 'pending_quote'].includes(item.order?.status || '');
+              const canViewProposal =
+                !!item.order &&
+                !isConsulting &&
+                hasViewableProposal(item.order.deliveryProposal as DeliveryProposal);
+              return (
+                <tr key={item.id} className="border-t border-slate-100 align-top">
+                  <td className="p-3 text-slate-500 tabular-nums">{total - index}</td>
+                  <td className="p-3">
+                    <code className="text-[11px] font-mono text-slate-700 break-all">{item.id}</code>
+                  </td>
+                  <td className="p-3 whitespace-nowrap">
+                    <span className="font-mono text-slate-700">{version}</span>
+                  </td>
+                  <td className="p-3">
+                    <div className="font-bold text-slate-900">{item.title}</div>
+                    <div className="text-slate-400 mt-0.5">
+                      {item.authorName || item.order?.creator?.name || '—'}
+                    </div>
+                  </td>
+                  <td className="p-3 whitespace-nowrap">
+                    <code className="text-[11px] font-mono text-slate-700">
+                      {item.order?.orderNo || '—'}
+                    </code>
+                  </td>
+                  <td className="p-3 whitespace-nowrap">
+                    <div className="text-slate-900">{item.customer?.name || '—'}</div>
+                    {item.customer?.email && (
+                      <div className="text-slate-400 mt-0.5">{item.customer.email}</div>
+                    )}
+                  </td>
+                  <td className="p-3 whitespace-nowrap">{orderStage.stageLabel}</td>
+                  <td className="p-3 text-slate-500 whitespace-nowrap">
+                    {item.createdAt ? new Date(item.createdAt).toLocaleString('zh-CN') : '—'}
+                  </td>
+                  <td className="p-3 text-right whitespace-nowrap">
+                    <div className="inline-flex flex-col items-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setDetailItem(item)}
+                        className="text-[11px] text-blue-600 font-bold cursor-pointer"
+                      >
+                        查看需求
+                      </button>
+                      {canViewProposal ? (
+                        <button
+                          type="button"
+                          onClick={() => setProposalItem(item)}
+                          className="text-[11px] text-violet-600 font-bold cursor-pointer"
+                        >
+                          查看方案
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">
+                          {isConsulting ? '等待交付方案' : '暂无方案'}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {data?.length === 0 && (
+          <p className="p-6 text-sm text-slate-400 text-center">暂无定制智能体实例</p>
+        )}
+      </div>
+
+      {detailItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+          onClick={() => setDetailItem(null)}
+        >
+          <div
+            className="bg-white w-full max-w-lg rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-labelledby="admin-custom-requirement-title"
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 id="admin-custom-requirement-title" className="text-sm font-bold text-slate-900">
+                定制需求详情
+              </h3>
+              <button
+                type="button"
+                onClick={() => setDetailItem(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+                aria-label="关闭"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                <div>
+                  <div className="text-slate-400">编号</div>
+                  <div className="font-mono text-slate-800 mt-0.5">
+                    {detailItem.order?.orderNo || '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-400">阶段</div>
+                  <div className="font-semibold text-slate-800 mt-0.5">
+                    {creatorOrderStage(detailItem.order?.status).stageLabel}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-400">基础智能体</div>
+                  <div className="font-semibold text-slate-800 mt-0.5">
+                    {detailItem.order?.baseAgentTitle || detailItem.baseAgentTitle || '—'}
+                    {detailItem.order?.baseAgentVersion || detailItem.baseAgentVersion
+                      ? ` · ${detailItem.order?.baseAgentVersion || detailItem.baseAgentVersion}`
+                      : ''}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-400">专家</div>
+                  <div className="font-semibold text-slate-800 mt-0.5">
+                    {detailItem.order?.creator?.name || detailItem.authorName || '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-400">专属用户</div>
+                  <div className="font-semibold text-slate-800 mt-0.5">
+                    {detailItem.customer?.name || '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-400">专属智能体</div>
+                  <div className="font-semibold text-slate-800 mt-0.5">{detailItem.title}</div>
+                </div>
+              </div>
+              <div>
+                <div className="text-slate-400 mb-1.5">需求描述</div>
+                <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-xl p-3 border border-slate-100">
+                  {detailItem.requirement ||
+                    detailItem.desc ||
+                    detailItem.order?.title ||
+                    '暂无需求描述'}
+                </p>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setDetailItem(null)}
+                className="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold cursor-pointer"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {proposalItem?.order &&
+        hasViewableProposal(proposalItem.order.deliveryProposal as DeliveryProposal) && (
+          <DeliveryProposalModal
+            isOpen
+            onClose={() => setProposalItem(null)}
+            title={`定制交付方案 · ${proposalItem.order.orderNo}`}
+          >
+            <DeliveryProposalReviewPanel
+              proposal={proposalItem.order.deliveryProposal as DeliveryProposal}
+              proposalVersion={proposalItem.order.proposalVersion}
+              proposalSubmittedAt={proposalItem.order.proposalSubmittedAt}
+              readOnly
+              statusHint={creatorOrderStage(proposalItem.order.status).stageLabel}
+            />
+          </DeliveryProposalModal>
+        )}
+    </div>
+  );
+};
+
+const AgentsPage = ({
+  authorFilter,
+  onClearAuthorFilter
+}: {
+  authorFilter?: { authorId: string; label: string } | null;
+  onClearAuthorFilter?: () => void;
+}) => {
+  const [q, setQ] = useState('');
+  const query = new URLSearchParams({
+    ...(q.trim() ? { q: q.trim() } : {}),
+    ...(authorFilter?.authorId ? { authorId: authorFilter.authorId } : {})
+  }).toString();
+  const { data, error, loading, reload } = useAdminQuery<Array<{
+    id: string;
+    kind: string;
+    title: string;
+    desc: string;
+    category: string;
+    authorName: string | null;
+    authorExpertNo?: string | null;
+    status: string;
+    version?: string;
+    showOnHome: boolean;
+    featured: boolean;
+    createdAt: string;
+  }>>(`/api/admin/agents${query ? `?${query}` : ''}`, `${q}|${authorFilter?.authorId || ''}`);
+
+  const total = data?.length || 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-black">通用智能体</h1>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="搜索 ID / 标题 / 作者 / 分类"
+          className="px-3 py-2 rounded-xl border border-slate-200 text-xs w-64 bg-white"
+        />
+      </div>
+      {authorFilter && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-100 font-bold">
+            筛选作者：{authorFilter.label}
+          </span>
+          <button
+            type="button"
+            onClick={onClearAuthorFilter}
+            className="text-slate-500 font-bold cursor-pointer hover:text-slate-800"
+          >
+            清除筛选
+          </button>
+        </div>
+      )}
+      {loading && <p className="text-sm text-slate-500">加载中…</p>}
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              <th className="text-left p-3 w-14">序号</th>
+              <th className="text-left p-3">智能体 ID</th>
+              <th className="text-left p-3 whitespace-nowrap">版本号</th>
+              <th className="text-left p-3">智能体名称</th>
+              <th className="text-left p-3 min-w-[220px]">智能体详情</th>
+              <th className="text-left p-3">分类</th>
+              <th className="text-left p-3">状态</th>
+              <th className="text-left p-3">首页</th>
+              <th className="text-left p-3 whitespace-nowrap">创建时间</th>
+              <th className="text-right p-3">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data || []).map((agent, index) => (
+              <tr key={agent.id} className="border-t border-slate-100 align-top">
+                <td className="p-3 text-slate-500 tabular-nums">{total - index}</td>
                 <td className="p-3">
-                  <div className="font-bold">{agent.title}</div>
-                  <div className="text-slate-400">{agent.authorName}</div>
+                  <code className="text-[11px] font-mono text-slate-700 break-all">{agent.id}</code>
                 </td>
-                <td className="p-3">{agent.kind === 'catalog' ? '市场卡片' : '专家作品'}</td>
-                <td className="p-3">{agent.category}</td>
-                <td className="p-3">{statusLabel[agent.status] || agent.status}</td>
+                <td className="p-3 whitespace-nowrap">
+                  <span className="font-mono text-slate-700">{agent.version || 'v1.0.0'}</span>
+                </td>
+                <td className="p-3">
+                  <div className="font-bold text-slate-900">{agent.title}</div>
+                  <div className="text-slate-400 mt-0.5">{agent.authorName || '—'}</div>
+                  {agent.authorExpertNo && (
+                    <div className="text-[11px] font-mono text-slate-500 mt-0.5">
+                      {agent.authorExpertNo}
+                    </div>
+                  )}
+                </td>
+                <td className="p-3 max-w-sm">
+                  <p className="text-slate-600 whitespace-pre-wrap leading-relaxed">
+                    {agent.desc?.trim() || '暂无详情'}
+                  </p>
+                </td>
+                <td className="p-3 whitespace-nowrap">{agent.category || '—'}</td>
+                <td className="p-3 whitespace-nowrap">{statusLabel[agent.status] || agent.status}</td>
                 <td className="p-3">{agent.showOnHome ? '是' : '否'}</td>
-                <td className="p-3 text-right space-x-2">
-                  {agent.status === 'published' ? (
+                <td className="p-3 text-slate-500 whitespace-nowrap">
+                  {agent.createdAt ? new Date(agent.createdAt).toLocaleString('zh-CN') : '—'}
+                </td>
+                <td className="p-3 text-right space-x-2 whitespace-nowrap">
+                  {agent.status === 'offline' ? (
+                    <span className="text-slate-400">已下架</span>
+                  ) : agent.status === 'in_review' ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="font-bold text-slate-300 cursor-not-allowed"
+                      title="审核中不可下架"
+                    >
+                      下架
+                    </button>
+                  ) : (
                     <button
                       type="button"
                       className="font-bold text-rose-600 cursor-pointer"
@@ -622,88 +813,16 @@ const AgentsPage = () => {
                     >
                       下架
                     </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="font-bold text-emerald-700 cursor-pointer"
-                      onClick={() => openPublishModal(agent)}
-                    >
-                      审核通过
-                    </button>
-                  )}
-                  {agent.kind === 'catalog' && (
-                    <button
-                      type="button"
-                      className="font-bold text-slate-700 cursor-pointer"
-                      onClick={async () => {
-                        await api(`/api/admin/agents/${agent.id}`, {
-                          method: 'PATCH',
-                          body: JSON.stringify({ showOnHome: !agent.showOnHome })
-                        });
-                        reload();
-                      }}
-                    >
-                      {agent.showOnHome ? '移出首页' : '上首页'}
-                    </button>
                   )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {data?.length === 0 && (
+          <p className="p-6 text-sm text-slate-400 text-center">暂无通用智能体</p>
+        )}
       </div>
-
-      {publishTarget && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => !publishing && setPublishTarget(null)}
-        >
-          <div
-            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div>
-              <h2 className="text-sm font-black text-slate-900">审核通过并发布</h2>
-              <p className="text-xs text-slate-500 mt-1">
-                「{publishTarget.title}」通过前须选择行业分类，用于首页与市场归类。
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-800">行业分类</label>
-              <select
-                value={publishCategory}
-                onChange={(e) => setPublishCategory(e.target.value)}
-                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-blue-500"
-              >
-                <option value="">请选择行业分类</option>
-                {industryOptions.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                type="button"
-                disabled={publishing}
-                onClick={() => setPublishTarget(null)}
-                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                disabled={publishing || !publishCategory}
-                onClick={confirmPublish}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold cursor-pointer"
-              >
-                {publishing ? '发布中…' : '确认通过并发布'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -719,6 +838,8 @@ const ApplicationsPage = () => {
     applicantName: string;
     contactPhone: string;
     expertTitle: string;
+    expertNo?: string | null;
+    expertId?: string | null;
     bio: string;
     domainTags: string[];
     agentTitle?: string;
@@ -741,10 +862,7 @@ const ApplicationsPage = () => {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-black">专家申请审核</h1>
-          <p className="text-xs text-slate-500 mt-1">
-            目标等级已取消；审核通过即成为 AI 专家
-          </p>
+          <h1 className="text-xl font-black">专家审核</h1>
         </div>
         <select
           value={filter}
@@ -774,14 +892,24 @@ const ApplicationsPage = () => {
                   </span>
                 </div>
                 <div className="text-xs text-slate-500 mt-0.5">
-                  {app.expertTitle}
-                  {app.user?.email ? ` · ${app.user.email}` : ''}
+                  {app.user?.email || app.contactPhone || '—'}
                 </div>
+                {app.status === 'approved' && app.expertNo && (
+                  <div className="text-[11px] font-mono text-emerald-700 mt-1">
+                    专家编号 {app.expertNo}
+                  </div>
+                )}
               </div>
               <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
                 {statusLabel[app.status] || app.status}
               </span>
             </div>
+            {app.expertTitle && (
+              <p className="text-xs text-slate-600">
+                <span className="text-slate-400">申请头衔 · </span>
+                {app.expertTitle}
+              </p>
+            )}
             {app.bio && <p className="text-xs text-slate-600">{app.bio}</p>}
             {app.supplementRequest && (
               <p className="text-[11px] text-amber-700 bg-amber-50 rounded-xl p-2">
@@ -819,17 +947,6 @@ const ApplicationsPage = () => {
                 </button>
                 <button
                   type="button"
-                  className="px-3 py-1.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-200 text-xs font-bold cursor-pointer"
-                  onClick={async () => {
-                    const message = window.prompt('请填写需补充的资料说明');
-                    if (!message) return;
-                    await runAction(app.id, 'request-supplement', { message });
-                  }}
-                >
-                  要求补充
-                </button>
-                <button
-                  type="button"
                   className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold cursor-pointer flex items-center gap-1"
                   onClick={async () => {
                     const reason = window.prompt('请填写驳回原因');
@@ -851,125 +968,12 @@ const ApplicationsPage = () => {
   );
 };
 
-const DisputesPage = () => {
-  const { data, error, loading, reload } = useAdminQuery<
-    Array<{
-      id: string;
-      orderNo: string;
-      title: string;
-      status: string;
-      priceCents: number;
-      disputeStatus: string;
-      disputeReason: string;
-      disputeOpenedAt?: string;
-      buyer?: { name: string; email: string };
-      creator?: { name: string; email: string };
-    }>
-  >('/api/admin/disputes');
-
-  const resolve = async (
-    orderId: string,
-    resolution: 'continue_delivery' | 'partial_refund' | 'full_refund' | 'confirm_complete'
-  ) => {
-    let refundYuan: number | undefined;
-    if (resolution === 'partial_refund') {
-      const raw = window.prompt('部分退款金额（元）');
-      if (!raw) return;
-      refundYuan = Number(raw);
-      if (!Number.isFinite(refundYuan) || refundYuan <= 0) {
-        alert('请输入有效退款金额');
-        return;
-      }
-    }
-    const note = window.prompt('判定说明（可选）') || undefined;
-    try {
-      await api(`/api/admin/custom-orders/${orderId}/resolve-dispute`, {
-        method: 'POST',
-        body: JSON.stringify({ resolution, note, refundYuan })
-      });
-      reload();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '判定失败');
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-black">争议处理</h1>
-        <p className="text-xs text-slate-500 mt-1">
-          判定结果：继续交付 / 部分退款 / 全额退款 / 确认完成。争议期间资金冻结，不可自动结算。
-        </p>
-      </div>
-      {loading && <p className="text-sm text-slate-500">加载中…</p>}
-      {error && <p className="text-sm text-rose-600">{error}</p>}
-      <div className="space-y-3">
-        {(data || []).map((order) => (
-          <div key={order.id} className="bg-white rounded-2xl border border-rose-200 p-4 space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-bold">{order.title}</div>
-                <div className="text-xs text-slate-500 mt-0.5">
-                  {order.orderNo} · ¥{(order.priceCents / 100).toFixed(2)}
-                </div>
-                <div className="text-[11px] text-slate-400 mt-0.5">
-                  买家 {order.buyer?.name || '—'} · 创作者 {order.creator?.name || '—'}
-                </div>
-              </div>
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">
-                {order.disputeStatus || order.status}
-              </span>
-            </div>
-            <p className="text-xs text-slate-700 bg-rose-50/60 border border-rose-100 rounded-xl p-3">
-              {order.disputeReason || '未填写原因'}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold cursor-pointer"
-                onClick={() => resolve(order.id, 'continue_delivery')}
-              >
-                继续修改
-              </button>
-              <button
-                type="button"
-                className="px-3 py-1.5 rounded-xl bg-amber-600 text-white text-xs font-bold cursor-pointer"
-                onClick={() => resolve(order.id, 'partial_refund')}
-              >
-                部分退款
-              </button>
-              <button
-                type="button"
-                className="px-3 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-bold cursor-pointer"
-                onClick={() => resolve(order.id, 'full_refund')}
-              >
-                全额退款
-              </button>
-              <button
-                type="button"
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer"
-                onClick={() => resolve(order.id, 'confirm_complete')}
-              >
-                确认完成
-              </button>
-            </div>
-          </div>
-        ))}
-        {data?.length === 0 && <p className="text-sm text-slate-400">暂无待处理争议。</p>}
-      </div>
-    </div>
-  );
-};
-
 const AgentReviewPage = () => {
   const [tab, setTab] = useState<'universal' | 'delivery'>('delivery');
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-black">智能体审核</h1>
-        <p className="text-xs text-slate-500 mt-1">
-          分为通用智能体上架审核，与定制交付智能体审核；可通过审核后才会对外可见或推送给客户
-        </p>
       </div>
       <div className="flex gap-1 bg-white p-1 rounded-xl border border-slate-200 w-fit">
         <button
@@ -1019,6 +1023,9 @@ const UniversalAgentsReviewPanel = () => {
   } | null>(null);
   const [publishCategory, setPublishCategory] = useState('');
   const [publishing, setPublishing] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<{ id: string; title: string } | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
   const { data, error, loading, reload } = useAdminQuery<Array<{
     id: string;
     title: string;
@@ -1026,6 +1033,7 @@ const UniversalAgentsReviewPanel = () => {
     category: string;
     authorName: string | null;
     authorId: string | null;
+    authorExpertNo?: string | null;
     status: string;
     solutionPayload?: string;
   }>>(`/api/admin/agents?status=${filter}`, filter);
@@ -1069,10 +1077,31 @@ const UniversalAgentsReviewPanel = () => {
     }
   };
 
+  const confirmReject = async () => {
+    if (!rejectTarget) return;
+    if (!rejectReason.trim()) {
+      alert('请填写驳回理由');
+      return;
+    }
+    setRejecting(true);
+    try {
+      await api(`/api/admin/agents/${rejectTarget.id}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: rejectReason.trim() })
+      });
+      setRejectTarget(null);
+      setRejectReason('');
+      reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '驳回失败');
+    } finally {
+      setRejecting(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-slate-500">审核创作者提交上架的通用智能体</p>
+      <div className="flex items-center justify-end gap-3">
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -1103,7 +1132,12 @@ const UniversalAgentsReviewPanel = () => {
               <div>
                 <div className="text-sm font-bold">{agent.title}</div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  作者 {agent.authorName || '—'} · {agent.category || '未分类'}
+                  作者 {agent.authorName || '—'}
+                  {agent.authorExpertNo ? (
+                    <span className="font-mono text-slate-500"> · {agent.authorExpertNo}</span>
+                  ) : null}
+                  {' · '}
+                  {agent.category || '未分类'}
                 </div>
               </div>
               <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
@@ -1152,14 +1186,9 @@ const UniversalAgentsReviewPanel = () => {
                   <button
                     type="button"
                     className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold cursor-pointer"
-                    onClick={async () => {
-                      const reason = window.prompt('请填写驳回理由（将通过消息提醒通知创作者）');
-                      if (!reason?.trim()) return;
-                      await api(`/api/admin/agents/${agent.id}/reject`, {
-                        method: 'POST',
-                        body: JSON.stringify({ reason: reason.trim() })
-                      });
-                      reload();
+                    onClick={() => {
+                      setRejectTarget({ id: agent.id, title: agent.title });
+                      setRejectReason('');
                     }}
                   >
                     驳回
@@ -1219,12 +1248,67 @@ const UniversalAgentsReviewPanel = () => {
           </div>
         </div>
       )}
+
+      {rejectTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => !rejecting && setRejectTarget(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h2 className="text-sm font-black text-slate-900">驳回通用智能体</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                「{rejectTarget.title}」驳回理由将通过消息提醒通知创作者。
+              </p>
+            </div>
+            <textarea
+              rows={4}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="请填写驳回理由（必填）"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={rejecting}
+                onClick={() => {
+                  setRejectTarget(null);
+                  setRejectReason('');
+                }}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={rejecting}
+                onClick={confirmReject}
+                className="px-3 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                {rejecting ? '提交中…' : '确认驳回'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 const DeliveriesPage = () => {
   const [filter, setFilter] = useState('pending_ops_review');
+  const [rejectTarget, setRejectTarget] = useState<{
+    id: string;
+    title: string;
+    version: string;
+  } | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
   const { data, error, loading, reload } = useAdminQuery<Array<{
     id: string;
     version: string;
@@ -1254,6 +1338,28 @@ const DeliveriesPage = () => {
     instance: { id: string; title: string };
   }>>(`/api/admin/delivery-versions?status=${filter}`, filter);
 
+  const confirmReject = async () => {
+    if (!rejectTarget) return;
+    if (!rejectReason.trim()) {
+      alert('请填写驳回理由');
+      return;
+    }
+    setRejecting(true);
+    try {
+      await api(`/api/admin/delivery-versions/${rejectTarget.id}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: rejectReason.trim() })
+      });
+      setRejectTarget(null);
+      setRejectReason('');
+      reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '驳回失败');
+    } finally {
+      setRejecting(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -1280,12 +1386,13 @@ const DeliveriesPage = () => {
             (typeof item.skillPayload?.agentDesc === 'string' && item.skillPayload.agentDesc.trim()) ||
             '暂无智能体介绍';
           const skillFile = item.skillPayload?.skillFileName || `${item.version || 'skill'}.zip`;
+          const agentTitle = item.skillPayload?.agentTitle || item.instance.title;
           return (
           <div key={item.id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-bold">
-                  {item.skillPayload?.agentTitle || item.instance.title}
+                  {agentTitle}
                   <span className="ml-2 text-xs font-mono text-slate-500">{item.version}</span>
                 </div>
                 <div className="text-xs text-slate-500 mt-0.5">
@@ -1336,14 +1443,13 @@ const DeliveriesPage = () => {
                   <button
                     type="button"
                     className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold cursor-pointer"
-                    onClick={async () => {
-                      const reason = window.prompt('请填写驳回理由（将通过消息提醒通知创作者）');
-                      if (!reason?.trim()) return;
-                      await api(`/api/admin/delivery-versions/${item.id}/reject`, {
-                        method: 'POST',
-                        body: JSON.stringify({ reason: reason.trim() })
+                    onClick={() => {
+                      setRejectTarget({
+                        id: item.id,
+                        title: agentTitle,
+                        version: item.version
                       });
-                      reload();
+                      setRejectReason('');
                     }}
                   >
                     驳回
@@ -1359,20 +1465,83 @@ const DeliveriesPage = () => {
         })}
         {data?.length === 0 && <p className="text-sm text-slate-400">当前筛选下没有交付版本。</p>}
       </div>
+
+      {rejectTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => !rejecting && setRejectTarget(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h2 className="text-sm font-black text-slate-900">驳回交付智能体</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                「{rejectTarget.title}」{rejectTarget.version} 驳回理由将通过消息提醒通知创作者与客户。
+              </p>
+            </div>
+            <textarea
+              rows={4}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="请填写驳回理由（必填）"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={rejecting}
+                onClick={() => {
+                  setRejectTarget(null);
+                  setRejectReason('');
+                }}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={rejecting}
+                onClick={confirmReject}
+                className="px-3 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                {rejecting ? '提交中…' : '确认驳回'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-const ExpertsPage = () => {
+const ExpertsPage = ({
+  onOpenPublishedAgents
+}: {
+  onOpenPublishedAgents?: (authorId: string, label: string) => void;
+}) => {
+  const [actionTarget, setActionTarget] = useState<{
+    certId: string;
+    name: string;
+    mode: 'freeze' | 'unfreeze';
+  } | null>(null);
+  const [actionReason, setActionReason] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
   const { data, error, loading, reload } = useAdminQuery<Array<{
     id: string;
+    expertNo?: string;
     name: string;
     title: string;
+    domainTags?: string[];
     expertLevel: number;
     listed: boolean;
     featured: boolean;
     paused: boolean;
     status: string;
+    publishedAgentsCount?: number;
+    appliedAt?: string;
     certification: null | {
       id: string;
       level: number;
@@ -1381,11 +1550,38 @@ const ExpertsPage = () => {
     };
   }>>('/api/admin/experts');
 
+  const total = data?.length || 0;
+
+  const confirmAction = async () => {
+    if (!actionTarget) return;
+    if (!actionReason.trim()) {
+      alert(actionTarget.mode === 'freeze' ? '请填写冻结原因' : '请填写解冻原因');
+      return;
+    }
+    setActionBusy(true);
+    try {
+      const path =
+        actionTarget.mode === 'freeze'
+          ? `/api/admin/expert-certifications/${actionTarget.certId}/freeze`
+          : `/api/admin/expert-certifications/${actionTarget.certId}/unfreeze`;
+      await api(path, {
+        method: 'POST',
+        body: JSON.stringify({ reason: actionReason.trim() })
+      });
+      setActionTarget(null);
+      setActionReason('');
+      reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '操作失败');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-black">专家管理</h1>
-        <p className="text-xs text-slate-500 mt-1">认证只读；后台只允许冻结 / 解冻与推荐</p>
       </div>
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
@@ -1393,45 +1589,102 @@ const ExpertsPage = () => {
         <table className="w-full text-xs">
           <thead className="bg-slate-50 text-slate-500">
             <tr>
+              <th className="text-left p-3 w-14">序号</th>
               <th className="text-left p-3">专家</th>
               <th className="text-left p-3">认证状态</th>
-              <th className="text-left p-3">专家库</th>
+              <th className="text-left p-3 whitespace-nowrap">已上架智能体</th>
+              <th className="text-left p-3 whitespace-nowrap">申请时间</th>
               <th className="text-right p-3">操作</th>
             </tr>
           </thead>
           <tbody>
-            {(data || []).map((expert) => {
+            {(data || []).map((expert, index) => {
               const cert = expert.certification;
               const frozen = cert?.status === 'frozen';
+              const publishedCount = expert.publishedAgentsCount || 0;
+              const tags = expert.domainTags || [];
               return (
-                <tr key={expert.id} className="border-t border-slate-100">
+                <tr key={expert.id} className="border-t border-slate-100 align-top">
+                  <td className="p-3 text-slate-500 tabular-nums">{total - index}</td>
                   <td className="p-3">
-                    <div className="font-bold">{expert.name}</div>
-                    <div className="text-slate-400">{expert.title}</div>
+                    <div className="font-bold text-slate-900">{expert.name}</div>
+                    {expert.expertNo && (
+                      <div className="text-[11px] font-mono text-slate-500 mt-0.5">{expert.expertNo}</div>
+                    )}
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {tags.length > 0 ? (
+                        tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100"
+                          >
+                            {tag}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </div>
                   </td>
-                  <td className="p-3">
+                  <td className="p-3 whitespace-nowrap">
                     {cert ? (
-                      <span className={frozen ? 'text-rose-600 font-bold' : 'text-emerald-700 font-bold'}>
-                        {statusLabel[cert.status] || cert.status}
-                      </span>
+                      <div>
+                        <span
+                          className={
+                            frozen
+                              ? 'text-rose-600 font-bold'
+                              : cert.status === 'active'
+                                ? 'text-emerald-700 font-bold'
+                                : 'text-slate-600 font-bold'
+                          }
+                        >
+                          {statusLabel[cert.status] || cert.status}
+                        </span>
+                        {frozen && cert.freezeReason && (
+                          <div className="text-[10px] text-rose-500 mt-0.5 max-w-[160px] whitespace-normal">
+                            {cert.freezeReason}
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <span className="text-slate-400">无认证记录</span>
                     )}
                   </td>
-                  <td className="p-3">{expert.listed && !expert.paused && !frozen ? '是' : '否'}</td>
-                  <td className="p-3 text-right space-x-2">
+                  <td className="p-3 whitespace-nowrap">
+                    {publishedCount > 0 ? (
+                      <button
+                        type="button"
+                        className="font-bold text-blue-600 cursor-pointer hover:underline tabular-nums"
+                        onClick={() =>
+                          onOpenPublishedAgents?.(
+                            expert.id,
+                            `${expert.name}${expert.expertNo ? ` · ${expert.expertNo}` : ''}`
+                          )
+                        }
+                      >
+                        {publishedCount}
+                      </button>
+                    ) : (
+                      <span className="text-slate-400 tabular-nums">0</span>
+                    )}
+                  </td>
+                  <td className="p-3 text-slate-500 whitespace-nowrap">
+                    {expert.appliedAt
+                      ? new Date(expert.appliedAt).toLocaleString('zh-CN')
+                      : '—'}
+                  </td>
+                  <td className="p-3 text-right space-x-2 whitespace-nowrap">
                     {cert && !frozen && (
                       <button
                         type="button"
                         className="font-bold text-rose-600 cursor-pointer"
-                        onClick={async () => {
-                          const reason = window.prompt('请填写冻结原因（必填）');
-                          if (!reason) return;
-                          await api(`/api/admin/expert-certifications/${cert.id}/freeze`, {
-                            method: 'POST',
-                            body: JSON.stringify({ reason })
+                        onClick={() => {
+                          setActionTarget({
+                            certId: cert.id,
+                            name: expert.name,
+                            mode: 'freeze'
                           });
-                          reload();
+                          setActionReason('');
                         }}
                       >
                         冻结
@@ -1441,14 +1694,13 @@ const ExpertsPage = () => {
                       <button
                         type="button"
                         className="font-bold text-emerald-700 cursor-pointer"
-                        onClick={async () => {
-                          const reason = window.prompt('请填写解冻原因', '复核通过，恢复认证');
-                          if (!reason) return;
-                          await api(`/api/admin/expert-certifications/${cert.id}/unfreeze`, {
-                            method: 'POST',
-                            body: JSON.stringify({ reason })
+                        onClick={() => {
+                          setActionTarget({
+                            certId: cert.id,
+                            name: expert.name,
+                            mode: 'unfreeze'
                           });
-                          reload();
+                          setActionReason('复核通过，恢复认证');
                         }}
                       >
                         解冻
@@ -1473,63 +1725,239 @@ const ExpertsPage = () => {
             })}
           </tbody>
         </table>
+        {data?.length === 0 && (
+          <p className="p-6 text-sm text-slate-400 text-center">暂无专家</p>
+        )}
       </div>
+
+      {actionTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => !actionBusy && setActionTarget(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h2 className="text-sm font-black text-slate-900">
+                {actionTarget.mode === 'freeze' ? '冻结专家' : '解冻专家'}
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                {actionTarget.mode === 'freeze'
+                  ? `冻结「${actionTarget.name}」后，其认证状态变为已冻结，须填写原因。`
+                  : `解冻「${actionTarget.name}」将恢复认证，请确认原因。`}
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-800">
+                {actionTarget.mode === 'freeze' ? '冻结原因' : '解冻原因'}
+              </label>
+              <textarea
+                value={actionReason}
+                onChange={(e) => setActionReason(e.target.value)}
+                rows={4}
+                placeholder={
+                  actionTarget.mode === 'freeze'
+                    ? '请填写冻结原因（必填）'
+                    : '请填写解冻原因'
+                }
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-blue-500 resize-none"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={actionBusy}
+                onClick={() => setActionTarget(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={actionBusy || !actionReason.trim()}
+                onClick={confirmAction}
+                className={`px-4 py-2 rounded-xl text-white text-xs font-bold cursor-pointer disabled:opacity-50 ${
+                  actionTarget.mode === 'freeze'
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+              >
+                {actionBusy
+                  ? '提交中…'
+                  : actionTarget.mode === 'freeze'
+                    ? '确认冻结'
+                    : '确认解冻'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 const LeadsPage = () => {
-  const { data, error, loading, reload } = useAdminQuery<Array<{
-    id: string;
-    clientName: string;
-    clientCompany: string;
-    agentTitle: string;
-    status: string;
-    createdAt: string;
-    summary: string;
-    messages: Array<{ id: string; senderName: string; text: string }>;
-  }>>('/api/admin/leads');
+  const [filter, setFilter] = useState<'open' | 'converted' | 'closed' | ''>('');
+  const { data, error, loading, reload } = useAdminQuery<
+    Array<{
+      id: string;
+      createdAt: string;
+      clientName: string;
+      clientCompany: string;
+      contactPhone: string;
+      user?: { id: string; name: string; email: string } | null;
+      expertName: string | null;
+      expertTitle: string | null;
+      agentId: string;
+      agentTitle: string;
+      requirement: string;
+      funnelStatus: 'open' | 'converted' | 'closed';
+      order?: {
+        id: string;
+        orderNo: string;
+        status: string;
+        title: string;
+        hasInstance: boolean;
+      } | null;
+    }>
+  >(`/api/admin/leads${filter ? `?status=${filter}` : ''}`, filter);
+
+  const total = data?.length || 0;
+  const funnelLabel: Record<string, string> = {
+    open: '咨询中',
+    converted: '已转化',
+    closed: '已关闭'
+  };
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-black">咨询线索</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-black">咨询线索</h1>
+          <p className="text-xs text-slate-500 mt-1">
+            记录谁在什么时间向哪位 AI 专家咨询了哪个智能体，以及咨询内容
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as typeof filter)}
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+          >
+            <option value="">全部状态</option>
+            <option value="open">咨询中</option>
+            <option value="converted">已转化</option>
+            <option value="closed">已关闭</option>
+          </select>
+          <button
+            type="button"
+            onClick={reload}
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+          >
+            刷新
+          </button>
+        </div>
+      </div>
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
-      <div className="space-y-3">
-        {(data || []).map((lead) => (
-          <div key={lead.id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-2">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-bold">{lead.clientName} · {lead.clientCompany}</div>
-                <div className="text-xs text-slate-500">
-                  {lead.agentTitle} · 咨询于 {new Date(lead.createdAt).toLocaleString('zh-CN')}
-                </div>
-              </div>
-              <select
-                value={lead.status}
-                className="border border-slate-200 rounded-lg px-2 py-1 text-xs"
-                onChange={async (e) => {
-                  await api(`/api/admin/leads/${lead.id}`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ status: e.target.value })
-                  });
-                  reload();
-                }}
-              >
-                {['new', 'contacted', 'quoted', 'signed', 'closed'].map((s) => (
-                  <option key={s} value={s}>{statusLabel[s]}</option>
-                ))}
-              </select>
-            </div>
-            {lead.summary && <p className="text-xs text-slate-600">{lead.summary}</p>}
-            {lead.messages[0] && (
-              <p className="text-[11px] text-slate-500 bg-slate-50 rounded-xl p-2">
-                {lead.messages[0].senderName}: {lead.messages[0].text}
-              </p>
-            )}
-          </div>
-        ))}
-        {data?.length === 0 && <p className="text-sm text-slate-400">暂无线索。前台提交咨询后会出现在这里。</p>}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              <th className="text-left p-3 w-14">序号</th>
+              <th className="text-left p-3 whitespace-nowrap">咨询时间</th>
+              <th className="text-left p-3">咨询人</th>
+              <th className="text-left p-3">AI 专家</th>
+              <th className="text-left p-3">咨询智能体</th>
+              <th className="text-left p-3 min-w-[220px]">咨询内容</th>
+              <th className="text-left p-3 whitespace-nowrap">订单编号</th>
+              <th className="text-left p-3">状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data || []).map((lead, index) => {
+              const agentTitle = (lead.agentTitle || '').trim();
+              const agentId = (lead.agentId || '').trim();
+              const isDirectExpertConsult =
+                !agentId ||
+                !agentTitle ||
+                agentTitle === '直接向专家咨询' ||
+                agentTitle === '未指定智能体';
+              const showOrderNo =
+                lead.funnelStatus === 'converted' && Boolean(lead.order?.orderNo);
+              return (
+                <tr key={lead.id} className="border-t border-slate-100 align-top">
+                  <td className="p-3 text-slate-500 tabular-nums">{total - index}</td>
+                  <td className="p-3 text-slate-500 whitespace-nowrap">
+                    {lead.createdAt ? new Date(lead.createdAt).toLocaleString('zh-CN') : '—'}
+                  </td>
+                  <td className="p-3">
+                    <div className="font-bold text-slate-900">
+                      {lead.user?.name || lead.clientName || '—'}
+                    </div>
+                    <div className="text-slate-400 mt-0.5">
+                      {lead.user?.email || lead.clientCompany || lead.contactPhone || '—'}
+                    </div>
+                  </td>
+                  <td className="p-3">
+                    <div className="font-bold text-slate-900">{lead.expertName || '—'}</div>
+                    {lead.expertTitle && (
+                      <div className="text-slate-400 mt-0.5">{lead.expertTitle}</div>
+                    )}
+                  </td>
+                  <td className="p-3">
+                    {isDirectExpertConsult ? (
+                      <span className="text-slate-400">—</span>
+                    ) : (
+                      <>
+                        <div className="font-bold text-slate-900">{agentTitle}</div>
+                        {agentId && (
+                          <code className="text-[11px] font-mono text-slate-500 break-all">
+                            {agentId}
+                          </code>
+                        )}
+                      </>
+                    )}
+                  </td>
+                  <td className="p-3 max-w-sm">
+                    <p className="text-slate-600 whitespace-pre-wrap leading-relaxed">
+                      {lead.requirement || '暂无咨询内容'}
+                    </p>
+                  </td>
+                  <td className="p-3 whitespace-nowrap">
+                    {showOrderNo ? (
+                      <code className="text-[11px] font-mono text-slate-700">
+                        {lead.order!.orderNo}
+                      </code>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="p-3 whitespace-nowrap">
+                    <span
+                      className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ring-1 ring-inset ${
+                        lead.funnelStatus === 'converted'
+                          ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                          : lead.funnelStatus === 'closed'
+                            ? 'bg-slate-50 text-slate-600 ring-slate-200'
+                            : 'bg-amber-50 text-amber-700 ring-amber-200'
+                      }`}
+                    >
+                      {funnelLabel[lead.funnelStatus] || lead.funnelStatus}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {data?.length === 0 && (
+          <p className="p-6 text-sm text-slate-400 text-center">
+            暂无线索。前台向专家发起咨询后会出现在这里。
+          </p>
+        )}
       </div>
     </div>
   );
@@ -1552,36 +1980,6 @@ const UsersPage = () => {
               <div className="text-xs text-slate-500">{user.email}</div>
             </div>
             <span className="text-xs font-bold">{user.role === 'super_admin' ? '超级管理员' : '运营'}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const LogsPage = () => {
-  const { data, error, loading } = useAdminQuery<Array<{
-    id: string;
-    action: string;
-    targetType: string;
-    targetId: string;
-    createdAt: string;
-    actor?: { name: string };
-  }>>('/api/admin/audit-logs');
-
-  return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-black">操作日志</h1>
-      {loading && <p className="text-sm text-slate-500">加载中…</p>}
-      {error && <p className="text-sm text-rose-600">{error}</p>}
-      <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 text-xs">
-        {(data || []).map((log) => (
-          <div key={log.id} className="p-3 flex justify-between gap-3">
-            <span>
-              <Check size={12} className="inline mr-1 text-emerald-600" />
-              {log.actor?.name || '系统'} {log.action} {log.targetType}/{log.targetId}
-            </span>
-            <span className="text-slate-400 shrink-0">{new Date(log.createdAt).toLocaleString()}</span>
           </div>
         ))}
       </div>

@@ -56,6 +56,7 @@ export function agentToSolution(agent: Agent) {
 export function expertToPublic(expert: Expert) {
   return {
     id: expert.id,
+    expertNo: expert.expertNo || undefined,
     name: expert.name,
     avatar: expert.avatar,
     title: expert.title,

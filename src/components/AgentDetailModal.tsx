@@ -135,6 +135,9 @@ export const AgentDetailModal: React.FC<AgentDetailModalProps> = ({
                     className="w-5 h-5 rounded-full object-cover"
                   />
                   <span className="font-semibold">{agent.authorName || authorExpert.name}</span>
+                  {authorExpert.expertNo && (
+                    <span className="text-[10px] font-mono text-slate-300">{authorExpert.expertNo}</span>
+                  )}
                   <FDEBadge type={authorExpert.verifyType} label={authorExpert.verifyLabel} size="sm" />
                   <span className="text-[10px] text-blue-300 opacity-80 group-hover:underline">
                     进入主页 &gt;

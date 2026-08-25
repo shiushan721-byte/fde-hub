@@ -14,6 +14,7 @@ import { expertApplicationRouter } from './routes/expertApplications';
 import { meRouter } from './routes/me';
 import { customOrderRouter } from './routes/customOrders';
 import { seedDatabase, ensureExpertApplicationSeed } from './db/seed';
+import { ensureExpertNos } from './lib/expertNo';
 import { startCustomOrderJobScheduler } from './services/customOrderJobs';
 import { customServicesRouter } from './routes/customServices';
 
@@ -56,6 +57,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 async function start() {
   await seedDatabase(false);
   await ensureExpertApplicationSeed();
+  await ensureExpertNos();
   startCustomOrderJobScheduler(
     Number(process.env.CUSTOM_ORDER_JOB_INTERVAL_MS || 5 * 60 * 1000)
   );

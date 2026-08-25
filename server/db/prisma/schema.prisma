@@ -94,6 +94,8 @@ model Expert {
   id              String   @id
   userId          String?  @unique
   user            User?    @relation(fields: [userId], references: [id])
+  /** 对外展示编号，如 AI-EXP-000001 */
+  expertNo        String   @default("")
   name            String
   avatar          String
   title           String

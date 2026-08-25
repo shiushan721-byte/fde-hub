@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { toJson } from '../lib/json';
 import { EXPERT_VERIFY_META } from '../lib/mappers';
+import { allocateNextExpertNo } from '../lib/expertNo';
 
 type Tx = Omit<
   typeof prisma,
@@ -130,10 +131,12 @@ export async function approveApplication(applicationId: string, actorId?: string
         }
       });
     } else {
+      const expertNo = await allocateNextExpertNo();
       await tx.expert.create({
         data: {
           id: expertId,
           userId: application.userId,
+          expertNo,
           name: String(snapshot.applicantName || snapshot.name || 'AI 专家'),
           avatar:
             String(snapshot.avatar || '') ||

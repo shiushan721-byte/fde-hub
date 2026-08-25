@@ -44,6 +44,9 @@ export const FDECard: React.FC<FDECardProps> = ({
             <h3 className="font-bold text-slate-900 text-base group-hover:text-blue-600 transition-colors">
               {expert.name}
             </h3>
+            {expert.expertNo && (
+              <p className="text-[11px] font-mono text-slate-500 mt-0.5">{expert.expertNo}</p>
+            )}
           </div>
         </div>
 
