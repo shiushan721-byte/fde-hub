@@ -829,6 +829,7 @@ const AgentsPage = ({
 
 const ApplicationsPage = () => {
   const [filter, setFilter] = useState('pending');
+  const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
   const { data, error, loading, reload } = useAdminQuery<Array<{
     id: string;
     type: string;
@@ -846,6 +847,10 @@ const ApplicationsPage = () => {
     caseDescription?: string;
     rejectReason: string;
     supplementRequest?: string;
+    realName?: string;
+    idCardMasked?: string;
+    idCardFrontUrl?: string;
+    idCardBackUrl?: string;
     createdAt: string;
     user?: { name: string; email: string };
   }>>(`/api/admin/expert-applications${filter ? `?status=${filter}` : ''}`, filter);
@@ -910,6 +915,61 @@ const ApplicationsPage = () => {
                 {app.expertTitle}
               </p>
             )}
+            {(app.realName || app.idCardMasked) && (
+              <div className="text-xs text-slate-600 space-y-0.5">
+                {app.realName && (
+                  <p>
+                    <span className="text-slate-400">真实姓名：</span>
+                    {app.realName}
+                  </p>
+                )}
+                {app.idCardMasked && (
+                  <p>
+                    <span className="text-slate-400">身份证号：</span>
+                    <span className="font-mono">{app.idCardMasked}</span>
+                  </p>
+                )}
+              </div>
+            )}
+            {(app.idCardFrontUrl || app.idCardBackUrl) && (
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-slate-400">身份证照片</p>
+                <div className="flex flex-wrap gap-3">
+                  {app.idCardFrontUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewImage({ url: app.idCardFrontUrl!, label: '身份证正面' })}
+                      className="group text-left cursor-pointer"
+                    >
+                      <div className="w-44 aspect-[1.58/1] rounded-xl border border-slate-200 overflow-hidden bg-slate-50 shadow-2xs">
+                        <img
+                          src={app.idCardFrontUrl}
+                          alt="身份证正面"
+                          className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"
+                        />
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-500">正面（人像面）· 点击放大</div>
+                    </button>
+                  )}
+                  {app.idCardBackUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewImage({ url: app.idCardBackUrl!, label: '身份证反面' })}
+                      className="group text-left cursor-pointer"
+                    >
+                      <div className="w-44 aspect-[1.58/1] rounded-xl border border-slate-200 overflow-hidden bg-slate-50 shadow-2xs">
+                        <img
+                          src={app.idCardBackUrl}
+                          alt="身份证反面"
+                          className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"
+                        />
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-500">反面（国徽面）· 点击放大</div>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             {app.bio && <p className="text-xs text-slate-600">{app.bio}</p>}
             {app.supplementRequest && (
               <p className="text-[11px] text-amber-700 bg-amber-50 rounded-xl p-2">
@@ -964,6 +1024,33 @@ const ApplicationsPage = () => {
         ))}
         {data?.length === 0 && <p className="text-sm text-slate-400">当前筛选下没有申请。</p>}
       </div>
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 p-4 max-w-3xl w-full space-y-3 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-bold text-slate-900">{previewImage.label}</h3>
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <img
+              src={previewImage.url}
+              alt={previewImage.label}
+              className="w-full rounded-xl border border-slate-100 bg-slate-50"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

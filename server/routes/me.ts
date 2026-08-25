@@ -84,21 +84,31 @@ meRouter.get('/real-name-verification', async (req, res) => {
 
 const startRealNameSchema = z.object({
   realName: z.string().min(1),
-  idCardNumber: z.string().min(15)
+  idCardNumber: z.string().min(15),
+  idCardFrontUrl: z.string().min(1),
+  idCardBackUrl: z.string().min(1)
 });
 
 meRouter.post('/real-name-verification', async (req, res) => {
   const parsed = startRealNameSchema.safeParse(req.body);
-  if (!parsed.success) return fail(res, '请提供姓名与身份证号');
+  if (!parsed.success) return fail(res, '请提供姓名、身份证号及正反面照片');
 
   const existing = await getLatestVerifiedRealName(req.user!.id);
   if (existing) {
+    const updated = await prisma.realNameVerification.update({
+      where: { id: existing.id },
+      data: {
+        realName: parsed.data.realName.trim(),
+        idCardFrontUrl: parsed.data.idCardFrontUrl.trim(),
+        idCardBackUrl: parsed.data.idCardBackUrl.trim()
+      }
+    });
     return ok(res, {
-      id: existing.id,
-      status: existing.status,
-      realNameMasked: existing.realNameMasked,
-      idCardMasked: existing.idCardMasked,
-      verifiedAt: existing.verifiedAt
+      id: updated.id,
+      status: updated.status,
+      realNameMasked: updated.realNameMasked,
+      idCardMasked: updated.idCardMasked,
+      verifiedAt: updated.verifiedAt
     });
   }
 
@@ -122,8 +132,11 @@ meRouter.post('/real-name-verification', async (req, res) => {
     data: {
       status: result.status,
       providerRef: result.providerRef,
+      realName: parsed.data.realName.trim(),
       realNameMasked: result.realNameMasked,
       idCardMasked: result.idCardMasked,
+      idCardFrontUrl: parsed.data.idCardFrontUrl.trim(),
+      idCardBackUrl: parsed.data.idCardBackUrl.trim(),
       failReason: result.failReason || '',
       verifiedAt: result.status === 'verified' ? new Date() : null
     }
@@ -180,9 +193,9 @@ meRouter.get('/expert-applications/:id', async (req, res) => {
 const createAppSchema = z.object({
   type: z.enum(['onboarding']).default('onboarding'),
   applicantName: z.string().min(1),
-  expertTitle: z.string().min(1),
-  bio: z.string().min(1),
-  domainTags: z.array(z.string()).min(1),
+  expertTitle: z.string().optional().default(''),
+  bio: z.string().optional().default(''),
+  domainTags: z.array(z.string()).optional().default([]),
   location: z.string().optional(),
   serviceModes: z.array(z.string()).optional(),
   caseDescription: z.string().optional(),
@@ -202,6 +215,9 @@ meRouter.post('/expert-applications', async (req, res) => {
   const userId = req.user!.id;
   const realName = await getLatestVerifiedRealName(userId);
   if (!realName) return fail(res, '请先完成实名认证');
+  if (!realName.idCardFrontUrl || !realName.idCardBackUrl) {
+    return fail(res, '请上传身份证正反面照片');
+  }
 
   const open = await getOpenApplication(userId);
   if (open) return fail(res, '您已有进行中的申请，请勿重复提交');
@@ -214,9 +230,9 @@ meRouter.post('/expert-applications', async (req, res) => {
 
   const snapshot = {
     applicantName: data.applicantName,
-    expertTitle: data.expertTitle,
-    bio: data.bio,
-    domainTags: data.domainTags,
+    expertTitle: data.expertTitle || '',
+    bio: data.bio || '',
+    domainTags: data.domainTags || [],
     location: data.location || '',
     serviceModes: data.serviceModes || ['远程交付'],
     caseDescription: data.caseDescription || '',

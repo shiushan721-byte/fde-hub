@@ -241,8 +241,11 @@ export async function seedDatabase(force = false) {
         status: 'verified',
         provider: 'mock',
         providerRef: `seed_${expert.id}`,
+        realName: expert.name,
         realNameMasked: `${expert.name[0]}*`,
         idCardMasked: '440301********0000',
+        idCardFrontUrl: '/demo/id-card-front.svg',
+        idCardBackUrl: '/demo/id-card-back.svg',
         verifiedAt: new Date()
       }
     });
@@ -298,7 +301,21 @@ async function ensureDemoUserRealName() {
   const existing = await prisma.realNameVerification.findFirst({
     where: { userId: 'user-demo', status: 'verified' }
   });
-  if (existing) return;
+  if (existing) {
+    if (!existing.realName || !existing.idCardMasked.startsWith('320823') || !existing.idCardFrontUrl) {
+      await prisma.realNameVerification.update({
+        where: { id: existing.id },
+        data: {
+          realName: existing.realName || '周启航',
+          realNameMasked: existing.realNameMasked || '周*',
+          idCardMasked: '320823********1234',
+          idCardFrontUrl: existing.idCardFrontUrl || '/demo/id-card-front.svg',
+          idCardBackUrl: existing.idCardBackUrl || '/demo/id-card-back.svg'
+        }
+      });
+    }
+    return;
+  }
   await prisma.realNameVerification.create({
     data: {
       id: 'rn_user_demo',
@@ -306,8 +323,11 @@ async function ensureDemoUserRealName() {
       status: 'verified',
       provider: 'mock',
       providerRef: 'seed_demo',
-      realNameMasked: '演*',
-      idCardMasked: '110101********1234',
+      realName: '周启航',
+      realNameMasked: '周*',
+      idCardMasked: '320823********1234',
+      idCardFrontUrl: '/demo/id-card-front.svg',
+      idCardBackUrl: '/demo/id-card-back.svg',
       verifiedAt: new Date()
     }
   });
@@ -420,8 +440,11 @@ async function ensureDemoUserAndCertifications() {
           status: 'verified',
           provider: 'mock',
           providerRef: `seed_${expert.id}`,
+          realName: expert.name,
           realNameMasked: `${expert.name[0]}*`,
           idCardMasked: '440301********0000',
+          idCardFrontUrl: '/demo/id-card-front.svg',
+          idCardBackUrl: '/demo/id-card-back.svg',
           verifiedAt: new Date()
         }
       });

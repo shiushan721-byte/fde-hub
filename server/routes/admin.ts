@@ -643,7 +643,13 @@ function mapAdminApplication(
     updatedAt: Date;
     user?: { id: string; name: string; email: string; role: string } | null;
   },
-  expertMeta?: { expertNo?: string | null; name?: string | null } | null
+  expertMeta?: { expertNo?: string | null; name?: string | null } | null,
+  realNameMeta?: {
+    realName?: string | null;
+    idCardMasked?: string | null;
+    idCardFrontUrl?: string | null;
+    idCardBackUrl?: string | null;
+  } | null
 ) {
   const snapshot = parseJson<Record<string, unknown>>(item.submittedProfileSnapshot, {});
   return {
@@ -657,7 +663,11 @@ function mapAdminApplication(
     profile: snapshot,
     rejectReason: item.decisionReason,
     /** 仅审核通过并落库专家后才有 */
-    expertNo: expertMeta?.expertNo || null
+    expertNo: expertMeta?.expertNo || null,
+    realName: realNameMeta?.realName || '',
+    idCardMasked: realNameMeta?.idCardMasked || '',
+    idCardFrontUrl: realNameMeta?.idCardFrontUrl || '',
+    idCardBackUrl: realNameMeta?.idCardBackUrl || ''
   };
 }
 
@@ -678,11 +688,71 @@ adminRouter.get('/expert-applications', async (req, res) => {
       })
     : [];
   const expertById = new Map(experts.map((e) => [e.id, e]));
+
+  const rnIds = Array.from(
+    new Set(items.map((item) => item.realNameVerificationId).filter((id): id is string => Boolean(id)))
+  );
+  const userIdsNeedingRn = items
+    .filter((item) => !item.realNameVerificationId)
+    .map((item) => item.userId);
+  const [linkedRn, fallbackRn] = await Promise.all([
+    rnIds.length
+      ? prisma.realNameVerification.findMany({
+          where: { id: { in: rnIds } },
+          select: {
+            id: true,
+            userId: true,
+            realName: true,
+            idCardMasked: true,
+            realNameMasked: true,
+            idCardFrontUrl: true,
+            idCardBackUrl: true
+          }
+        })
+      : Promise.resolve([]),
+    userIdsNeedingRn.length
+      ? prisma.realNameVerification.findMany({
+          where: { userId: { in: userIdsNeedingRn }, status: 'verified' },
+          orderBy: { verifiedAt: 'desc' },
+          select: {
+            id: true,
+            userId: true,
+            realName: true,
+            idCardMasked: true,
+            realNameMasked: true,
+            idCardFrontUrl: true,
+            idCardBackUrl: true
+          }
+        })
+      : Promise.resolve([])
+  ]);
+  const rnById = new Map(linkedRn.map((r) => [r.id, r]));
+  const rnByUserId = new Map<string, (typeof fallbackRn)[number]>();
+  for (const r of fallbackRn) {
+    if (!rnByUserId.has(r.userId)) rnByUserId.set(r.userId, r);
+  }
+
   return ok(
     res,
-    items.map((item) =>
-      mapAdminApplication(item, item.expertId ? expertById.get(item.expertId) : null)
-    )
+    items.map((item) => {
+      const rn =
+        (item.realNameVerificationId ? rnById.get(item.realNameVerificationId) : null) ||
+        rnByUserId.get(item.userId) ||
+        null;
+      const realNameMeta = rn
+        ? {
+            realName: rn.realName || rn.realNameMasked || '',
+            idCardMasked: rn.idCardMasked || '',
+            idCardFrontUrl: rn.idCardFrontUrl || '',
+            idCardBackUrl: rn.idCardBackUrl || ''
+          }
+        : null;
+      return mapAdminApplication(
+        item,
+        item.expertId ? expertById.get(item.expertId) : null,
+        realNameMeta
+      );
+    })
   );
 });
 
@@ -716,12 +786,22 @@ adminRouter.get('/expert-applications/:id', async (req, res) => {
   ]);
 
   return ok(res, {
-    application: mapAdminApplication(item),
+    application: mapAdminApplication(item, null, realName
+      ? {
+          realName: realName.realName || realName.realNameMasked || '',
+          idCardMasked: realName.idCardMasked || '',
+          idCardFrontUrl: realName.idCardFrontUrl || '',
+          idCardBackUrl: realName.idCardBackUrl || ''
+        }
+      : null),
     realName: realName
       ? {
           status: realName.status,
+          realName: realName.realName || '',
           realNameMasked: realName.realNameMasked,
           idCardMasked: realName.idCardMasked,
+          idCardFrontUrl: realName.idCardFrontUrl,
+          idCardBackUrl: realName.idCardBackUrl,
           verifiedAt: realName.verifiedAt,
           provider: realName.provider
         }

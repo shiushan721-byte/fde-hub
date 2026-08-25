@@ -184,8 +184,13 @@ model RealNameVerification {
   status         String    @default("unverified")
   provider       String    @default("mock")
   providerRef    String    @default("")
+  /** 真实姓名（仅后台审核可见；前台仍用 realNameMasked） */
+  realName       String    @default("")
   realNameMasked String    @default("")
   idCardMasked   String    @default("")
+  /** 身份证正面 / 反面照片 URL（后台审核展示） */
+  idCardFrontUrl String    @default("")
+  idCardBackUrl  String    @default("")
   failReason     String    @default("")
   verifiedAt     DateTime?
   createdAt      DateTime  @default(now())
