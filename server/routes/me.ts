@@ -320,3 +320,44 @@ meRouter.post('/expert-applications/:id/withdraw', async (req, res) => {
 
   return ok(res, publicApplication(updated));
 });
+
+meRouter.get('/notifications', async (req, res) => {
+  const items = await prisma.userNotification.findMany({
+    where: { userId: req.user!.id },
+    orderBy: { createdAt: 'desc' },
+    take: 50
+  });
+  return ok(
+    res,
+    items.map((n) => ({
+      id: n.id,
+      type: n.type,
+      title: n.title,
+      body: n.body,
+      link: n.link,
+      payload: JSON.parse(n.payload || '{}'),
+      read: n.read,
+      createdAt: n.createdAt
+    }))
+  );
+});
+
+meRouter.post('/notifications/read-all', async (req, res) => {
+  const result = await prisma.userNotification.updateMany({
+    where: { userId: req.user!.id, read: false },
+    data: { read: true }
+  });
+  return ok(res, { updated: result.count });
+});
+
+meRouter.post('/notifications/:id/read', async (req, res) => {
+  const item = await prisma.userNotification.findFirst({
+    where: { id: req.params.id, userId: req.user!.id }
+  });
+  if (!item) return fail(res, '通知不存在', 404, 'NOT_FOUND');
+  const updated = await prisma.userNotification.update({
+    where: { id: item.id },
+    data: { read: true }
+  });
+  return ok(res, { id: updated.id, read: updated.read });
+});

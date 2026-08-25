@@ -35,6 +35,8 @@ export type CustomServiceOrder = {
   settlementStatus?: string;
   disputeStatus?: string;
   disputeReason?: string;
+  revisionQuota?: number;
+  revisionsUsed?: number;
   creator?: { name?: string };
   buyer?: { name?: string; email?: string };
   instance?: { id: string; title: string; currentVersion: string } | null;

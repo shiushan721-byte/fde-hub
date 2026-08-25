@@ -860,18 +860,38 @@ export async function approveDelivery(input: {
         id: newId('ntf'),
         userId: order.buyerUserId,
         type: 'delivery_ready',
-        title: '专属智能体已交付，请验收',
-        body: `${order.title} ${delivery.version} 已推送到您的工作台`,
+        title: '专属智能体审核已通过',
+        body: `${order.title} ${delivery.version} 已通过平台审核并推送到您的工作台，请验收。`,
         link: `/workspace?instanceId=${delivery.instanceId}`,
         payload: toJson({
           orderId: order.id,
           deliveryId: delivery.id,
           version: delivery.version,
+          agentTitle: order.title,
           changelog: delivery.changelog,
           acceptanceDeadlineAt: deadline.toISOString()
         })
       }
     });
+
+    if (order.creatorUserId) {
+      await tx.userNotification.create({
+        data: {
+          id: newId('ntf'),
+          userId: order.creatorUserId,
+          type: 'delivery_review_approved',
+          title: '交付智能体审核已通过',
+          body: `「${order.title}」${delivery.version} 已通过平台审核，并已推送给客户。`,
+          link: `/creator-center?tab=custom-services`,
+          payload: toJson({
+            orderId: order.id,
+            deliveryId: delivery.id,
+            version: delivery.version,
+            agentTitle: order.title
+          })
+        }
+      });
+    }
 
     await writeAudit({
       actorId: input.reviewerId,
@@ -930,13 +950,32 @@ export async function rejectDelivery(input: {
   if (order.creatorUserId) {
     await notify({
       userId: order.creatorUserId,
-      type: 'delivery_rejected',
-      title: '交付版本被驳回',
-      body: `${delivery.version}：${input.reason}`,
-      link: `/creator-center?tab=orders&orderId=${order.id}`,
-      payload: { orderId: order.id, deliveryId: delivery.id }
+      type: 'delivery_review_rejected',
+      title: '交付智能体审核未通过',
+      body: `「${order.title}」${delivery.version} 被驳回：${input.reason}`,
+      link: `/creator-center?tab=custom-services`,
+      payload: {
+        orderId: order.id,
+        deliveryId: delivery.id,
+        reason: input.reason,
+        agentTitle: order.title
+      }
     });
   }
+
+  await notify({
+    userId: order.buyerUserId,
+    type: 'delivery_review_rejected',
+    title: '专属智能体审核未通过',
+    body: `「${order.title}」${delivery.version} 未通过平台审核：${input.reason}`,
+    link: `/order-center`,
+    payload: {
+      orderId: order.id,
+      deliveryId: delivery.id,
+      reason: input.reason,
+      agentTitle: order.title
+    }
+  });
 
   await writeAudit({
     actorId: input.reviewerId,
@@ -1079,9 +1118,6 @@ export async function requestRevisionByBuyer(input: {
   if (order.buyerUserId !== input.buyerUserId) throw new Error('仅下单用户可申请修改');
   if (order.status !== 'pending_acceptance') throw new Error('当前状态不可申请修改');
   if (order.disputeStatus === 'open') throw new Error('争议处理中，请等待平台判定');
-  if (order.revisionsUsed >= order.revisionQuota) {
-    throw new Error('已达约定修改次数，请发起争议或联系运营');
-  }
 
   const remainingMs =
     order.acceptanceDeadlineAt && order.acceptanceDeadlineAt > new Date()
@@ -1123,9 +1159,17 @@ export async function requestRevisionByBuyer(input: {
       userId: order.creatorUserId,
       type: 'revision_requested',
       title: '客户申请修改交付',
-      body: input.feedback,
-      link: `/creator-center?tab=orders&orderId=${order.id}`,
-      payload: { orderId: order.id }
+      body:
+        (input.unmetItems?.length
+          ? `未达标：${input.unmetItems.join('、')}。`
+          : '') + input.feedback,
+      link: `/creator-center?tab=custom-services`,
+      payload: {
+        orderId: order.id,
+        agentTitle: order.title,
+        unmetItems: input.unmetItems || [],
+        reason: input.feedback
+      }
     });
   }
 

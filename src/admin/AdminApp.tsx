@@ -13,7 +13,8 @@ import {
   Check,
   Loader2,
   UserPlus,
-  X
+  X,
+  Download
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
@@ -41,7 +42,7 @@ const nav: { key: AdminPage; label: string; icon: React.ElementType; superOnly?:
   { key: 'agents', label: '智能体', icon: Bot },
   { key: 'experts', label: '专家', icon: Users },
   { key: 'applications', label: '专家申请', icon: UserPlus },
-  { key: 'deliveries', label: '交付审核', icon: Check },
+  { key: 'deliveries', label: '智能体审核', icon: Check },
   { key: 'disputes', label: '争议处理', icon: MessageSquare },
   { key: 'leads', label: '咨询线索', icon: MessageSquare },
   { key: 'users', label: '管理员', icon: Shield, superOnly: true },
@@ -179,7 +180,7 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         {page === 'agents' && <AgentsPage />}
         {page === 'experts' && <ExpertsPage />}
         {page === 'applications' && <ApplicationsPage />}
-        {page === 'deliveries' && <DeliveriesPage />}
+        {page === 'deliveries' && <AgentReviewPage />}
         {page === 'disputes' && <DisputesPage />}
         {page === 'leads' && <LeadsPage />}
         {page === 'users' && me.role === 'super_admin' && <UsersPage />}
@@ -960,6 +961,268 @@ const DisputesPage = () => {
   );
 };
 
+const AgentReviewPage = () => {
+  const [tab, setTab] = useState<'universal' | 'delivery'>('delivery');
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-black">智能体审核</h1>
+        <p className="text-xs text-slate-500 mt-1">
+          分为通用智能体上架审核，与定制交付智能体审核；可通过审核后才会对外可见或推送给客户
+        </p>
+      </div>
+      <div className="flex gap-1 bg-white p-1 rounded-xl border border-slate-200 w-fit">
+        <button
+          type="button"
+          onClick={() => setTab('universal')}
+          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+            tab === 'universal' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          通用智能体审核
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('delivery')}
+          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+            tab === 'delivery' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          交付智能体审核
+        </button>
+      </div>
+      {tab === 'universal' ? <UniversalAgentsReviewPanel /> : <DeliveriesPage />}
+    </div>
+  );
+};
+
+function downloadSkillPackage(fileName: string, payload: Record<string, unknown>) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName.endsWith('.zip') || fileName.endsWith('.json')
+    ? fileName.replace(/\.zip$/i, '.json')
+    : `${fileName || 'skill-package'}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+const UniversalAgentsReviewPanel = () => {
+  const [filter, setFilter] = useState('in_review');
+  const [publishTarget, setPublishTarget] = useState<{
+    id: string;
+    title: string;
+    category: string;
+  } | null>(null);
+  const [publishCategory, setPublishCategory] = useState('');
+  const [publishing, setPublishing] = useState(false);
+  const { data, error, loading, reload } = useAdminQuery<Array<{
+    id: string;
+    title: string;
+    desc: string;
+    category: string;
+    authorName: string | null;
+    authorId: string | null;
+    status: string;
+    solutionPayload?: string;
+  }>>(`/api/admin/agents?status=${filter}`, filter);
+  const { data: homeData } = useAdminQuery<{
+    categories: Array<{ id: string; name: string; visible: boolean; sortOrder: number }>;
+  }>('/api/admin/home');
+
+  const industryOptions = Array.from(
+    new Set([
+      ...(homeData?.categories || [])
+        .map((c) => c.name)
+        .filter((name) => name && name !== '全部'),
+      '内容营销',
+      '创作工具',
+      '办公协同',
+      '图片视频',
+      '电商零售',
+      '智能制造',
+      '金融投研'
+    ])
+  );
+
+  const confirmPublish = async () => {
+    if (!publishTarget) return;
+    if (!publishCategory.trim()) {
+      alert('请选择行业分类');
+      return;
+    }
+    setPublishing(true);
+    try {
+      await api(`/api/admin/agents/${publishTarget.id}/publish`, {
+        method: 'POST',
+        body: JSON.stringify({ category: publishCategory.trim() })
+      });
+      setPublishTarget(null);
+      reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '发布失败');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-slate-500">审核创作者提交上架的通用智能体</p>
+        <select
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+        >
+          <option value="in_review">待审核</option>
+          <option value="published">已通过</option>
+          <option value="offline">已下架/驳回</option>
+          <option value="">全部</option>
+        </select>
+      </div>
+      {loading && <p className="text-sm text-slate-500">加载中…</p>}
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+      {(data || []).map((agent) => {
+        let skillMeta: Record<string, unknown> = {};
+        try {
+          skillMeta = agent.solutionPayload ? JSON.parse(agent.solutionPayload) : {};
+        } catch {
+          skillMeta = {};
+        }
+        const skillFile =
+          typeof skillMeta.skillFileName === 'string'
+            ? skillMeta.skillFileName
+            : `${agent.title || 'agent'}-skill.json`;
+        return (
+          <div key={agent.id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-bold">{agent.title}</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  作者 {agent.authorName || '—'} · {agent.category || '未分类'}
+                </div>
+              </div>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                {statusLabel[agent.status] || agent.status}
+              </span>
+            </div>
+            <p className="text-xs text-slate-600 whitespace-pre-wrap">
+              {agent.desc || '暂无智能体介绍'}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+                onClick={() =>
+                  downloadSkillPackage(skillFile, {
+                    agentId: agent.id,
+                    title: agent.title,
+                    desc: agent.desc,
+                    ...skillMeta
+                  })
+                }
+              >
+                <Download size={12} />
+                下载 Skill 包
+              </button>
+              {agent.status === 'in_review' && (
+                <>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer"
+                    onClick={() => {
+                      setPublishTarget({
+                        id: agent.id,
+                        title: agent.title,
+                        category: agent.category
+                      });
+                      setPublishCategory(
+                        agent.category && industryOptions.includes(agent.category)
+                          ? agent.category
+                          : industryOptions[0] || ''
+                      );
+                    }}
+                  >
+                    审核通过
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold cursor-pointer"
+                    onClick={async () => {
+                      const reason = window.prompt('请填写驳回理由（将通过消息提醒通知创作者）');
+                      if (!reason?.trim()) return;
+                      await api(`/api/admin/agents/${agent.id}/reject`, {
+                        method: 'POST',
+                        body: JSON.stringify({ reason: reason.trim() })
+                      });
+                      reload();
+                    }}
+                  >
+                    驳回
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {data?.length === 0 && <p className="text-sm text-slate-400">当前筛选下没有通用智能体。</p>}
+
+      {publishTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => !publishing && setPublishTarget(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h2 className="text-sm font-black text-slate-900">审核通过并发布</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                「{publishTarget.title}」通过前须选择行业分类。
+              </p>
+            </div>
+            <select
+              value={publishCategory}
+              onChange={(e) => setPublishCategory(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+            >
+              {industryOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={publishing}
+                onClick={() => setPublishTarget(null)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={publishing}
+                onClick={confirmPublish}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer"
+              >
+                {publishing ? '提交中…' : '确认通过'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const DeliveriesPage = () => {
   const [filter, setFilter] = useState('pending_ops_review');
   const { data, error, loading, reload } = useAdminQuery<Array<{
@@ -970,7 +1233,14 @@ const DeliveriesPage = () => {
     hermesPassed: boolean;
     hermesReport: { issues?: string[]; score?: number };
     completedItems: string[];
+    skillPayload: {
+      skillFileName?: string;
+      agentTitle?: string;
+      agentDesc?: string;
+      [key: string]: unknown;
+    };
     submittedAt?: string;
+    rejectReason?: string;
     order: {
       id: string;
       orderNo: string;
@@ -985,14 +1255,11 @@ const DeliveriesPage = () => {
   }>>(`/api/admin/delivery-versions?status=${filter}`, filter);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-black">交付版本审核</h1>
-          <p className="text-xs text-slate-500 mt-1">
-            审核的是客户专属实例的具体交付版本；通过后才会推送给下单用户
-          </p>
-        </div>
+        <p className="text-xs text-slate-500">
+          审核客户专属实例的交付版本；通过后才会推送给下单用户
+        </p>
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -1008,12 +1275,17 @@ const DeliveriesPage = () => {
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
       <div className="space-y-3">
-        {(data || []).map((item) => (
+        {(data || []).map((item) => {
+          const agentDesc =
+            (typeof item.skillPayload?.agentDesc === 'string' && item.skillPayload.agentDesc.trim()) ||
+            '暂无智能体介绍';
+          const skillFile = item.skillPayload?.skillFileName || `${item.version || 'skill'}.zip`;
+          return (
           <div key={item.id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-bold">
-                  {item.instance.title}
+                  {item.skillPayload?.agentTitle || item.instance.title}
                   <span className="ml-2 text-xs font-mono text-slate-500">{item.version}</span>
                 </div>
                 <div className="text-xs text-slate-500 mt-0.5">
@@ -1027,51 +1299,64 @@ const DeliveriesPage = () => {
                 {statusLabel[item.status] || item.status}
               </span>
             </div>
-            <p className="text-xs text-slate-600 whitespace-pre-wrap">{item.changelog}</p>
-            <div className="text-[11px] text-slate-500 bg-slate-50 rounded-xl p-2">
-              Hermes {item.hermesPassed ? '通过' : '未通过'}
-              {item.hermesReport?.score != null ? ` · 评分 ${item.hermesReport.score}` : ''}
-              {(item.hermesReport?.issues || []).length > 0
-                ? ` · ${item.hermesReport.issues!.join('；')}`
-                : ''}
-            </div>
-            {item.status === 'pending_ops_review' && (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer"
-                  onClick={async () => {
-                    await api(`/api/admin/delivery-versions/${item.id}/approve`, {
-                      method: 'POST',
-                      body: '{}'
-                    });
-                    reload();
-                  }}
-                >
-                  审核通过并推送客户
-                </button>
-                <button
-                  type="button"
-                  className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold cursor-pointer"
-                  onClick={async () => {
-                    const reason = window.prompt('请填写驳回原因');
-                    if (!reason) return;
-                    await api(`/api/admin/delivery-versions/${item.id}/reject`, {
-                      method: 'POST',
-                      body: JSON.stringify({ reason })
-                    });
-                    reload();
-                  }}
-                >
-                  驳回
-                </button>
-              </div>
+            <p className="text-xs text-slate-600 whitespace-pre-wrap">{agentDesc}</p>
+            {item.rejectReason && (
+              <p className="text-xs text-rose-600">驳回理由：{item.rejectReason}</p>
             )}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+                onClick={() =>
+                  downloadSkillPackage(skillFile, {
+                    deliveryId: item.id,
+                    version: item.version,
+                    ...(item.skillPayload || {})
+                  })
+                }
+              >
+                <Download size={12} />
+                下载 Skill 包
+              </button>
+              {item.status === 'pending_ops_review' && (
+                <>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer"
+                    onClick={async () => {
+                      await api(`/api/admin/delivery-versions/${item.id}/approve`, {
+                        method: 'POST',
+                        body: '{}'
+                      });
+                      reload();
+                    }}
+                  >
+                    审核通过并推送客户
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold cursor-pointer"
+                    onClick={async () => {
+                      const reason = window.prompt('请填写驳回理由（将通过消息提醒通知创作者）');
+                      if (!reason?.trim()) return;
+                      await api(`/api/admin/delivery-versions/${item.id}/reject`, {
+                        method: 'POST',
+                        body: JSON.stringify({ reason: reason.trim() })
+                      });
+                      reload();
+                    }}
+                  >
+                    驳回
+                  </button>
+                </>
+              )}
+            </div>
             {item.submittedAt && (
               <div className="text-[10px] text-slate-400">{new Date(item.submittedAt).toLocaleString()}</div>
             )}
           </div>
-        ))}
+          );
+        })}
         {data?.length === 0 && <p className="text-sm text-slate-400">当前筛选下没有交付版本。</p>}
       </div>
     </div>

@@ -6,24 +6,26 @@ import {
   RefreshCw,
   RotateCcw,
   ClipboardList,
-  ChevronDown,
-  ChevronUp,
   X
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
 import {
   buyerStatusText,
-  CUSTOM_SERVICE_FILTERS,
+  BUYER_CUSTOM_SERVICE_FILTERS,
   CustomServiceFilterKey,
   formatOrderTime,
   matchesCustomServiceFilter,
   statusBadgeClass,
   yuan
 } from '../lib/customOrderLabels';
-import { DeliveryProposalReviewPanel } from './DeliveryProposalReviewPanel';
+import {
+  DeliveryProposalModal,
+  DeliveryProposalReviewPanel,
+  hasViewableProposal
+} from './DeliveryProposalReviewPanel';
 import { DeliveryProposal } from '../types/deliveryProposal';
-import { CustomServiceDeal } from '../types/customService';
+import { CustomServiceDeal, CustomServiceOrder } from '../types/customService';
 
 /** 买家视角：我的定制（咨询 → 方案 → 支付 → 交付 → 验收） */
 export const OrderCenterView: React.FC = () => {
@@ -32,8 +34,11 @@ export const OrderCenterView: React.FC = () => {
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
   const [filter, setFilter] = useState<CustomServiceFilterKey>('all');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailDeal, setDetailDeal] = useState<CustomServiceDeal | null>(null);
+  const [proposalDeal, setProposalDeal] = useState<CustomServiceDeal | null>(null);
+  const [revisionDeal, setRevisionDeal] = useState<CustomServiceDeal | null>(null);
+  const [revisionFeedback, setRevisionFeedback] = useState('');
+  const [revisionSubmitting, setRevisionSubmitting] = useState(false);
 
   const reload = async () => {
     setLoading(true);
@@ -135,19 +140,33 @@ export const OrderCenterView: React.FC = () => {
     }
   };
 
-  const revise = async (orderId: string) => {
-    const feedback = window.prompt('请说明需要修改的内容（需对应需求清单中的具体项）');
-    if (!feedback) return;
-    setBusyId(orderId);
+  const openRevisionModal = (deal: CustomServiceDeal) => {
+    setRevisionDeal(deal);
+    setRevisionFeedback('');
+  };
+
+  const submitRevision = async () => {
+    const order = revisionDeal?.order;
+    if (!order) return;
+    const feedback = revisionFeedback.trim();
+    if (!feedback) {
+      alert('请填写需要修改的内容');
+      return;
+    }
+    setRevisionSubmitting(true);
+    setBusyId(order.id);
     try {
-      await api(`/api/custom-orders/${orderId}/request-revision`, {
+      await api(`/api/custom-orders/${order.id}/request-revision`, {
         method: 'POST',
         body: JSON.stringify({ feedback })
       });
+      setRevisionDeal(null);
+      alert('已申请修改，创作者将按你的说明重新交付。');
       await reload();
     } catch (err) {
       alert(err instanceof Error ? err.message : '申请失败');
     } finally {
+      setRevisionSubmitting(false);
       setBusyId('');
     }
   };
@@ -171,10 +190,6 @@ export const OrderCenterView: React.FC = () => {
     }
   };
 
-  const toggleExpand = (id: string) => {
-    setExpandedId((prev) => (prev === id ? null : id));
-  };
-
   return (
     <div id="order-center-view" className="space-y-6 pb-16">
       <div className="border-b border-slate-200 pb-5 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
@@ -184,7 +199,7 @@ export const OrderCenterView: React.FC = () => {
             我的定制
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            咨询 → 确认方案 → 支付 → 开发 → 审核 → 验收，同一条流程跟进
+            咨询 → 确认方案 → 支付 → 提交交付 → 审核 → 验收，同一条流程跟进
           </p>
         </div>
         <button
@@ -199,7 +214,7 @@ export const OrderCenterView: React.FC = () => {
       </div>
 
       <div className="flex flex-wrap gap-1.5 bg-white p-1 rounded-xl border border-slate-200 w-fit">
-        {CUSTOM_SERVICE_FILTERS.map((f) => (
+        {BUYER_CUSTOM_SERVICE_FILTERS.map((f) => (
           <button
             key={f.key}
             type="button"
@@ -234,10 +249,9 @@ export const OrderCenterView: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] text-left text-xs">
+            <table className="w-full min-w-[840px] text-left text-xs">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
-                  <th className="px-4 py-3 font-bold w-8" />
                   <th className="px-4 py-3 font-bold">时间</th>
                   <th className="px-4 py-3 font-bold">编号</th>
                   <th className="px-4 py-3 font-bold">基础智能体</th>
@@ -251,89 +265,79 @@ export const OrderCenterView: React.FC = () => {
               <tbody className="divide-y divide-slate-100">
                 {filtered.map((deal) => {
                   const o = deal.order;
-                  const expanded = expandedId === deal.dealId;
                   const status = o?.status || '';
-                  const hasProposal =
-                    status === 'awaiting_proposal_confirm' &&
-                    o?.deliveryProposal &&
-                    (o.deliveryProposal as DeliveryProposal).customizationItems?.length;
+                  const isConsulting =
+                    deal.stageKey === 'consulting' ||
+                    ['consulting', 'pending_quote'].includes(status);
+                  const canViewProposal =
+                    !isConsulting && hasViewableProposal(o?.deliveryProposal as DeliveryProposal);
+                  const needsConfirm = status === 'awaiting_proposal_confirm' && canViewProposal;
                   return (
-                    <React.Fragment key={deal.dealId}>
-                      <tr className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-2 py-3.5">
-                          {(hasProposal || status === 'awaiting_proposal_confirm') && (
-                            <button
-                              type="button"
-                              onClick={() => toggleExpand(deal.dealId)}
-                              className="p-1 rounded-lg hover:bg-slate-100 cursor-pointer text-slate-500"
-                            >
-                              {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                            </button>
-                          )}
-                        </td>
-                        <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">
-                          {formatOrderTime(o?.createdAt)}
-                        </td>
-                        <td className="px-4 py-3.5 font-mono text-[11px] text-slate-500 whitespace-nowrap">
-                          {o?.orderNo || '咨询未成单'}
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <div className="font-bold text-slate-900">{deal.agentTitle || o?.baseAgentTitle || '—'}</div>
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            {o?.baseAgentVersion
-                              ? `锁定 ${o.baseAgentVersion}`
-                              : deal.standardVersionAtRequest
-                                ? `咨询时 ${deal.standardVersionAtRequest}`
-                                : '未锁定版本'}
+                    <tr key={deal.dealId} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">
+                        {formatOrderTime(o?.createdAt || deal.consultedAt)}
+                      </td>
+                      <td className="px-4 py-3.5 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                        {o?.orderNo || '咨询未成单'}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="font-bold text-slate-900">{deal.agentTitle || o?.baseAgentTitle || '—'}</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          {o?.baseAgentVersion
+                            ? `锁定 ${o.baseAgentVersion}`
+                            : deal.standardVersionAtRequest
+                              ? `咨询时 ${deal.standardVersionAtRequest}`
+                              : '未锁定版本'}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 max-w-[180px]">
+                        <button
+                          type="button"
+                          onClick={() => setDetailDeal(deal)}
+                          className="text-left w-full cursor-pointer group"
+                        >
+                          <div className="font-medium text-slate-800 truncate group-hover:text-blue-700">
+                            {deal.requirement || o?.title || '—'}
                           </div>
-                        </td>
-                        <td className="px-4 py-3.5 max-w-[180px]">
-                          <button
-                            type="button"
-                            onClick={() => setDetailDeal(deal)}
-                            className="text-left w-full cursor-pointer group"
-                          >
-                            <div className="font-medium text-slate-800 truncate group-hover:text-blue-700">
-                              {deal.requirement || o?.title || '—'}
-                            </div>
-                            {o?.creator?.name && (
-                              <div className="text-[11px] text-slate-500 mt-0.5">专家 · {o.creator.name}</div>
-                            )}
-                            <span className="text-[10px] text-blue-600 font-bold mt-0.5 inline-block">
-                              查看详情
-                            </span>
-                          </button>
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span className="text-slate-700 font-semibold">{deal.stageLabel}</span>
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span
-                            className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ring-1 ring-inset ${statusBadgeClass(
-                              status || 'consulting'
-                            )}`}
-                          >
-                            {status ? buyerStatusText[status] || status : '咨询沟通中'}
+                          {o?.creator?.name && (
+                            <div className="text-[11px] text-slate-500 mt-0.5">专家 · {o.creator.name}</div>
+                          )}
+                          <span className="text-[10px] text-blue-600 font-bold mt-0.5 inline-block">
+                            查看详情
                           </span>
-                        </td>
-                        <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                          <span className="font-bold text-slate-900 tabular-nums">{yuan(o?.priceCents)}</span>
-                          {(o?.priceCents || 0) > 0 && o?.deliveryDays ? (
-                            <div className="text-[10px] text-slate-500 mt-0.5">{o.deliveryDays} 天交付</div>
-                          ) : null}
-                        </td>
-                        <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                        </button>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className="text-slate-700 font-semibold">{deal.stageLabel}</span>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span
+                          className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ring-1 ring-inset ${statusBadgeClass(
+                            status || 'consulting'
+                          )}`}
+                        >
+                          {status ? buyerStatusText[status] || status : '咨询沟通中'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                        <span className="font-bold text-slate-900 tabular-nums">{yuan(o?.priceCents)}</span>
+                        {(o?.priceCents || 0) > 0 && o?.deliveryDays ? (
+                          <div className="text-[10px] text-slate-500 mt-0.5">{o.deliveryDays} 天交付</div>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                        <div className="inline-flex flex-col items-end gap-1.5">
                           {!o && <span className="text-[11px] text-slate-400">等待专家回复</span>}
-                          {o && ['consulting', 'pending_quote'].includes(status) && (
+                          {o && isConsulting && (
                             <span className="text-[11px] text-slate-400">等待交付方案</span>
                           )}
-                          {status === 'awaiting_proposal_confirm' && !expanded && (
+                          {canViewProposal && (
                             <button
                               type="button"
-                              onClick={() => toggleExpand(deal.dealId)}
+                              onClick={() => setProposalDeal(deal)}
                               className="text-[11px] text-violet-600 font-bold cursor-pointer"
                             >
-                              查看方案
+                              {needsConfirm ? '确认方案' : '查看方案'}
                             </button>
                           )}
                           {status === 'pending_acceptance' && o && (
@@ -351,7 +355,7 @@ export const OrderCenterView: React.FC = () => {
                                 <button
                                   type="button"
                                   disabled={busyId === o.id}
-                                  onClick={() => revise(o.id)}
+                                  onClick={() => openRevisionModal(deal)}
                                   className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 text-slate-700 font-bold cursor-pointer disabled:opacity-60"
                                 >
                                   <RotateCcw size={11} />
@@ -411,60 +415,9 @@ export const OrderCenterView: React.FC = () => {
                           {status === 'closed' && (
                             <span className="text-[11px] text-slate-400">已关闭</span>
                           )}
-                          {o &&
-                            ![
-                              'consulting',
-                              'pending_quote',
-                              'awaiting_proposal_confirm',
-                              'awaiting_payment',
-                              'pending_acceptance',
-                              'pending_settlement',
-                              'dispute',
-                              'closed'
-                            ].includes(status) && (
-                              <span className="text-[11px] text-slate-400">—</span>
-                            )}
-                        </td>
-                      </tr>
-                      {expanded && hasProposal && o && (
-                        <tr>
-                          <td colSpan={9} className="px-4 py-4 bg-slate-50/50">
-                            <DeliveryProposalReviewPanel
-                              proposal={o.deliveryProposal as DeliveryProposal}
-                              proposalVersion={o.proposalVersion}
-                              proposalSubmittedAt={o.proposalSubmittedAt}
-                              onConfirm={async () => {
-                                setBusyId(o.id);
-                                try {
-                                  await confirmProposal(o.id);
-                                } finally {
-                                  setBusyId('');
-                                  setExpandedId(null);
-                                }
-                              }}
-                              onReject={async (reason) => {
-                                setBusyId(o.id);
-                                try {
-                                  await rejectProposal(o.id, reason);
-                                } finally {
-                                  setBusyId('');
-                                  setExpandedId(null);
-                                }
-                              }}
-                              onRequestRevision={async (feedback) => {
-                                setBusyId(o.id);
-                                try {
-                                  await requestProposalRevision(o.id, feedback);
-                                } finally {
-                                  setBusyId('');
-                                  setExpandedId(null);
-                                }
-                              }}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
+                        </div>
+                      </td>
+                    </tr>
                   );
                 })}
               </tbody>
@@ -476,7 +429,7 @@ export const OrderCenterView: React.FC = () => {
       {!loading && filtered.length > 0 && (
         <p className="text-[11px] text-slate-400 text-right">
           共 {filtered.length} 条
-          {filter !== 'all' ? `（筛选：${CUSTOM_SERVICE_FILTERS.find((f) => f.key === filter)?.label}）` : ''}
+          {filter !== 'all' ? `（筛选：${BUYER_CUSTOM_SERVICE_FILTERS.find((f) => f.key === filter)?.label}）` : ''}
         </p>
       )}
 
@@ -553,6 +506,162 @@ export const OrderCenterView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {proposalDeal?.order && hasViewableProposal(proposalDeal.order.deliveryProposal) && (
+        <DeliveryProposalModal
+          isOpen
+          onClose={() => setProposalDeal(null)}
+          title={`定制交付方案 · ${proposalDeal.order.orderNo}`}
+        >
+          <DeliveryProposalReviewPanel
+            proposal={proposalDeal.order.deliveryProposal as DeliveryProposal}
+            proposalVersion={proposalDeal.order.proposalVersion}
+            proposalSubmittedAt={proposalDeal.order.proposalSubmittedAt}
+            readOnly={proposalDeal.order.status !== 'awaiting_proposal_confirm'}
+            statusHint={
+              proposalDeal.order.status === 'awaiting_proposal_confirm'
+                ? '待确认'
+                : proposalDeal.stageLabel
+            }
+            onConfirm={
+              proposalDeal.order.status === 'awaiting_proposal_confirm'
+                ? async () => {
+                    const id = proposalDeal.order!.id;
+                    setBusyId(id);
+                    try {
+                      await confirmProposal(id);
+                      setProposalDeal(null);
+                    } finally {
+                      setBusyId('');
+                    }
+                  }
+                : undefined
+            }
+            onReject={
+              proposalDeal.order.status === 'awaiting_proposal_confirm'
+                ? async (reason) => {
+                    const id = proposalDeal.order!.id;
+                    setBusyId(id);
+                    try {
+                      await rejectProposal(id, reason);
+                      setProposalDeal(null);
+                    } finally {
+                      setBusyId('');
+                    }
+                  }
+                : undefined
+            }
+            onRequestRevision={
+              proposalDeal.order.status === 'awaiting_proposal_confirm'
+                ? async (feedback) => {
+                    const id = proposalDeal.order!.id;
+                    setBusyId(id);
+                    try {
+                      await requestProposalRevision(id, feedback);
+                      setProposalDeal(null);
+                    } finally {
+                      setBusyId('');
+                    }
+                  }
+                : undefined
+            }
+          />
+        </DeliveryProposalModal>
+      )}
+
+      {revisionDeal?.order && (
+        <RevisionRequestModal
+          order={revisionDeal.order}
+          feedback={revisionFeedback}
+          submitting={revisionSubmitting}
+          onFeedbackChange={setRevisionFeedback}
+          onClose={() => setRevisionDeal(null)}
+          onSubmit={submitRevision}
+        />
+      )}
     </div>
   );
 };
+
+function RevisionRequestModal({
+  order,
+  feedback,
+  submitting,
+  onFeedbackChange,
+  onClose,
+  onSubmit
+}: {
+  order: CustomServiceOrder;
+  feedback: string;
+  submitting: boolean;
+  onFeedbackChange: (v: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full max-w-lg rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-labelledby="revision-request-title"
+      >
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <h3 id="revision-request-title" className="text-sm font-bold text-slate-900">
+              申请修改交付
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">{order.orderNo}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+            aria-label="关闭"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4 text-xs">
+          <div>
+            <div className="font-bold text-slate-800 mb-1.5">修改说明（必填）</div>
+            <textarea
+              rows={4}
+              value={feedback}
+              onChange={(e) => onFeedbackChange(e.target.value)}
+              placeholder="请说明期望如何修改"
+              className="w-full p-3 border border-slate-200 rounded-xl text-xs resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+            />
+          </div>
+
+          <p className="text-[10px] text-slate-500 leading-relaxed">
+            提交后订单将回到创作者修改；验收倒计时暂停。创作者重新提交并通过审核后，你会再次进入待验收。
+          </p>
+        </div>
+
+        <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={onSubmit}
+            className="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60 inline-flex items-center gap-1.5"
+          >
+            {submitting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+            {submitting ? '提交中…' : '确认申请修改'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sidebar, MainNavRoute } from './components/Sidebar';
 import { TopHeader } from './components/TopHeader';
 import { HellomeHomeView } from './components/HellomeHomeView';
@@ -23,6 +23,7 @@ import { DemoModeBar } from './components/DemoModeBar';
 import { AdminApp } from './admin/AdminApp';
 import { useCatalog } from './lib/catalog';
 import { api } from './lib/api';
+import { ensureMarketplaceSession } from './lib/marketplaceAuth';
 
 import {
   mockServicePackages,
@@ -54,6 +55,7 @@ export default function App() {
   // 咨询提交后写入创作者中心「定制服务」，进度通过消息提醒通知用户
   const [sessionConsultationLeads, setSessionConsultationLeads] = useState<CustomerLeadItem[]>([]);
   const [isMessagesDrawerOpen, setIsMessagesDrawerOpen] = useState(false);
+  const [apiUnreadCount, setApiUnreadCount] = useState(0);
   const [saveToastVisible, setSaveToastVisible] = useState(false);
   const [saveToastMessage, setSaveToastMessage] = useState('操作已完成');
 
@@ -86,6 +88,20 @@ export default function App() {
   const [isCreatorOnboardingOpen, setIsCreatorOnboardingOpen] = useState(false);
   const [isCreatorDebugOpen, setIsCreatorDebugOpen] = useState(false);
   const [userRole, setUserRole] = useState<UserIdentityRole>('expert');
+
+  const refreshUnreadCount = async () => {
+    try {
+      await ensureMarketplaceSession();
+      const items = await api<Array<{ read: boolean }>>('/api/me/notifications');
+      setApiUnreadCount(items.filter((n) => !n.read).length);
+    } catch {
+      setApiUnreadCount(0);
+    }
+  };
+
+  useEffect(() => {
+    void refreshUnreadCount();
+  }, [userRole, isMessagesDrawerOpen]);
 
   const handleSwitchUserRole = (role: UserIdentityRole) => {
     setUserRole(role === 'normal' ? 'normal' : 'expert');
@@ -320,7 +336,9 @@ export default function App() {
           onBackToHome={handleBackToHome}
           onOpenRechargeModal={() => setIsRechargeOpen(true)}
           unreadCount={
-            mockUserNotifications.filter((n) => n.unread).length + sessionConsultationLeads.length
+            apiUnreadCount +
+            mockUserNotifications.filter((n) => n.unread).length +
+            sessionConsultationLeads.length
           }
           favoriteAgentCount={favoriteAgentIds.length}
           favoriteExpertCount={favoriteExpertIds.length}
@@ -540,7 +558,10 @@ export default function App() {
 
       <ConsultationMessagesDrawer
         isOpen={isMessagesDrawerOpen}
-        onClose={() => setIsMessagesDrawerOpen(false)}
+        onClose={() => {
+          setIsMessagesDrawerOpen(false);
+          void refreshUnreadCount();
+        }}
         leads={sessionConsultationLeads}
       />
       <CreatorOnboardingModal

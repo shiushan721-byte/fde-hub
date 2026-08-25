@@ -19,11 +19,11 @@ export const buyerStatusText: Record<string, string> = {
   pending_quote: '咨询中',
   awaiting_proposal_confirm: '待确认方案',
   awaiting_payment: '待支付',
-  paid_pending_start: '已付款 · 待开工',
-  escrowed: '已付款 · 待开工',
-  in_development: '开发中',
-  in_review: '平台审核中',
-  revision: '修改处理中',
+  paid_pending_start: '待提交交付',
+  escrowed: '待提交交付',
+  in_development: '待提交交付',
+  in_review: '待提交交付',
+  revision: '需修改',
   pending_acceptance: '待验收',
   dispute: '争议处理中',
   pending_settlement: '待结算',
@@ -32,19 +32,19 @@ export const buyerStatusText: Record<string, string> = {
 };
 
 export const creatorStatusText: Record<string, string> = {
-  consulting: '咨询沟通中',
-  pending_quote: '咨询沟通中',
-  awaiting_proposal_confirm: '待用户确认方案',
-  awaiting_payment: '待用户付款',
-  paid_pending_start: '已托管 · 待开工',
-  escrowed: '已托管 · 待开工',
-  in_development: '开发中',
+  consulting: '咨询中',
+  pending_quote: '咨询中',
+  awaiting_proposal_confirm: '待确认方案',
+  awaiting_payment: '待支付',
+  paid_pending_start: '待提交交付',
+  escrowed: '待提交交付',
+  in_development: '待提交交付',
   in_review: '平台审核中',
-  revision: '需修改 / 审核驳回',
-  pending_acceptance: '待客户验收',
+  revision: '需修改',
+  pending_acceptance: '待验收',
   dispute: '争议处理中',
   pending_settlement: '待结算',
-  completed: '已结算',
+  completed: '已完成',
   closed: '已关闭'
 };
 
@@ -137,12 +137,16 @@ export const CUSTOM_SERVICE_FILTERS: { key: CustomServiceFilterKey; label: strin
   { key: 'consulting', label: '咨询中' },
   { key: 'awaiting_proposal_confirm', label: '待确认方案' },
   { key: 'awaiting_payment', label: '待支付' },
-  { key: 'in_delivery', label: '交付中' },
+  { key: 'in_delivery', label: '待提交交付' },
   { key: 'in_review', label: '平台审核中' },
   { key: 'pending_acceptance', label: '待验收' },
   { key: 'completed', label: '已完成' },
   { key: 'closed', label: '已关闭/争议中' }
 ];
+
+/** 买家侧：不展示「平台审核中」，该阶段并入「待提交交付」 */
+export const BUYER_CUSTOM_SERVICE_FILTERS: { key: CustomServiceFilterKey; label: string }[] =
+  CUSTOM_SERVICE_FILTERS.filter((f) => f.key !== 'in_review');
 
 export function matchesCustomServiceFilter(
   stageKey: string,

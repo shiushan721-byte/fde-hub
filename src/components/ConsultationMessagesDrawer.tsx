@@ -1,6 +1,8 @@
-import React, { useMemo, useState } from 'react';
-import { X, Bell, Bot, CheckCircle2, MessageCircle, Sparkles } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { X, Bell, Bot, CheckCircle2, MessageCircle, Sparkles, ShieldAlert } from 'lucide-react';
 import { CustomerLeadItem } from '../types/creator';
+import { api } from '../lib/api';
+import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
 
 export interface UserNotificationItem {
   id: string;
@@ -9,7 +11,7 @@ export interface UserNotificationItem {
   time: string;
   agentTitle?: string;
   unread?: boolean;
-  kind: 'submitted' | 'creator_reply' | 'status';
+  kind: 'submitted' | 'creator_reply' | 'status' | 'ops_review';
 }
 
 export const mockUserNotifications: UserNotificationItem[] = [
@@ -50,9 +52,39 @@ interface ConsultationMessagesDrawerProps {
 
 const kindIcon = (kind: UserNotificationItem['kind']) => {
   if (kind === 'creator_reply') return <MessageCircle size={14} className="text-blue-600" />;
+  if (kind === 'ops_review') return <ShieldAlert size={14} className="text-violet-600" />;
   if (kind === 'status') return <Sparkles size={14} className="text-amber-600" />;
   return <CheckCircle2 size={14} className="text-emerald-600" />;
 };
+
+function formatRelativeTime(iso: string) {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const diff = Date.now() - t;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return '刚刚';
+  if (mins < 60) return `${mins} 分钟前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} 天前`;
+  return new Date(iso).toLocaleString('zh-CN');
+}
+
+function mapApiTypeToKind(type: string): UserNotificationItem['kind'] {
+  if (
+    type.includes('review') ||
+    type.includes('delivery_ready') ||
+    type.includes('agent_review') ||
+    type.includes('rejected') ||
+    type.includes('approved')
+  ) {
+    return 'ops_review';
+  }
+  if (type.includes('reply')) return 'creator_reply';
+  if (type.includes('status') || type.includes('accepted')) return 'status';
+  return 'submitted';
+}
 
 export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProps> = ({
   isOpen,
@@ -60,6 +92,50 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
   leads
 }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [apiNotifications, setApiNotifications] = useState<UserNotificationItem[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureMarketplaceSession();
+        const items = await api<
+          Array<{
+            id: string;
+            type: string;
+            title: string;
+            body: string;
+            read: boolean;
+            createdAt: string;
+            payload?: { agentTitle?: string; reason?: string };
+          }>
+        >('/api/me/notifications');
+        if (cancelled) return;
+        setApiNotifications(
+          items.map((n) => ({
+            id: n.id,
+            kind: mapApiTypeToKind(n.type),
+            title: n.title,
+            body: n.body,
+            time: formatRelativeTime(n.createdAt),
+            agentTitle:
+              typeof n.payload?.agentTitle === 'string' ? n.payload.agentTitle : undefined,
+            unread: !n.read
+          }))
+        );
+        const hasUnread = items.some((n) => !n.read);
+        if (hasUnread) {
+          await api('/api/me/notifications/read-all', { method: 'POST', body: '{}' });
+        }
+      } catch {
+        if (!cancelled) setApiNotifications([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   const notifications = useMemo(() => {
     const fromLeads: UserNotificationItem[] = leads.flatMap((lead) => {
@@ -91,8 +167,10 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
         });
       return items;
     });
-    return [...fromLeads, ...mockUserNotifications];
-  }, [leads]);
+    const apiIds = new Set(apiNotifications.map((n) => n.id));
+    const mocks = mockUserNotifications.filter((n) => !apiIds.has(n.id));
+    return [...apiNotifications, ...fromLeads, ...mocks];
+  }, [leads, apiNotifications]);
 
   if (!isOpen) return null;
 
@@ -107,6 +185,7 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900">消息提醒</h2>
+              <p className="text-[11px] text-slate-500 mt-0.5">含平台智能体审核通过 / 驳回通知</p>
             </div>
           </div>
           <button
@@ -121,7 +200,7 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
           <div className="flex-1 flex flex-col items-center justify-center text-center px-8 text-slate-400">
             <Bell size={36} className="mb-3 text-slate-300" />
             <p className="text-sm font-medium text-slate-600">暂无消息提醒</p>
-            <p className="text-xs mt-1">保存定制需求后，进度更新会显示在这里</p>
+            <p className="text-xs mt-1">保存定制需求或智能体审核有结果时，会显示在这里</p>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">

@@ -8,7 +8,6 @@ import {
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
 import {
-  creatorStatusText,
   CUSTOM_SERVICE_FILTERS,
   CustomServiceFilterKey,
   formatOrderTime,
@@ -16,6 +15,11 @@ import {
   yuan
 } from '../lib/customOrderLabels';
 import { DeliveryProposalForm } from './DeliveryProposalForm';
+import {
+  DeliveryProposalModal,
+  DeliveryProposalReviewPanel,
+  hasViewableProposal
+} from './DeliveryProposalReviewPanel';
 import { DeliveryProposal } from '../types/deliveryProposal';
 import { CustomServiceDeal, CustomServiceOrder } from '../types/customService';
 import { CustomerLeadItem, CreatorAgentItem } from '../types/creator';
@@ -35,6 +39,7 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
   const [proposalOrder, setProposalOrder] = useState<OrderRow | null>(null);
   const [creatingLeadId, setCreatingLeadId] = useState('');
   const [deliveryDeal, setDeliveryDeal] = useState<CustomServiceDeal | null>(null);
+  const [viewProposalDeal, setViewProposalDeal] = useState<CustomServiceDeal | null>(null);
 
   const reload = async () => {
     setLoading(true);
@@ -162,17 +167,22 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
     }
   };
 
-  const submitSkillDelivery = async (order: OrderRow, agentData: { version?: string; skillPackage?: { fileName?: string } }) => {
+  const submitSkillDelivery = async (
+    order: OrderRow,
+    agentData: { version?: string; title?: string; desc?: string; skillPackage?: { fileName?: string } }
+  ) => {
     const result = await api<{ hermes: { passed: boolean; report: { issues: string[] } } }>(
       `/api/custom-orders/${order.id}/submit-delivery`,
       {
         method: 'POST',
         body: JSON.stringify({
           version: agentData.version || order.instance?.currentVersion || 'v1.0.0',
-          changelog: '已上传 Skill 包并通过沙箱自测，提交平台审核。',
+          changelog: '已上传 Skill 包，提交平台审核。',
           completedItems: [order.title].filter(Boolean),
           skillPayload: {
             skillFileName: agentData.skillPackage?.fileName || 'customer_fork.zip',
+            agentTitle: agentData.title || order.instance?.title || order.baseAgentTitle,
+            agentDesc: (agentData.desc || '').trim(),
             promptOverrides: true
           }
         })
@@ -203,7 +213,7 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
             定制服务
           </h3>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            咨询 → 方案 → 支付 → 开发 → 审核 → 验收，同一条流程跟进
+            咨询 → 方案 → 支付 → 提交交付 → 审核 → 验收，同一条流程跟进
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -240,6 +250,8 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
         const canStartProposal =
           isConsulting && (!order || canPropose(order.status));
         const canCloseConsulting = isConsulting;
+        const canViewProposal =
+          !isConsulting && hasViewableProposal(proposal);
         return (
           <div key={deal.dealId} className="p-3.5 rounded-2xl border border-slate-200 bg-white space-y-3">
             <div className="flex items-start justify-between gap-3">
@@ -254,9 +266,6 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
                     ? ` ${deal.standardVersionAtRequest || order?.baseAgentVersion}`
                     : ''}
                 </div>
-                {deal.requirement && (
-                  <p className="text-[11px] text-slate-600 mt-1.5 line-clamp-2">{deal.requirement}</p>
-                )}
                 {timeValue && (
                   <div className="text-[11px] text-slate-500 mt-1">
                     {isConsulting ? '咨询时间' : '下单时间'} · {formatOrderTime(timeValue)}
@@ -267,11 +276,6 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
                 <span className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
                   {deal.stageLabel}
                 </span>
-                {order && (
-                  <span className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                    {creatorStatusText[order.status] || order.status}
-                  </span>
-                )}
                 <div>
                   <div className="text-[10px] font-bold text-slate-400 tracking-wide">订单价格</div>
                   <div
@@ -284,20 +288,6 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
                 </div>
               </div>
             </div>
-            {hasPrice && order && (
-              <p className="text-[11px] text-slate-600">
-                {order.deliveryDays} 天交付
-                {order.serviceScope ? ` · ${order.serviceScope}` : ''}
-                {order.paymentStatus && order.paymentStatus !== 'none'
-                  ? ` · 支付：${order.paymentStatus}`
-                  : ''}
-              </p>
-            )}
-            {proposal?.customizationItems?.length ? (
-              <p className="text-[11px] text-slate-600">
-                方案 v{order?.proposalVersion ?? proposal.version} · 需求 {proposal.customizationItems.length} 项
-              </p>
-            ) : null}
             {order?.instance && (
               <p className="text-[11px] text-slate-600">
                 专属实例：{order.instance.title}
@@ -330,6 +320,16 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
                   {creatingLeadId === deal.leadId ? '创建中…' : '发起定制交付方案'}
                 </button>
               )}
+              {canViewProposal && (
+                <button
+                  type="button"
+                  onClick={() => setViewProposalDeal(deal)}
+                  className="px-3.5 py-2 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 text-xs font-bold cursor-pointer flex items-center gap-1.5 hover:bg-violet-100"
+                >
+                  <FileText size={14} />
+                  查看方案
+                </button>
+              )}
               {order && canUploadSkill(order.status) && (
                 <button
                   type="button"
@@ -340,12 +340,6 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
                   <UploadCloud size={14} />
                   上传 Skill
                 </button>
-              )}
-              {order?.status === 'awaiting_proposal_confirm' && (
-                <span className="text-[11px] text-violet-600 px-2 py-1.5 font-bold">等待用户确认方案…</span>
-              )}
-              {order?.status === 'awaiting_payment' && (
-                <span className="text-[11px] text-slate-500 px-2 py-1.5">用户已确认方案，等待付款至平台托管…</span>
               )}
             </div>
           </div>
@@ -365,6 +359,22 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
             setProposalOrder(null);
           }}
         />
+      )}
+
+      {viewProposalDeal?.order && hasViewableProposal(viewProposalDeal.order.deliveryProposal) && (
+        <DeliveryProposalModal
+          isOpen
+          onClose={() => setViewProposalDeal(null)}
+          title={`定制交付方案 · ${viewProposalDeal.order.orderNo}`}
+        >
+          <DeliveryProposalReviewPanel
+            proposal={viewProposalDeal.order.deliveryProposal as DeliveryProposal}
+            proposalVersion={viewProposalDeal.order.proposalVersion}
+            proposalSubmittedAt={viewProposalDeal.order.proposalSubmittedAt}
+            readOnly
+            statusHint={viewProposalDeal.stageLabel}
+          />
+        </DeliveryProposalModal>
       )}
 
       {deliveryDeal?.order && (

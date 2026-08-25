@@ -31,7 +31,10 @@ function leadPayloadStandardVersion(payload: any): string | undefined {
   );
 }
 
-function computeStageFromOrder(order: any): { stageKey: DealStageKey; stageLabel: string } {
+function computeStageFromOrder(
+  order: any,
+  audience: 'buyer' | 'creator' = 'creator'
+): { stageKey: DealStageKey; stageLabel: string } {
   switch (order.status) {
     case 'consulting':
     case 'pending_quote':
@@ -43,9 +46,14 @@ function computeStageFromOrder(order: any): { stageKey: DealStageKey; stageLabel
     case 'paid_pending_start':
     case 'escrowed':
     case 'in_development':
+      return { stageKey: 'in_delivery', stageLabel: '待提交交付' };
     case 'revision':
-      return { stageKey: 'in_delivery', stageLabel: '交付中' };
+      return { stageKey: 'in_delivery', stageLabel: '需修改' };
     case 'in_review':
+      // 买家侧不暴露「平台审核中」，并入「待提交交付」；专家端仍单独展示
+      if (audience === 'buyer') {
+        return { stageKey: 'in_delivery', stageLabel: '待提交交付' };
+      }
       return { stageKey: 'in_review', stageLabel: '平台审核中' };
     case 'pending_acceptance':
       return { stageKey: 'pending_acceptance', stageLabel: '待验收' };
@@ -78,9 +86,11 @@ function computeStageFromLead(
   }
 }
 
-function dealFromLead(lead: any, order: any | null) {
+function dealFromLead(lead: any, order: any | null, audience: 'buyer' | 'creator' = 'creator') {
   const mappedOrder = order ? mapOrder(order) : null;
-  const stage = mappedOrder ? computeStageFromOrder(mappedOrder) : computeStageFromLead(lead);
+  const stage = mappedOrder
+    ? computeStageFromOrder(mappedOrder, audience)
+    : computeStageFromLead(lead);
   const payload = parseJson(lead.payload, {});
   return {
     dealId: lead.id,
@@ -101,9 +111,9 @@ function dealFromLead(lead: any, order: any | null) {
   };
 }
 
-function dealFromOrphanOrder(order: any) {
+function dealFromOrphanOrder(order: any, audience: 'buyer' | 'creator' = 'creator') {
   const mappedOrder = mapOrder(order);
-  const stage = computeStageFromOrder(mappedOrder);
+  const stage = computeStageFromOrder(mappedOrder, audience);
   return {
     dealId: mappedOrder.id,
     leadId: mappedOrder.leadId || null,
@@ -147,8 +157,8 @@ customServicesRouter.get('/mine', async (req, res) => {
     });
 
     const deals = [
-      ...leads.map((lead) => dealFromLead(lead, orderByLeadId.get(lead.id))),
-      ...orphanOrders.map(dealFromOrphanOrder)
+      ...leads.map((lead) => dealFromLead(lead, orderByLeadId.get(lead.id), 'buyer')),
+      ...orphanOrders.map((o) => dealFromOrphanOrder(o, 'buyer'))
     ];
 
     return ok(res, deals);
@@ -209,8 +219,10 @@ customServicesRouter.get('/creator', async (req, res) => {
     });
 
     const deals = [
-      ...leads.map((lead: any) => dealFromLead(lead, orderByLeadId.get(lead.id))),
-      ...orders.filter((o) => !o.leadId || !leadById.has(o.leadId)).map(dealFromOrphanOrder)
+      ...leads.map((lead: any) => dealFromLead(lead, orderByLeadId.get(lead.id), 'creator')),
+      ...orders
+        .filter((o) => !o.leadId || !leadById.has(o.leadId))
+        .map((o) => dealFromOrphanOrder(o, 'creator'))
     ];
 
     return ok(res, deals);

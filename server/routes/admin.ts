@@ -243,6 +243,67 @@ adminRouter.post('/agents/:id/publish', async (req, res) => {
     targetId: agent.id,
     diff: { category: parsed.data.category }
   });
+
+  if (current.authorId) {
+    const expert = await prisma.expert.findUnique({ where: { id: current.authorId } });
+    if (expert?.userId) {
+      await prisma.userNotification.create({
+        data: {
+          id: `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          userId: expert.userId,
+          type: 'agent_review_approved',
+          title: '通用智能体审核已通过',
+          body: `「${agent.title}」已通过平台审核并上架。`,
+          link: '/creator-center?tab=my-agents',
+          payload: JSON.stringify({
+            agentId: agent.id,
+            category: agent.category,
+            agentTitle: agent.title
+          })
+        }
+      });
+    }
+  }
+
+  return ok(res, agent);
+});
+
+adminRouter.post('/agents/:id/reject', async (req, res) => {
+  const reason = z.string().min(1).safeParse(req.body?.reason);
+  if (!reason.success) return fail(res, '驳回必须填写理由');
+  const current = await prisma.agent.findUnique({ where: { id: req.params.id } });
+  if (!current) return fail(res, '智能体不存在', 404, 'NOT_FOUND');
+  const agent = await prisma.agent.update({
+    where: { id: req.params.id },
+    data: { status: 'offline', showOnHome: false }
+  });
+  await writeAudit({
+    actorId: actorId(req),
+    action: 'reject_agent',
+    targetType: 'agent',
+    targetId: agent.id,
+    diff: { reason: reason.data }
+  });
+  if (current.authorId) {
+    const expert = await prisma.expert.findUnique({ where: { id: current.authorId } });
+    if (expert?.userId) {
+      await prisma.userNotification.create({
+        data: {
+          id: `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          userId: expert.userId,
+          type: 'agent_review_rejected',
+          title: '通用智能体审核未通过',
+          body: `「${agent.title}」被驳回：${reason.data}`,
+          link: '/creator-center?tab=my-agents',
+          payload: JSON.stringify({
+            agentId: agent.id,
+            reason: reason.data,
+            agentTitle: agent.title
+          })
+        }
+      });
+    }
+  }
   return ok(res, agent);
 });
 

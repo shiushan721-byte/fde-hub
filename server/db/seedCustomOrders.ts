@@ -85,6 +85,7 @@ type DemoOrderSpec = {
     version: string;
     status: string;
     changelog: string;
+    agentDesc?: string;
     rejectReason?: string;
     publishedAt?: Date;
   };
@@ -178,7 +179,7 @@ const DEMO_ORDERS: DemoOrderSpec[] = [
     priceCents: 459900,
     deliveryDays: 10,
     serviceScope: '流程改造 + 一次验收内修改',
-    quoteNote: '平台已托管，待开工',
+    quoteNote: '平台已托管，待上传 Skill 提交交付',
     quotedAt: daysFromNow(-4),
     proposalSubmittedAt: daysFromNow(-4),
     proposalConfirmedAt: daysFromNow(-3),
@@ -193,14 +194,14 @@ const DEMO_ORDERS: DemoOrderSpec[] = [
   {
     id: 'cord_demo_in_dev',
     orderNo: 'CUS-DEMO-004',
-    status: 'in_development',
+    status: 'escrowed',
     title: 'GEO 助手 · 品牌可见度看板',
     baseAgentId: 'geo-helper',
     baseAgentTitle: 'GEO助手',
     priceCents: 329900,
     deliveryDays: 14,
     serviceScope: 'Prompt 定制 + 页面二开',
-    quoteNote: '开发中',
+    quoteNote: '平台已托管，待上传 Skill 提交交付',
     quotedAt: daysFromNow(-8),
     proposalSubmittedAt: daysFromNow(-8),
     proposalConfirmedAt: daysFromNow(-7),
@@ -551,7 +552,13 @@ async function upsertDemoOrder(spec: DemoOrderSpec) {
         status: spec.delivery.status,
         changelog: spec.delivery.changelog,
         completedItems: toJson(['页面定制', '流程改造']),
-        skillPayload: toJson({ skillFileName: 'customer_fork.zip' }),
+        skillPayload: toJson({
+          skillFileName: 'customer_fork.zip',
+          agentTitle: `${spec.baseAgentTitle} · 客户专属`,
+          agentDesc:
+            spec.delivery.agentDesc ||
+            `面向「${spec.title}」场景的专属智能体，按约定范围完成定制交付。`
+        }),
         hermesReport: toJson({ passed: true, issues: [] }),
         hermesPassed: true,
         hermesCheckedAt: daysFromNow(-spec.daysAgo + 2),
@@ -572,6 +579,13 @@ async function upsertDemoOrder(spec: DemoOrderSpec) {
       update: {
         status: spec.delivery.status,
         changelog: spec.delivery.changelog,
+        skillPayload: toJson({
+          skillFileName: 'customer_fork.zip',
+          agentTitle: `${spec.baseAgentTitle} · 客户专属`,
+          agentDesc:
+            spec.delivery.agentDesc ||
+            `面向「${spec.title}」场景的专属智能体，按约定范围完成定制交付。`
+        }),
         rejectReason: spec.delivery.rejectReason || '',
         publishedAt: spec.delivery.publishedAt || null,
         updatedAt: new Date()
