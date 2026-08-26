@@ -1,7 +1,9 @@
 import type { Agent, Expert } from '@prisma/client';
 import { parseJson } from './json';
+import { engagementTotals, formatEngagementCount } from './engagement';
 
 export function agentToCatalog(agent: Agent) {
+  const eng = engagementTotals(agent);
   return {
     id: agent.id,
     title: agent.title,
@@ -16,9 +18,10 @@ export function agentToCatalog(agent: Agent) {
     authorId: agent.authorId || undefined,
     price: agent.price ?? undefined,
     pricingPlans: parseJson(agent.pricingPlans, undefined),
-    likesCount: agent.likesCount,
-    favoritesCount: agent.favoritesCount,
+    likesCount: formatEngagementCount(eng.likesTotal),
+    favoritesCount: formatEngagementCount(eng.favoritesTotal),
     commentsCount: agent.commentsCount,
+    sharesCount: formatEngagementCount(eng.sharesTotal),
     usageCount: agent.usageCount || undefined,
     rating: agent.rating ?? undefined
   };
@@ -39,7 +42,7 @@ export function agentToSolution(agent: Agent) {
     authorVerifyLabel: '认证 FDE',
     tags: [agent.category],
     category: agent.category,
-    likesCount: Number(agent.likesCount) || 0,
+    likesCount: engagementTotals(agent).likesTotal,
     usesCount: 0,
     rating: agent.rating || 5,
     description: agent.desc,
@@ -66,6 +69,7 @@ export function expertToPublic(expert: Expert) {
     domainTags: parseJson<string[]>(expert.domainTags, []),
     rating: expert.rating,
     ordersCount: expert.ordersCount,
+    followersCount: expert.followersCount ?? 0,
     praiseRate: expert.praiseRate,
     responseTime: expert.responseTime,
     bio: expert.bio,

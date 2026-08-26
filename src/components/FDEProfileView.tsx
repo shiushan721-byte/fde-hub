@@ -3,26 +3,13 @@ import {
   ArrowLeft,
   Heart,
   MessageSquare,
-  Star,
-  CheckCircle2,
-  Clock,
-  MapPin,
-  Briefcase,
   Play,
-  FileText,
-  Award,
   Sparkles,
-  ExternalLink,
-  ChevronRight,
   Layers,
-  Building2,
-  Lock,
   Share2,
   Copy,
   Check,
-  QrCode,
-  Users,
-  Zap
+  QrCode
 } from 'lucide-react';
 import { FDEExpert, AgentSolution } from '../types';
 import { FDEBadge } from './FDEBadge';
@@ -153,33 +140,7 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
                   </span>
                 </div>
 
-                {expert.expertNo && (
-                  <p className="text-xs font-mono text-slate-500 mt-1">{expert.expertNo}</p>
-                )}
-
                 <p className="text-xs sm:text-sm font-medium text-slate-600 mt-1.5">{expert.title}</p>
-
-                {/* Subtitle indicators */}
-                <div className="flex items-center gap-3 flex-wrap text-xs text-slate-500 mt-2.5">
-                  <span className="font-semibold text-slate-800">
-                    已交付 {expert.ordersCount} 家企业工程
-                  </span>
-                  <span>·</span>
-                  <span className="text-amber-600 font-semibold flex items-center gap-1">
-                    <Star size={13} className="fill-amber-400 text-amber-400" />
-                    好评率 {expert.praiseRate}%
-                  </span>
-                  <span>·</span>
-                  <span className="text-emerald-700 font-medium flex items-center gap-1">
-                    <Clock size={13} />
-                    {expert.responseTime}
-                  </span>
-                  <span>·</span>
-                  <span className="text-slate-600 flex items-center gap-1">
-                    <MapPin size={13} />
-                    {expert.location}
-                  </span>
-                </div>
 
                 {/* Domain tags */}
                 <div className="flex flex-wrap gap-1.5 mt-3.5">
@@ -294,17 +255,6 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
 
                   {/* Bottom Action Area */}
                   <div className="pt-3 border-t border-slate-100 space-y-2">
-                    <div className="flex items-center justify-between text-[11px] text-slate-500">
-                      <span className="flex items-center gap-1 font-mono">
-                        <Zap size={11} className="text-amber-500" />
-                        <span>已运行 {agent.usesCount || 108} 次</span>
-                      </span>
-                      <span className="text-emerald-700 font-bold flex items-center gap-1">
-                        <CheckCircle2 size={11} />
-                        <span>Hermes 验证通过</span>
-                      </span>
-                    </div>
-
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => onTryAgent(agent)}

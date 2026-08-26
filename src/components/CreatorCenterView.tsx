@@ -168,6 +168,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
   // Creator Profile State (主页编辑)
   const [profileData, setProfileData] = useState({
     name: '林然 (Ray Lin)',
+    expertNo: 'AI-EXP-000001',
     title: '跨境出海 & 电商营销 AI 架构师',
     bio: '原跨境独角兽 AI 团队负责人，8 年企业架构落地经验。专注 Hermes 隔离沙箱下的自动化智能体工作流交付，已累计为 140+ 品牌搭建营销与私域 Agent。',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80',
@@ -306,6 +307,9 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                 </span>
               ) : null}
             </div>
+            {profileData.expertNo && (
+              <p className="text-xs font-mono text-slate-500 mt-1">{profileData.expertNo}</p>
+            )}
           </div>
         </div>
 
@@ -411,7 +415,6 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
               <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm">创作者基础资料与简介</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">对外展示在公开主页与专家集合页，建立真实专业度</p>
                 </div>
                 <button
                   type="submit"
@@ -434,6 +437,17 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                   type="text"
                   value={profileData.name}
                   onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
+                />
+              </div>
+
+              <div className="space-y-1.5 text-xs">
+                <label className="font-bold text-slate-700">专家头衔</label>
+                <input
+                  type="text"
+                  value={profileData.title}
+                  onChange={(e) => setProfileData({ ...profileData, title: e.target.value })}
+                  placeholder="如：电商 AI 解决方案架构师"
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
                 />
               </div>
@@ -515,6 +529,9 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                 />
                 <div>
                   <h4 className="font-bold text-slate-900 text-sm">{profileData.name}</h4>
+                  {profileData.title && (
+                    <p className="text-[11px] text-slate-500 mt-0.5">{profileData.title}</p>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-1 justify-center">
                   {profileData.domainTags.map((tag) => (

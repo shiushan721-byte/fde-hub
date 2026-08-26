@@ -5,6 +5,7 @@ import { fail, ok } from '../lib/http';
 import { writeAudit } from '../lib/audit';
 import { parseJson } from '../lib/json';
 import { agentToCatalog, agentToSolution, expertToPublic } from '../lib/mappers';
+import { engagementTotals } from '../lib/engagement';
 import { requireSuperAdmin } from '../middleware/auth';
 import {
   approveApplication,
@@ -198,6 +199,59 @@ adminRouter.get('/agents', async (req, res) => {
       })
     : [];
   const authorById = new Map(authors.map((a) => [a.id, a]));
+  const agentIds = agents.map((a) => a.id);
+  const commentCounts =
+    agentIds.length === 0
+      ? []
+      : await prisma.agentComment.groupBy({
+          by: ['agentId'],
+          where: { agentId: { in: agentIds } },
+          _count: { _all: true }
+        });
+  const commentCountByAgent = new Map(
+    commentCounts.map((row) => [row.agentId, row._count._all])
+  );
+
+  const latestCommentRows =
+    agentIds.length === 0
+      ? []
+      : await prisma.agentComment.findMany({
+          where: { agentId: { in: agentIds } },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            agentId: true,
+            userName: true,
+            content: true,
+            isAuthor: true,
+            parentId: true,
+            createdAt: true
+          }
+        });
+  const latestCommentsByAgent = new Map<
+    string,
+    Array<{
+      id: string;
+      userName: string;
+      content: string;
+      isAuthor: boolean;
+      isReply: boolean;
+      createdAt: Date;
+    }>
+  >();
+  for (const row of latestCommentRows) {
+    const list = latestCommentsByAgent.get(row.agentId) || [];
+    if (list.length >= 2) continue;
+    list.push({
+      id: row.id,
+      userName: row.userName,
+      content: row.content,
+      isAuthor: row.isAuthor,
+      isReply: Boolean(row.parentId),
+      createdAt: row.createdAt
+    });
+    latestCommentsByAgent.set(row.agentId, list);
+  }
 
   return ok(
     res,
@@ -212,15 +266,136 @@ adminRouter.get('/agents', async (req, res) => {
         (typeof skillPackage?.version === 'string' && skillPackage.version.trim()) ||
         'v1.0.0';
       const author = agent.authorId ? authorById.get(agent.authorId) : null;
+      const commentsCount = commentCountByAgent.get(agent.id) ?? (Number(agent.commentsCount) || 0);
+      const eng = engagementTotals(agent);
       return {
         ...agent,
         version: versionRaw.startsWith('v') ? versionRaw : `v${versionRaw}`,
         authorExpertNo: author?.expertNo || null,
+        commentsCount,
+        likesActual: eng.likesActual,
+        likesManual: eng.likesManual,
+        likesCount: eng.likesTotal,
+        favoritesActual: eng.favoritesActual,
+        favoritesManual: eng.favoritesManual,
+        favoritesCount: eng.favoritesTotal,
+        sharesActual: eng.sharesActual,
+        sharesManual: eng.sharesManual,
+        sharesCount: eng.sharesTotal,
+        latestComments: latestCommentsByAgent.get(agent.id) || [],
         catalog: agentToCatalog(agent),
         solution: agent.kind === 'solution' ? agentToSolution(agent) : null
       };
     })
   );
+});
+
+const engagementManualPatch = z.object({
+  metric: z.enum(['likes', 'favorites', 'shares']),
+  manual: z.number().int().min(0).max(10_000_000)
+});
+
+adminRouter.patch('/agents/:id/engagement-manual', async (req, res) => {
+  const parsed = engagementManualPatch.safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  const agent = await prisma.agent.findUnique({ where: { id: req.params.id } });
+  if (!agent) return fail(res, '智能体不存在', 404, 'NOT_FOUND');
+
+  const data =
+    parsed.data.metric === 'likes'
+      ? { likesManual: parsed.data.manual }
+      : parsed.data.metric === 'favorites'
+        ? { favoritesManual: parsed.data.manual }
+        : { sharesManual: parsed.data.manual };
+
+  const updated = await prisma.agent.update({
+    where: { id: agent.id },
+    data
+  });
+  const eng = engagementTotals(updated);
+  await writeAudit({
+    actorId: actorId(req),
+    action: 'update_agent_engagement_manual',
+    targetType: 'agent',
+    targetId: agent.id,
+    diff: { metric: parsed.data.metric, manual: parsed.data.manual }
+  });
+  return ok(res, {
+    metric: parsed.data.metric,
+    likesActual: eng.likesActual,
+    likesManual: eng.likesManual,
+    likesCount: eng.likesTotal,
+    favoritesActual: eng.favoritesActual,
+    favoritesManual: eng.favoritesManual,
+    favoritesCount: eng.favoritesTotal,
+    sharesActual: eng.sharesActual,
+    sharesManual: eng.sharesManual,
+    sharesCount: eng.sharesTotal
+  });
+});
+
+adminRouter.get('/agents/:id/comments', async (req, res) => {
+  const agent = await prisma.agent.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, title: true, authorName: true }
+  });
+  if (!agent) return fail(res, '智能体不存在', 404, 'NOT_FOUND');
+
+  const comments = await prisma.agentComment.findMany({
+    where: { agentId: agent.id },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  const roots = comments.filter((c) => !c.parentId);
+  const repliesByParent = new Map<string, typeof comments>();
+  for (const c of comments) {
+    if (!c.parentId) continue;
+    const list = repliesByParent.get(c.parentId) || [];
+    list.push(c);
+    repliesByParent.set(c.parentId, list);
+  }
+
+  return ok(res, {
+    agent,
+    total: comments.length,
+    comments: roots.map((root) => ({
+      ...root,
+      replies: (repliesByParent.get(root.id) || []).sort(
+        (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+      )
+    }))
+  });
+});
+
+adminRouter.delete('/agents/:agentId/comments/:commentId', async (req, res) => {
+  const comment = await prisma.agentComment.findFirst({
+    where: { id: req.params.commentId, agentId: req.params.agentId }
+  });
+  if (!comment) return fail(res, '评论不存在', 404, 'NOT_FOUND');
+
+  // 删父评论时一并删除其回复
+  await prisma.agentComment.deleteMany({
+    where: {
+      agentId: req.params.agentId,
+      OR: [{ id: comment.id }, { parentId: comment.id }]
+    }
+  });
+
+  const remaining = await prisma.agentComment.count({ where: { agentId: req.params.agentId } });
+  await prisma.agent.update({
+    where: { id: req.params.agentId },
+    data: { commentsCount: String(remaining) }
+  });
+
+  await writeAudit({
+    actorId: actorId(req),
+    action: 'delete_agent_comment',
+    targetType: 'agent_comment',
+    targetId: comment.id,
+    diff: { agentId: req.params.agentId, remaining }
+  });
+
+  return ok(res, { remaining });
 });
 
 const agentPatch = z.object({
@@ -359,7 +534,8 @@ adminRouter.get('/experts', async (_req, res) => {
     include: { certification: true }
   });
   const expertIds = experts.map((e) => e.id);
-  const [publishedCounts, applications] = await Promise.all([
+  const userIds = experts.map((e) => e.userId).filter((id): id is string => Boolean(id));
+  const [publishedCounts, applications, realNames] = await Promise.all([
     expertIds.length
       ? prisma.agent.groupBy({
           by: ['authorId'],
@@ -373,6 +549,20 @@ adminRouter.get('/experts', async (_req, res) => {
           orderBy: { createdAt: 'asc' },
           select: { expertId: true, createdAt: true, reviewedAt: true }
         })
+      : Promise.resolve([]),
+    userIds.length
+      ? prisma.realNameVerification.findMany({
+          where: { userId: { in: userIds }, status: 'verified' },
+          orderBy: { verifiedAt: 'desc' },
+          select: {
+            userId: true,
+            realName: true,
+            realNameMasked: true,
+            idCardMasked: true,
+            idCardFrontUrl: true,
+            idCardBackUrl: true
+          }
+        })
       : Promise.resolve([])
   ]);
   const countByAuthor = new Map(
@@ -383,25 +573,52 @@ adminRouter.get('/experts', async (_req, res) => {
     if (!app.expertId || appliedAtByExpert.has(app.expertId)) continue;
     appliedAtByExpert.set(app.expertId, app.createdAt);
   }
+  const rnByUserId = new Map<string, (typeof realNames)[number]>();
+  for (const rn of realNames) {
+    if (!rnByUserId.has(rn.userId)) rnByUserId.set(rn.userId, rn);
+  }
 
   return ok(
     res,
-    experts.map((expert) => ({
-      ...expertToPublic(expert),
-      publishedAgentsCount: countByAuthor.get(expert.id) || 0,
-      appliedAt:
-        appliedAtByExpert.get(expert.id)?.toISOString() ||
-        expert.certification?.certifiedAt?.toISOString() ||
-        expert.createdAt.toISOString(),
-      certification: expert.certification
+    experts.map((expert) => {
+      const pendingRaw = parseJson<Record<string, unknown>>(expert.pendingProfileSnapshot || '', {});
+      const hasPending =
+        Boolean(expert.pendingProfileSnapshot?.trim()) &&
+        (typeof pendingRaw.name === 'string' ||
+          typeof pendingRaw.bio === 'string' ||
+          Array.isArray(pendingRaw.domainTags));
+      const pendingProfile = hasPending
         ? {
-            id: expert.certification.id,
-            status: expert.certification.status,
-            frozenAt: expert.certification.frozenAt,
-            freezeReason: expert.certification.freezeReason
+            name: String(pendingRaw.name || expert.name),
+            bio: String(pendingRaw.bio ?? ''),
+            domainTags: Array.isArray(pendingRaw.domainTags)
+              ? pendingRaw.domainTags.map(String)
+              : []
           }
-        : null
-    }))
+        : null;
+      const rn = expert.userId ? rnByUserId.get(expert.userId) : null;
+      return {
+        ...expertToPublic(expert),
+        publishedAgentsCount: countByAuthor.get(expert.id) || 0,
+        appliedAt:
+          appliedAtByExpert.get(expert.id)?.toISOString() ||
+          expert.certification?.certifiedAt?.toISOString() ||
+          expert.createdAt.toISOString(),
+        pendingProfile,
+        realName: rn?.realName || rn?.realNameMasked || '',
+        idCardMasked: rn?.idCardMasked || '',
+        idCardFrontUrl: rn?.idCardFrontUrl || '',
+        idCardBackUrl: rn?.idCardBackUrl || '',
+        certification: expert.certification
+          ? {
+              id: expert.certification.id,
+              status: expert.certification.status,
+              frozenAt: expert.certification.frozenAt,
+              freezeReason: expert.certification.freezeReason
+            }
+          : null
+      };
+    })
   );
 });
 

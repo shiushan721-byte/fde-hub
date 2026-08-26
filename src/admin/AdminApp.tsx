@@ -696,6 +696,44 @@ const AgentsPage = ({
   onClearAuthorFilter?: () => void;
 }) => {
   const [q, setQ] = useState('');
+  const [commentsTarget, setCommentsTarget] = useState<{ id: string; title: string } | null>(null);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsError, setCommentsError] = useState('');
+  const [commentsPayload, setCommentsPayload] = useState<{
+    total: number;
+    comments: Array<{
+      id: string;
+      userName: string;
+      userAvatar: string;
+      isAuthor: boolean;
+      content: string;
+      createdAt: string;
+      replies: Array<{
+        id: string;
+        userName: string;
+        userAvatar: string;
+        isAuthor: boolean;
+        content: string;
+        createdAt: string;
+      }>;
+    }>;
+  } | null>(null);
+  const [engagementTarget, setEngagementTarget] = useState<{
+    id: string;
+    title: string;
+    metric: 'likes' | 'favorites' | 'shares';
+    label: string;
+    actual: number;
+    manual: number;
+  } | null>(null);
+  const [engagementManualInput, setEngagementManualInput] = useState('0');
+  const [engagementSaving, setEngagementSaving] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<{
+    title: string;
+    desc: string;
+    coverImage?: string | null;
+  } | null>(null);
+
   const query = new URLSearchParams({
     ...(q.trim() ? { q: q.trim() } : {}),
     ...(authorFilter?.authorId ? { authorId: authorFilter.authorId } : {})
@@ -710,12 +748,126 @@ const AgentsPage = ({
     authorExpertNo?: string | null;
     status: string;
     version?: string;
+    coverImage?: string | null;
+    commentsCount?: number | string;
+    likesCount?: string | number;
+    likesActual?: number;
+    likesManual?: number;
+    favoritesCount?: string | number;
+    favoritesActual?: number;
+    favoritesManual?: number;
+    sharesCount?: string | number;
+    sharesActual?: number;
+    sharesManual?: number;
     showOnHome: boolean;
     featured: boolean;
     createdAt: string;
   }>>(`/api/admin/agents${query ? `?${query}` : ''}`, `${q}|${authorFilter?.authorId || ''}`);
 
   const total = data?.length || 0;
+
+  const openComments = async (agent: { id: string; title: string }) => {
+    setCommentsTarget(agent);
+    setCommentsLoading(true);
+    setCommentsError('');
+    setCommentsPayload(null);
+    try {
+      const result = await api<{
+        total: number;
+        comments: typeof commentsPayload extends null ? never : NonNullable<typeof commentsPayload>['comments'];
+      }>(`/api/admin/agents/${agent.id}/comments`);
+      setCommentsPayload({
+        total: result.total,
+        comments: result.comments
+      });
+    } catch (err) {
+      setCommentsError(err instanceof Error ? err.message : '加载评论失败');
+    } finally {
+      setCommentsLoading(false);
+    }
+  };
+
+  const deleteComment = async (commentId: string) => {
+    if (!commentsTarget) return;
+    if (!window.confirm('确认删除该评论？若为父评论，其作者回复也会一并删除。')) return;
+    try {
+      await api(`/api/admin/agents/${commentsTarget.id}/comments/${commentId}`, {
+        method: 'DELETE'
+      });
+      await openComments(commentsTarget);
+      reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '删除失败');
+    }
+  };
+
+  const openEngagement = (
+    agent: {
+      id: string;
+      title: string;
+      likesActual?: number;
+      likesManual?: number;
+      likesCount?: string | number;
+      favoritesActual?: number;
+      favoritesManual?: number;
+      favoritesCount?: string | number;
+      sharesActual?: number;
+      sharesManual?: number;
+      sharesCount?: string | number;
+    },
+    metric: 'likes' | 'favorites' | 'shares'
+  ) => {
+    const label = metric === 'likes' ? '点赞' : metric === 'favorites' ? '收藏' : '分享';
+    const manual =
+      metric === 'likes'
+        ? Number(agent.likesManual) || 0
+        : metric === 'favorites'
+          ? Number(agent.favoritesManual) || 0
+          : Number(agent.sharesManual) || 0;
+    const total =
+      metric === 'likes'
+        ? Number(agent.likesCount) || 0
+        : metric === 'favorites'
+          ? Number(agent.favoritesCount) || 0
+          : Number(agent.sharesCount) || 0;
+    const actualFromApi =
+      metric === 'likes'
+        ? agent.likesActual
+        : metric === 'favorites'
+          ? agent.favoritesActual
+          : agent.sharesActual;
+    const actual =
+      actualFromApi !== undefined && actualFromApi !== null
+        ? Number(actualFromApi) || 0
+        : Math.max(0, total - manual);
+    setEngagementTarget({
+      id: agent.id,
+      title: agent.title,
+      metric,
+      label,
+      actual,
+      manual
+    });
+    setEngagementManualInput(String(manual));
+  };
+
+  const saveEngagementManual = async () => {
+    if (!engagementTarget) return;
+    const manual = Math.max(0, Math.floor(Number(engagementManualInput) || 0));
+    setEngagementSaving(true);
+    try {
+      await api(`/api/admin/agents/${engagementTarget.id}/engagement-manual`, {
+        method: 'PATCH',
+        body: JSON.stringify({ metric: engagementTarget.metric, manual })
+      });
+      setEngagementTarget(null);
+      reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setEngagementSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -750,12 +902,10 @@ const AgentsPage = ({
             <tr>
               <th className="text-left p-3 w-14">序号</th>
               <th className="text-left p-3">智能体 ID</th>
-              <th className="text-left p-3 whitespace-nowrap">版本号</th>
               <th className="text-left p-3">智能体名称</th>
-              <th className="text-left p-3 min-w-[220px]">智能体详情</th>
               <th className="text-left p-3">分类</th>
               <th className="text-left p-3">状态</th>
-              <th className="text-left p-3">首页</th>
+              <th className="text-left p-3 whitespace-nowrap">互动</th>
               <th className="text-left p-3 whitespace-nowrap">创建时间</th>
               <th className="text-right p-3">操作</th>
             </tr>
@@ -766,9 +916,9 @@ const AgentsPage = ({
                 <td className="p-3 text-slate-500 tabular-nums">{total - index}</td>
                 <td className="p-3">
                   <code className="text-[11px] font-mono text-slate-700 break-all">{agent.id}</code>
-                </td>
-                <td className="p-3 whitespace-nowrap">
-                  <span className="font-mono text-slate-700">{agent.version || 'v1.0.0'}</span>
+                  <div className="text-[11px] font-mono text-slate-500 mt-1">
+                    {agent.version || 'v1.0.0'}
+                  </div>
                 </td>
                 <td className="p-3">
                   <div className="font-bold text-slate-900">{agent.title}</div>
@@ -778,15 +928,62 @@ const AgentsPage = ({
                       {agent.authorExpertNo}
                     </div>
                   )}
-                </td>
-                <td className="p-3 max-w-sm">
-                  <p className="text-slate-600 whitespace-pre-wrap leading-relaxed">
-                    {agent.desc?.trim() || '暂无详情'}
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDetailTarget({
+                        title: agent.title,
+                        desc: agent.desc || '',
+                        coverImage: agent.coverImage
+                      })
+                    }
+                    className="mt-1.5 text-[11px] font-bold text-blue-600 hover:text-blue-700 cursor-pointer"
+                  >
+                    智能体详情
+                  </button>
                 </td>
                 <td className="p-3 whitespace-nowrap">{agent.category || '—'}</td>
                 <td className="p-3 whitespace-nowrap">{statusLabel[agent.status] || agent.status}</td>
-                <td className="p-3">{agent.showOnHome ? '是' : '否'}</td>
+                <td className="p-3 whitespace-nowrap">
+                  <div className="space-y-1 text-[11px] text-slate-600">
+                    <button
+                      type="button"
+                      onClick={() => void openComments({ id: agent.id, title: agent.title })}
+                      className="flex items-center gap-1.5 font-bold text-blue-600 hover:text-blue-700 cursor-pointer tabular-nums"
+                      title="查看评论"
+                    >
+                      <span className="text-slate-400 font-medium w-7">评论</span>
+                      <span>{Number(agent.commentsCount) || 0}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEngagement(agent, 'likes')}
+                      className="flex items-center gap-1.5 tabular-nums cursor-pointer hover:text-blue-700"
+                      title="调整点赞手动数量"
+                    >
+                      <span className="text-slate-400 w-7">点赞</span>
+                      <span className="font-semibold text-slate-800">{agent.likesCount ?? 0}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEngagement(agent, 'favorites')}
+                      className="flex items-center gap-1.5 tabular-nums cursor-pointer hover:text-blue-700"
+                      title="调整收藏手动数量"
+                    >
+                      <span className="text-slate-400 w-7">收藏</span>
+                      <span className="font-semibold text-slate-800">{agent.favoritesCount ?? 0}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEngagement(agent, 'shares')}
+                      className="flex items-center gap-1.5 tabular-nums cursor-pointer hover:text-blue-700"
+                      title="调整分享手动数量"
+                    >
+                      <span className="text-slate-400 w-7">分享</span>
+                      <span className="font-semibold text-slate-800">{agent.sharesCount ?? 0}</span>
+                    </button>
+                  </div>
+                </td>
                 <td className="p-3 text-slate-500 whitespace-nowrap">
                   {agent.createdAt ? new Date(agent.createdAt).toLocaleString('zh-CN') : '—'}
                 </td>
@@ -823,6 +1020,243 @@ const AgentsPage = ({
           <p className="p-6 text-sm text-slate-400 text-center">暂无通用智能体</p>
         )}
       </div>
+
+      {commentsTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setCommentsTarget(null)}
+        >
+          <div
+            className="bg-white w-full max-w-2xl max-h-[80vh] rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-slate-900 truncate">
+                  评论 · {commentsTarget.title}
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  共 {commentsPayload?.total ?? '—'} 条
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCommentsTarget(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {commentsLoading && <p className="text-sm text-slate-500">加载中…</p>}
+              {commentsError && <p className="text-sm text-rose-600">{commentsError}</p>}
+              {!commentsLoading && !commentsError && commentsPayload?.comments.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-8">暂无评论</p>
+              )}
+              {(commentsPayload?.comments || []).map((c) => (
+                <div key={c.id} className="space-y-2">
+                  <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <img
+                          src={c.userAvatar || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=80'}
+                          alt=""
+                          className="w-8 h-8 rounded-full object-cover border border-slate-200"
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-900 truncate">
+                            {c.userName}
+                            {c.isAuthor && (
+                              <span className="ml-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded">
+                                作者
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {new Date(c.createdAt).toLocaleString('zh-CN')}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void deleteComment(c.id)}
+                        className="text-[11px] font-bold text-rose-600 hover:text-rose-700 cursor-pointer shrink-0"
+                      >
+                        删除
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">
+                      {c.content}
+                    </p>
+                  </div>
+                  {(c.replies || []).map((r) => (
+                    <div
+                      key={r.id}
+                      className="ml-6 rounded-xl border border-slate-100 bg-slate-50 p-3 space-y-2"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <img
+                            src={r.userAvatar || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=80'}
+                            alt=""
+                            className="w-7 h-7 rounded-full object-cover border border-slate-200"
+                          />
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-slate-900 truncate">
+                              {r.userName}
+                              {r.isAuthor && (
+                                <span className="ml-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded">
+                                  作者回复
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              {new Date(r.createdAt).toLocaleString('zh-CN')}
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void deleteComment(r.id)}
+                          className="text-[11px] font-bold text-rose-600 hover:text-rose-700 cursor-pointer shrink-0"
+                        >
+                          删除
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">
+                        {r.content}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setDetailTarget(null)}
+        >
+          <div
+            className="bg-white w-full max-w-lg max-h-[80vh] rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-slate-900 truncate">智能体详情</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{detailTarget.title}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailTarget(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {detailTarget.coverImage ? (
+                <div className="rounded-xl overflow-hidden bg-slate-100 ring-1 ring-slate-200/80">
+                  <img
+                    src={detailTarget.coverImage}
+                    alt={detailTarget.title}
+                    referrerPolicy="no-referrer"
+                    className="w-full aspect-[16/9] object-cover"
+                  />
+                </div>
+              ) : (
+                <div className="rounded-xl bg-slate-100 aspect-[16/9] flex items-center justify-center text-xs text-slate-400">
+                  暂无封面
+                </div>
+              )}
+              <div className="space-y-2">
+                <h4 className="text-sm font-black text-slate-900 leading-snug">
+                  {detailTarget.title}
+                </h4>
+                <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
+                  {detailTarget.desc?.trim() || '暂无简介'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {engagementTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setEngagementTarget(null)}
+        >
+          <div
+            className="bg-white w-full max-w-md rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-slate-900 truncate">
+                  {engagementTarget.label} · {engagementTarget.title}
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  前台展示 = 实际数量 + 手动添加
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEngagementTarget(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="text-slate-500">实际数量</span>
+                <span className="font-semibold tabular-nums text-slate-900">
+                  {engagementTarget.actual}
+                </span>
+              </div>
+              <label className="block space-y-1.5">
+                <span className="text-sm text-slate-500">手动添加数量</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={engagementManualInput}
+                  onChange={(e) => setEngagementManualInput(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm tabular-nums"
+                />
+              </label>
+              <div className="flex items-center justify-between gap-3 text-sm rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5">
+                <span className="text-slate-500">前台总数量</span>
+                <span className="font-black tabular-nums text-slate-900">
+                  {engagementTarget.actual +
+                    Math.max(0, Math.floor(Number(engagementManualInput) || 0))}
+                </span>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setEngagementTarget(null)}
+                  className="px-3 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={engagementSaving}
+                  onClick={() => void saveEngagementManual()}
+                  className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-60 cursor-pointer"
+                >
+                  {engagementSaving ? '保存中…' : '保存'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1604,6 +2038,63 @@ const DeliveriesPage = () => {
   );
 };
 
+const ExpertProfileBlock = ({
+  heading,
+  name,
+  bio,
+  domainTags,
+  highlight
+}: {
+  heading?: string;
+  name: string;
+  bio: string;
+  domainTags: string[];
+  highlight?: boolean;
+}) => (
+  <div
+    className={`space-y-3 rounded-xl border p-4 ${
+      highlight ? 'border-amber-200 bg-amber-50/50' : 'border-slate-200 bg-white'
+    }`}
+  >
+    {heading && (
+      <div
+        className={`text-[11px] font-bold ${
+          highlight ? 'text-amber-700' : 'text-slate-500'
+        }`}
+      >
+        {heading}
+      </div>
+    )}
+    <div className="space-y-1">
+      <div className="text-[11px] text-slate-400">专家名称</div>
+      <div className="text-sm font-bold text-slate-900">{name || '—'}</div>
+    </div>
+    <div className="space-y-1">
+      <div className="text-[11px] text-slate-400">专家简介</div>
+      <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+        {bio?.trim() || '暂无简介'}
+      </p>
+    </div>
+    <div className="space-y-1.5">
+      <div className="text-[11px] text-slate-400">专家标签</div>
+      <div className="flex flex-wrap gap-1">
+        {domainTags.length > 0 ? (
+          domainTags.map((tag) => (
+            <span
+              key={tag}
+              className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100"
+            >
+              {tag}
+            </span>
+          ))
+        ) : (
+          <span className="text-slate-400 text-xs">—</span>
+        )}
+      </div>
+    </div>
+  </div>
+);
+
 const ExpertsPage = ({
   onOpenPublishedAgents
 }: {
@@ -1616,11 +2107,24 @@ const ExpertsPage = ({
   } | null>(null);
   const [actionReason, setActionReason] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
+  const [detailTarget, setDetailTarget] = useState<{
+    mode: 'view' | 'review';
+    name: string;
+    bio: string;
+    domainTags: string[];
+    pending?: { name: string; bio: string; domainTags: string[] } | null;
+    realName?: string;
+    idCardMasked?: string;
+    idCardFrontUrl?: string;
+    idCardBackUrl?: string;
+  } | null>(null);
   const { data, error, loading, reload } = useAdminQuery<Array<{
     id: string;
     expertNo?: string;
     name: string;
     title: string;
+    bio?: string;
     domainTags?: string[];
     expertLevel: number;
     listed: boolean;
@@ -1628,7 +2132,13 @@ const ExpertsPage = ({
     paused: boolean;
     status: string;
     publishedAgentsCount?: number;
+    followersCount?: number;
     appliedAt?: string;
+    pendingProfile?: { name: string; bio: string; domainTags: string[] } | null;
+    realName?: string;
+    idCardMasked?: string;
+    idCardFrontUrl?: string;
+    idCardBackUrl?: string;
     certification: null | {
       id: string;
       level: number;
@@ -1678,8 +2188,10 @@ const ExpertsPage = ({
             <tr>
               <th className="text-left p-3 w-14">序号</th>
               <th className="text-left p-3">专家</th>
+              <th className="text-left p-3 whitespace-nowrap">专家详情</th>
               <th className="text-left p-3">认证状态</th>
               <th className="text-left p-3 whitespace-nowrap">已上架智能体</th>
+              <th className="text-left p-3 whitespace-nowrap">关注人数</th>
               <th className="text-left p-3 whitespace-nowrap">申请时间</th>
               <th className="text-right p-3">操作</th>
             </tr>
@@ -1689,7 +2201,7 @@ const ExpertsPage = ({
               const cert = expert.certification;
               const frozen = cert?.status === 'frozen';
               const publishedCount = expert.publishedAgentsCount || 0;
-              const tags = expert.domainTags || [];
+              const pending = expert.pendingProfile || null;
               return (
                 <tr key={expert.id} className="border-t border-slate-100 align-top">
                   <td className="p-3 text-slate-500 tabular-nums">{total - index}</td>
@@ -1698,20 +2210,31 @@ const ExpertsPage = ({
                     {expert.expertNo && (
                       <div className="text-[11px] font-mono text-slate-500 mt-0.5">{expert.expertNo}</div>
                     )}
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {tags.length > 0 ? (
-                        tags.map((tag) => (
-                          <span
-                            key={tag}
-                            className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100"
-                          >
-                            {tag}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </div>
+                  </td>
+                  <td className="p-3 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDetailTarget({
+                          mode: pending ? 'review' : 'view',
+                          name: expert.name,
+                          bio: expert.bio || '',
+                          domainTags: expert.domainTags || [],
+                          pending,
+                          realName: expert.realName || '',
+                          idCardMasked: expert.idCardMasked || '',
+                          idCardFrontUrl: expert.idCardFrontUrl || '',
+                          idCardBackUrl: expert.idCardBackUrl || ''
+                        })
+                      }
+                      className={`font-bold cursor-pointer ${
+                        pending
+                          ? 'text-amber-600 hover:text-amber-700'
+                          : 'text-blue-600 hover:text-blue-700'
+                      }`}
+                    >
+                      {pending ? '待审核' : '查看详情'}
+                    </button>
                   </td>
                   <td className="p-3 whitespace-nowrap">
                     {cert ? (
@@ -1754,6 +2277,9 @@ const ExpertsPage = ({
                     ) : (
                       <span className="text-slate-400 tabular-nums">0</span>
                     )}
+                  </td>
+                  <td className="p-3 whitespace-nowrap tabular-nums text-slate-700">
+                    {expert.followersCount ?? 0}
                   </td>
                   <td className="p-3 text-slate-500 whitespace-nowrap">
                     {expert.appliedAt
@@ -1816,6 +2342,164 @@ const ExpertsPage = ({
           <p className="p-6 text-sm text-slate-400 text-center">暂无专家</p>
         )}
       </div>
+
+      {detailTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setDetailTarget(null)}
+        >
+          <div
+            className="bg-white w-full max-w-xl max-h-[80vh] rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-slate-900 truncate">
+                  {detailTarget.mode === 'review' ? '专家详情 · 待审核' : '专家详情'}
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{detailTarget.name}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailTarget(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-5">
+              {(detailTarget.realName ||
+                detailTarget.idCardMasked ||
+                detailTarget.idCardFrontUrl ||
+                detailTarget.idCardBackUrl) && (
+                <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                  {(detailTarget.realName || detailTarget.idCardMasked) && (
+                    <div className="text-xs text-slate-600 space-y-0.5">
+                      {detailTarget.realName && (
+                        <p>
+                          <span className="text-slate-400">真实姓名：</span>
+                          {detailTarget.realName}
+                        </p>
+                      )}
+                      {detailTarget.idCardMasked && (
+                        <p>
+                          <span className="text-slate-400">身份证号：</span>
+                          <span className="font-mono">{detailTarget.idCardMasked}</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {(detailTarget.idCardFrontUrl || detailTarget.idCardBackUrl) && (
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] text-slate-400">身份证照片</p>
+                      <div className="flex flex-wrap gap-3">
+                        {detailTarget.idCardFrontUrl && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewImage({
+                                url: detailTarget.idCardFrontUrl!,
+                                label: '身份证正面'
+                              })
+                            }
+                            className="group text-left cursor-pointer"
+                          >
+                            <div className="w-44 aspect-[1.58/1] rounded-xl border border-slate-200 overflow-hidden bg-slate-50 shadow-2xs">
+                              <img
+                                src={detailTarget.idCardFrontUrl}
+                                alt="身份证正面"
+                                className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"
+                              />
+                            </div>
+                            <div className="mt-1 text-[11px] text-slate-500">
+                              正面（人像面）· 点击放大
+                            </div>
+                          </button>
+                        )}
+                        {detailTarget.idCardBackUrl && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewImage({
+                                url: detailTarget.idCardBackUrl!,
+                                label: '身份证反面'
+                              })
+                            }
+                            className="group text-left cursor-pointer"
+                          >
+                            <div className="w-44 aspect-[1.58/1] rounded-xl border border-slate-200 overflow-hidden bg-slate-50 shadow-2xs">
+                              <img
+                                src={detailTarget.idCardBackUrl}
+                                alt="身份证反面"
+                                className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"
+                              />
+                            </div>
+                            <div className="mt-1 text-[11px] text-slate-500">
+                              反面（国徽面）· 点击放大
+                            </div>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {detailTarget.mode === 'review' && detailTarget.pending ? (
+                <>
+                  <ExpertProfileBlock
+                    heading="当前线上版本"
+                    name={detailTarget.name}
+                    bio={detailTarget.bio}
+                    domainTags={detailTarget.domainTags}
+                  />
+                  <ExpertProfileBlock
+                    heading="本次提交（待审核）"
+                    name={detailTarget.pending.name}
+                    bio={detailTarget.pending.bio}
+                    domainTags={detailTarget.pending.domainTags}
+                    highlight
+                  />
+                </>
+              ) : (
+                <ExpertProfileBlock
+                  name={detailTarget.name}
+                  bio={detailTarget.bio}
+                  domainTags={detailTarget.domainTags}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-6"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 p-4 max-w-3xl w-full space-y-3 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-bold text-slate-900">{previewImage.label}</h3>
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <img
+              src={previewImage.url}
+              alt={previewImage.label}
+              className="w-full rounded-xl border border-slate-100 bg-slate-50"
+            />
+          </div>
+        </div>
+      )}
 
       {actionTarget && (
         <div

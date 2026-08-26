@@ -21,11 +21,12 @@ import { CreatorTierLevel, RealNameVerifyStatus, FDECertStatus, UserIdentityRole
 import { isExpertRole } from '../utils/expertIdentity';
 
 interface TopHeaderProps {
-  currentRoute: MainNavRoute | 'author-profile';
+  currentRoute: MainNavRoute | 'author-profile' | 'agent-detail';
   onNavigate: (route: MainNavRoute) => void;
   onOpenRechargeModal: () => void;
   currentTier?: CreatorTierLevel;
   activeAuthorName?: string | null;
+  activeAgentTitle?: string | null;
   onBackToHome?: () => void;
   unreadCount?: number;
   favoriteAgentCount?: number;
@@ -47,6 +48,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenRechargeModal,
   currentTier = 1 as CreatorTierLevel,
   activeAuthorName,
+  activeAgentTitle,
   onBackToHome,
   unreadCount = 0,
   favoriteAgentCount = 0,
@@ -84,7 +86,22 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
     >
       {/* Left Breadcrumb & Route Context */}
       <div className="flex items-center gap-3">
-        {currentRoute === 'author-profile' ? (
+        {currentRoute === 'agent-detail' ? (
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              onClick={onBackToHome || (() => onNavigate('hellome-home'))}
+              className="text-slate-500 hover:text-slate-900 font-medium flex items-center gap-1 cursor-pointer"
+            >
+              <Home size={13} />
+              <span>返回</span>
+            </button>
+            <ChevronRight size={12} className="text-slate-400" />
+            <span className="text-slate-900 font-bold flex items-center gap-1.5 truncate max-w-[40vw]">
+              <Sparkles size={13} className="text-blue-600 shrink-0" />
+              <span className="truncate">{activeAgentTitle || '智能体详情'}</span>
+            </span>
+          </div>
+        ) : currentRoute === 'author-profile' ? (
           <div className="flex items-center gap-2 text-xs">
             <button
               onClick={onBackToHome || (() => onNavigate('hellome-home'))}

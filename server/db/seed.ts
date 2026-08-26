@@ -23,7 +23,9 @@ export async function seedDatabase(force = false) {
     await ensureDemoUserAndCertifications();
     await ensureSampleExpertApplications();
     await ensureSampleCustomOrders();
+    await ensureSampleExpertPendingProfile();
     await ensureExpertNos();
+    await ensureAgentComments();
     return { seeded: false, agents: existing };
   }
 
@@ -45,6 +47,7 @@ export async function seedDatabase(force = false) {
     await prisma.expertReview.deleteMany();
     await prisma.expertService.deleteMany();
     await prisma.expert.deleteMany();
+    await prisma.agentComment.deleteMany();
     await prisma.agent.deleteMany();
     await prisma.homeBanner.deleteMany();
     await prisma.category.deleteMany();
@@ -134,6 +137,9 @@ export async function seedDatabase(force = false) {
       likesCount: String(agent.likesCount),
       favoritesCount: String(agent.favoritesCount),
       commentsCount: String(agent.commentsCount),
+      sharesCount: String(
+        Math.max(1, Math.round(Number(String(agent.likesCount).replace(/k/i, '000')) * 0.12) || 0)
+      ),
       usageCount: agent.usageCount,
       rating: agent.rating,
       status: 'published',
@@ -175,6 +181,7 @@ export async function seedDatabase(force = false) {
         likesCount: String(agent.likesCount),
         favoritesCount: String(agent.favoritesCount ?? 0),
         commentsCount: '0',
+        sharesCount: '0',
         usageCount: String(agent.usesCount),
         rating: agent.rating,
         status: 'published',
@@ -214,6 +221,7 @@ export async function seedDatabase(force = false) {
         domainTags: toJson(expert.domainTags),
         rating: expert.rating,
         ordersCount: expert.ordersCount,
+        followersCount: Math.max(12, (expert.ordersCount || 0) * 37 + (index + 1) * 19),
         praiseRate: expert.praiseRate,
         responseTime: expert.responseTime,
         bio: expert.bio,
@@ -289,7 +297,9 @@ export async function seedDatabase(force = false) {
   await ensureDemoUserRealName();
   await ensureSampleExpertApplications();
   await ensureSampleCustomOrders();
+  await ensureSampleExpertPendingProfile();
   await ensureExpertNos();
+  await ensureAgentComments();
 
   const count = await prisma.agent.count();
   return { seeded: true, agents: count };
@@ -384,6 +394,11 @@ async function ensureDemoUserAndCertifications() {
           domainTags: toJson(expert.domainTags),
           rating: expert.rating,
           ordersCount: expert.ordersCount,
+          followersCount: Math.max(
+            12,
+            (expert.ordersCount || 0) * 37 +
+              (mockExperts.findIndex((e) => e.id === expert.id) + 1) * 19
+          ),
           praiseRate: expert.praiseRate,
           responseTime: expert.responseTime,
           bio: expert.bio,
@@ -427,7 +442,16 @@ async function ensureDemoUserAndCertifications() {
       data: {
         verifyType: EXPERT_VERIFY_META.verifyType,
         verifyLabel: EXPERT_VERIFY_META.verifyLabel,
-        expertLevel: 1
+        expertLevel: 1,
+        ...(row.followersCount === 0
+          ? {
+              followersCount: Math.max(
+                12,
+                (expert.ordersCount || 0) * 37 +
+                  (mockExperts.findIndex((e) => e.id === expert.id) + 1) * 19
+              )
+            }
+          : {})
       }
     });
 
@@ -446,6 +470,17 @@ async function ensureDemoUserAndCertifications() {
           idCardFrontUrl: '/demo/id-card-front.svg',
           idCardBackUrl: '/demo/id-card-back.svg',
           verifiedAt: new Date()
+        }
+      });
+    } else if (!rn.realName || !rn.idCardFrontUrl || !rn.idCardBackUrl) {
+      await prisma.realNameVerification.update({
+        where: { id: rn.id },
+        data: {
+          realName: rn.realName || expert.name,
+          realNameMasked: rn.realNameMasked || `${expert.name[0]}*`,
+          idCardMasked: rn.idCardMasked || '440301********0000',
+          idCardFrontUrl: rn.idCardFrontUrl || '/demo/id-card-front.svg',
+          idCardBackUrl: rn.idCardBackUrl || '/demo/id-card-back.svg'
         }
       });
     }
@@ -485,13 +520,138 @@ async function ensureSampleExpertApplications() {
   });
 }
 
+/** 给一名已入驻专家写入待审核主页资料，便于后台「专家详情 · 待审核」演示 */
+async function ensureSampleExpertPendingProfile() {
+  const expert = await prisma.expert.findUnique({ where: { id: 'fde-zhangheng' } });
+  if (!expert) return;
+  if (expert.pendingProfileSnapshot?.trim()) return;
+  await prisma.expert.update({
+    where: { id: expert.id },
+    data: {
+      pendingProfileSnapshot: toJson({
+        name: '张恒',
+        bio: '更新后的简介：聚焦金融合规与财报智能体，强化招股书结构化与监管文书自动化。',
+        domainTags: ['财报结构化', '智能风控', '合规筛查', '招股书解析']
+      })
+    }
+  });
+}
+
 export async function ensureExpertApplicationSeed() {
   try {
     await ensureDemoUserAndCertifications();
     await ensureSampleExpertApplications();
     await ensureSampleCustomOrders();
+    await ensureSampleExpertPendingProfile();
+    await ensureAgentComments();
   } catch (error) {
     console.warn('ensureExpertApplicationSeed skipped:', error);
+  }
+}
+
+/** 为通用智能体补齐评论与作者回复（计数含回复） */
+export async function ensureAgentComments() {
+  const catalogAgents = await prisma.agent.findMany({
+    where: { kind: 'catalog' },
+    orderBy: { sortOrder: 'asc' },
+    select: { id: true, authorName: true, authorId: true }
+  });
+  if (catalogAgents.length === 0) return;
+
+  const existingByAgent = await prisma.agentComment.groupBy({
+    by: ['agentId'],
+    _count: { _all: true }
+  });
+  const hasComments = new Set(existingByAgent.map((r) => r.agentId));
+  const missing = catalogAgents.filter((a) => !hasComments.has(a.id));
+
+  if (missing.length === 0) {
+    await syncAgentCommentCounts();
+    return;
+  }
+
+  const avatars = [
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&auto=format&fit=crop&q=80'
+  ];
+
+  const userNames = ['视觉设计师-小澈', '品牌增长-程璐', '政企公文助手-王科', '独立创作者-Leo', '项目助理-陈欣'];
+  const userNames2 = ['晴天工作室', 'SEO老兵-阿威', '跨境运营-小北', '内容主编-阿月', '产品经理-周舟'];
+  const contents = [
+    '这个智能体上手很快，业务场景贴合度很高，已经推荐给同事了。',
+    '效果比预期好，尤其是结构化输出部分，几乎不用二次改。',
+    '临时救急非常管用，格式和语气都很到位。',
+    '希望后续能支持更多行业模板。',
+    '整体体验流畅，收藏了！'
+  ];
+  const contents2 = [
+    '配合作者二次定制后完全打通了我们的资产库，非常给力。',
+    '抓取语义比传统方案更有参考价值。',
+    '已经在团队里推广使用了。',
+    '回复很快，问题解决及时。',
+    '会继续关注版本更新。'
+  ];
+
+  const samples: Array<{
+    id: string;
+    agentId: string;
+    parentId?: string;
+    userName: string;
+    userAvatar: string;
+    isAuthor: boolean;
+    content: string;
+    createdAt: Date;
+  }> = [];
+
+  missing.forEach((agent, i) => {
+    const c1 = `cmt_${agent.id}_1`;
+    samples.push({
+      id: c1,
+      agentId: agent.id,
+      userName: userNames[i % userNames.length],
+      userAvatar: avatars[i % avatars.length],
+      isAuthor: false,
+      content: contents[i % contents.length],
+      createdAt: new Date(Date.now() - (i + 1) * 3600_000)
+    });
+    samples.push({
+      id: `cmt_${agent.id}_2`,
+      agentId: agent.id,
+      userName: userNames2[i % userNames2.length],
+      userAvatar: avatars[(i + 1) % avatars.length],
+      isAuthor: false,
+      content: contents2[i % contents2.length],
+      createdAt: new Date(Date.now() - (i + 2) * 7200_000)
+    });
+    samples.push({
+      id: `cmt_${agent.id}_reply`,
+      agentId: agent.id,
+      parentId: c1,
+      userName: agent.authorName || '作者',
+      userAvatar:
+        'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80',
+      isAuthor: true,
+      content: '感谢反馈！有定制或对接需求可以直接咨询我，会持续优化。',
+      createdAt: new Date(Date.now() - i * 1800_000)
+    });
+  });
+
+  await prisma.agentComment.createMany({ data: samples });
+  await syncAgentCommentCounts();
+}
+
+async function syncAgentCommentCounts() {
+  const groups = await prisma.agentComment.groupBy({
+    by: ['agentId'],
+    _count: { _all: true }
+  });
+  for (const row of groups) {
+    await prisma.agent.update({
+      where: { id: row.agentId },
+      data: { commentsCount: String(row._count._all) }
+    });
   }
 }
 

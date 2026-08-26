@@ -79,6 +79,11 @@ model Agent {
   likesCount      String   @default("0")
   favoritesCount  String   @default("0")
   commentsCount   String   @default("0")
+  sharesCount     String   @default("0")
+  /** 运营手动加成，前台展示 = 实际字段 + manual */
+  likesManual     Int      @default(0)
+  favoritesManual Int      @default(0)
+  sharesManual    Int      @default(0)
   usageCount      String?
   rating          Float?
   status          String   @default("published")
@@ -88,6 +93,23 @@ model Agent {
   solutionPayload String   @default("")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  comments        AgentComment[]
+}
+
+/** 智能体评论（含作者回复：parentId 指向父评论） */
+model AgentComment {
+  id         String   @id
+  agentId    String
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  parentId   String?
+  userId     String?
+  userName   String
+  userAvatar String   @default("")
+  /** 是否为智能体作者的回复 */
+  isAuthor   Boolean  @default(false)
+  content    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model Expert {
@@ -106,6 +128,7 @@ model Expert {
   domainTags      String   @default("[]")
   rating          Float    @default(5)
   ordersCount     Int      @default(0)
+  followersCount  Int      @default(0)
   praiseRate      Int      @default(100)
   responseTime    String   @default("")
   bio             String   @default("")
@@ -117,6 +140,8 @@ model Expert {
   experienceYears Int      @default(0)
   featuredQuote   String   @default("")
   socialLinks     String   @default("{}")
+  /** 非空时表示有待审核的主页资料变更 JSON：{ name, bio, domainTags } */
+  pendingProfileSnapshot String @default("")
   listed          Boolean  @default(true)
   featured        Boolean  @default(false)
   paused          Boolean  @default(false)

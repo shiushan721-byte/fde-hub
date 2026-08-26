@@ -17,7 +17,7 @@ import { CreatorDebugPanelModal } from './components/CreatorDebugPanelModal';
 import { UserIdentityRole, CustomerLeadItem, ConsultationMessage } from './types/creator';
 import { FavoritesView } from './components/FavoritesView';
 import { ExpertsCatalogView } from './components/ExpertsCatalogView';
-import { AgentDetailModal } from './components/AgentDetailModal';
+import { AgentDetailView } from './components/AgentDetailView';
 import { FDEIntroView } from './components/FDEIntroView';
 import { DemoModeBar } from './components/DemoModeBar';
 import { AdminApp } from './admin/AdminApp';
@@ -37,7 +37,7 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
 
   // Global sidebar route: 'hellome-home' | 'author-profile' | 'creator-center' | 'workspace' | 'account' | 'apikey'
-  const [currentRoute, setCurrentRoute] = useState<MainNavRoute | 'author-profile'>('hellome-home');
+  const [currentRoute, setCurrentRoute] = useState<MainNavRoute | 'author-profile' | 'agent-detail'>('hellome-home');
   const [creatorCenterTab, setCreatorCenterTab] = useState<CreatorCenterTab>('my-agents');
   const [activeAuthorId, setActiveAuthorId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -79,9 +79,9 @@ export default function App() {
   const [favoritesInitialTab, setFavoritesInitialTab] = useState<'agents' | 'experts'>('agents');
   const [creatorCenterBackRoute, setCreatorCenterBackRoute] = useState<MainNavRoute | null>(null);
 
-  // Agent Introduction & Detail Modal state
+  // Agent detail page（页内打开，非弹窗）
   const [activeDetailAgent, setActiveDetailAgent] = useState<HellomeAgentItem | null>(null);
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [agentDetailBackRoute, setAgentDetailBackRoute] = useState<MainNavRoute>('hellome-home');
 
   // Modals for becoming expert, recharge, onboarding, and identity debug panel
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
@@ -117,10 +117,22 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Open Agent Detail & Introduction Modal (triggered when clicking Agent card/image)
+  // Open Agent Detail page in main content
   const handleOpenAgentDetail = (agent: HellomeAgentItem) => {
+    const from =
+      currentRoute === 'agent-detail' || currentRoute === 'author-profile'
+        ? agentDetailBackRoute
+        : (currentRoute as MainNavRoute);
+    setAgentDetailBackRoute(from);
     setActiveDetailAgent(agent);
-    setIsDetailModalOpen(true);
+    setCurrentRoute('agent-detail');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleBackFromAgentDetail = () => {
+    setCurrentRoute(agentDetailBackRoute);
+    setActiveDetailAgent(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Toggle Like state on Agent
@@ -299,10 +311,15 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 text-slate-900 flex font-sans selection:bg-blue-600 selection:text-white">
       {/* 1. Left Global Sidebar */}
       <Sidebar
-        currentRoute={currentRoute === 'author-profile' ? 'hellome-home' : currentRoute}
+        currentRoute={
+          currentRoute === 'author-profile' || currentRoute === 'agent-detail'
+            ? 'hellome-home'
+            : currentRoute
+        }
         onNavigate={(route) => {
           setCurrentRoute(route);
           setActiveAuthorId(null);
+          setActiveDetailAgent(null);
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         collapsed={sidebarCollapsed}
@@ -330,10 +347,14 @@ export default function App() {
           onNavigate={(route) => {
             setCurrentRoute(route);
             setActiveAuthorId(null);
+            setActiveDetailAgent(null);
             if (route !== 'creator-center') setCreatorCenterBackRoute(null);
           }}
           activeAuthorName={activeAuthor?.name}
-          onBackToHome={handleBackToHome}
+          activeAgentTitle={activeDetailAgent?.title}
+          onBackToHome={
+            currentRoute === 'agent-detail' ? handleBackFromAgentDetail : handleBackToHome
+          }
           onOpenRechargeModal={() => setIsRechargeOpen(true)}
           unreadCount={
             apiUnreadCount +
@@ -346,6 +367,7 @@ export default function App() {
             setFavoritesInitialTab(tab);
             setCurrentRoute('favorites');
             setActiveAuthorId(null);
+            setActiveDetailAgent(null);
           }}
           onOpenBecomeCreator={() => setIsCreatorOnboardingOpen(true)}
           userRole={userRole}
@@ -436,6 +458,28 @@ export default function App() {
                 initialTab={favoritesInitialTab}
               />
             </div>
+          )}
+
+          {/* ROUTE: Agent Detail Page */}
+          {currentRoute === 'agent-detail' && activeDetailAgent && (
+            <AgentDetailView
+              agent={activeDetailAgent}
+              onBack={handleBackFromAgentDetail}
+              onOpenAuthorProfile={handleOpenAuthorProfile}
+              onConsultAuthor={(agent) => {
+                handleCustomizeFromHellomeAgent(agent);
+              }}
+              onCustomizeFromAgent={(agent) => {
+                handleCustomizeFromHellomeAgent(agent);
+              }}
+              onUseAgent={(agent) => {
+                handleTryAgent(hellomeItemToSolution(agent));
+              }}
+              isFavorite={favoriteAgentIds.includes(activeDetailAgent.id)}
+              onToggleFavorite={handleToggleFavoriteAgent}
+              isLiked={likedAgentIds.includes(activeDetailAgent.id)}
+              onToggleLike={handleToggleLikeAgent}
+            />
           )}
 
           {/* ROUTE 2: Author Profile Page */}
@@ -598,33 +642,6 @@ export default function App() {
         }}
       />
       )}
-
-      {/* Agent Detail & Introduction Modal (点击智能体图片/卡片触发) */}
-      <AgentDetailModal
-        agent={activeDetailAgent}
-        isOpen={isDetailModalOpen}
-        onClose={() => setIsDetailModalOpen(false)}
-        onOpenAuthorProfile={(authorId) => {
-          setIsDetailModalOpen(false);
-          handleOpenAuthorProfile(authorId);
-        }}
-        onConsultAuthor={(agent, initialPrompt) => {
-          setIsDetailModalOpen(false);
-          handleCustomizeFromHellomeAgent(agent);
-        }}
-        onCustomizeFromAgent={(agent) => {
-          setIsDetailModalOpen(false);
-          handleCustomizeFromHellomeAgent(agent);
-        }}
-        onUseAgent={(agent) => {
-          setIsDetailModalOpen(false);
-          handleTryAgent(hellomeItemToSolution(agent));
-        }}
-        isFavorite={activeDetailAgent ? favoriteAgentIds.includes(activeDetailAgent.id) : false}
-        onToggleFavorite={handleToggleFavoriteAgent}
-        isLiked={activeDetailAgent ? likedAgentIds.includes(activeDetailAgent.id) : false}
-        onToggleLike={handleToggleLikeAgent}
-      />
 
       <RechargeModal
         isOpen={isRechargeOpen}
