@@ -37,7 +37,8 @@ import {
   Bookmark,
   ThumbsUp,
   Crown,
-  ArrowLeft
+  ArrowLeft,
+  Plus
 } from 'lucide-react';
 import {
   CreatorTierLevel,
@@ -54,6 +55,8 @@ import {
   mockCustomerLeads,
   creatorDatasetsByTier
 } from '../data/creatorMockData';
+import { mockCaseStudies } from '../data/mockData';
+import { CaseStudy, getCaseStudyImages } from '../types';
 import { AgentPublishWizardModal } from './AgentPublishWizardModal';
 import { CustomerInstancesPanel } from './CustomerInstancesPanel';
 import { CreatorCustomOrdersPanel } from './CustomOrderPanels';
@@ -179,6 +182,23 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
   const [newTagInput, setNewTagInput] = useState('');
   const [profileSavedToast, setProfileSavedToast] = useState(false);
 
+  // Case Studies State (案例管理)
+  const [casesList, setCasesList] = useState<CaseStudy[]>(() => mockCaseStudies.slice(0, 3));
+  const [showAddCaseModal, setShowAddCaseModal] = useState(false);
+  const [newCase, setNewCase] = useState<Partial<CaseStudy>>({
+    title: '',
+    clientIndustry: '跨境电商',
+    clientName: '',
+    challenge: '',
+    solution: '',
+    images: [],
+    coverImage: '',
+    roiMetrics: [
+      { label: '效率提升', value: '+300%' },
+      { label: '月度降本', value: '￥85,000' }
+    ]
+  });
+
   // Agents State (我的智能体)
   const [agentsList, setAgentsList] = useState<CreatorAgentItem[]>(() => mockCreatorAgentsList);
   const [showPublishModal, setShowPublishModal] = useState(false);
@@ -248,6 +268,65 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     e.preventDefault();
     setProfileSavedToast(true);
     setTimeout(() => setProfileSavedToast(false), 3000);
+  };
+
+  const handleAddCaseSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCase.title || !newCase.challenge || !newCase.solution) return;
+    const images =
+      Array.isArray(newCase.images) && newCase.images.length > 0
+        ? newCase.images
+        : newCase.coverImage
+          ? [newCase.coverImage]
+          : [];
+    const entry: CaseStudy = {
+      id: `case-${Date.now()}`,
+      expertId: 'fde-linran',
+      title: newCase.title,
+      clientIndustry: newCase.clientIndustry || '企业服务',
+      clientName: newCase.clientName || '某知名出海品牌',
+      challenge: newCase.challenge,
+      solution: newCase.solution,
+      roiMetrics: newCase.roiMetrics || [{ label: '交付周期', value: '3 天' }],
+      images,
+      coverImage:
+        images[0] ||
+        'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=400&auto=format&fit=crop&q=80',
+      tags: ['落地实战', 'Hermes沙箱', '生产环境']
+    };
+    setCasesList([entry, ...casesList]);
+    setShowAddCaseModal(false);
+    setNewCase({
+      title: '',
+      clientIndustry: '跨境电商',
+      clientName: '',
+      challenge: '',
+      solution: '',
+      images: [],
+      coverImage: '',
+      roiMetrics: [{ label: '效率提升', value: '+300%' }]
+    });
+  };
+
+  const handleCaseCoverUpload = (files?: FileList | null) => {
+    if (!files?.length) return;
+    const list = Array.from(files);
+    list.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = String(reader.result || '');
+        if (!url) return;
+        setNewCase((prev) => {
+          const nextImages = [...(prev.images || []), url];
+          return {
+            ...prev,
+            images: nextImages,
+            coverImage: nextImages[0] || ''
+          };
+        });
+      };
+      reader.readAsDataURL(file);
+    });
   };
 
   // Handle Toggle Agent Status (Publish / Unpublish)
@@ -512,6 +591,88 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                 </div>
               </div>
             </form>
+
+            {/* Case Studies Management */}
+            <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">落地案例管理 ({casesList.length})</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    展示已完成的企业落地实践，突出业务痛点、解决方案与 ROI
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddCaseModal(true)}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus size={14} />
+                  <span>添加新案例</span>
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {casesList.map((c) => {
+                  const imgs = getCaseStudyImages(c);
+                  return (
+                  <div
+                    key={c.id}
+                    className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 text-xs"
+                  >
+                    {imgs.length > 0 && (
+                      <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                        {imgs.map((url, idx) => (
+                          <div
+                            key={`${c.id}-${idx}`}
+                            className="w-28 sm:w-32 aspect-[16/10] rounded-xl overflow-hidden bg-slate-200 border border-slate-200 shrink-0"
+                          >
+                            <img
+                              src={url}
+                              alt={`${c.title} ${idx + 1}`}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                          <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold shrink-0">
+                            {c.clientIndustry}
+                          </span>
+                          <h4 className="font-bold text-slate-900 text-sm">{c.title}</h4>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCasesList(casesList.filter((item) => item.id !== c.id))}
+                          className="text-rose-500 hover:text-rose-700 text-xs font-semibold cursor-pointer shrink-0"
+                        >
+                          删除
+                        </button>
+                      </div>
+
+                      <div className="space-y-2 text-[11px] text-slate-600">
+                        <div>
+                          <strong className="text-rose-800">痛点：</strong>
+                          {c.challenge}
+                        </div>
+                        <div>
+                          <strong className="text-blue-800">方案：</strong>
+                          {c.solution}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  );
+                })}
+                {casesList.length === 0 && (
+                  <p className="text-xs text-slate-400 text-center py-6">暂无落地案例，点击上方添加</p>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Right 1 Col: Public Profile Preview Card */}
@@ -1268,6 +1429,145 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       })()}
 
       {/* Agent Publish / Skill Replacement Wizard Modal */}
+      {showAddCaseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-sm text-slate-900">添加新企业落地案例</h3>
+              <button
+                type="button"
+                onClick={() => setShowAddCaseModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-500 text-xs font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAddCaseSubmit} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">案例标题</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="如：某头部出海女装品牌爆款文案 Agent 落地"
+                  value={newCase.title || ''}
+                  onChange={(e) => setNewCase({ ...newCase, title: e.target.value })}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700">行业分类</label>
+                  <input
+                    type="text"
+                    value={newCase.clientIndustry || ''}
+                    onChange={(e) => setNewCase({ ...newCase, clientIndustry: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700">客户对象</label>
+                  <input
+                    type="text"
+                    placeholder="如：跨境年销 5000 万美金品牌"
+                    value={newCase.clientName || ''}
+                    onChange={(e) => setNewCase({ ...newCase, clientName: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">案例图片（可多张）</label>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    {(newCase.images || []).map((url, idx) => (
+                      <div key={`new-case-img-${idx}`} className="relative w-28 aspect-[16/10]">
+                        <img
+                          src={url}
+                          alt={`预览 ${idx + 1}`}
+                          className="w-full h-full object-cover rounded-xl border border-slate-200"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNewCase((prev) => {
+                              const next = (prev.images || []).filter((_, i) => i !== idx);
+                              return { ...prev, images: next, coverImage: next[0] || '' };
+                            })
+                          }
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-rose-600 text-white text-[10px] font-bold cursor-pointer"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <label className="relative w-28 aspect-[16/10] rounded-xl border border-dashed border-slate-300 bg-slate-50 overflow-hidden cursor-pointer hover:border-blue-400 hover:bg-blue-50/40 transition-colors flex flex-col items-center justify-center gap-1 text-slate-400">
+                      <Upload size={16} />
+                      <span className="text-[10px] font-semibold">添加图片</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          handleCaseCoverUpload(e.target.files);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    支持一次选择多张图片，用于案例列表与公开主页展示。
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">业务痛点 (Challenge)</label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="描述客户在落地前遇到的效率瓶颈或成本问题..."
+                  value={newCase.challenge || ''}
+                  onChange={(e) => setNewCase({ ...newCase, challenge: e.target.value })}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">FDE 落地解决方案 (Solution)</label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="描述基于 Hermes 架构与智能体工作流的解决路径..."
+                  value={newCase.solution || ''}
+                  onChange={(e) => setNewCase({ ...newCase, solution: e.target.value })}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCaseModal(false)}
+                  className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
+                >
+                  确认添加案例
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <AgentPublishWizardModal
         isOpen={showPublishModal}
         onClose={() => {

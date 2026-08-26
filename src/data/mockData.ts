@@ -816,6 +816,11 @@ export const mockCaseStudies: CaseStudy[] = [
       { label: '首月挽回错发损失', value: '￥160,000+' }
     ],
     coverImage: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=600&auto=format&fit=crop&q=80',
+    images: [
+      'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1556740758-90de374c12ad?w=800&auto=format&fit=crop&q=80'
+    ],
     tags: ['电商客服', '大促提效', 'ERP深度打通', '千万级降本']
   },
   {
@@ -832,6 +837,10 @@ export const mockCaseStudies: CaseStudy[] = [
       { label: '年节省外语客服人力', value: '￥720,000' }
     ],
     coverImage: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600&auto=format&fit=crop&q=80',
+    images: [
+      'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&auto=format&fit=crop&q=80'
+    ],
     tags: ['跨境出海', '多语种智能体', 'Shopify集成', '退货率压降']
   },
   {
@@ -848,6 +857,10 @@ export const mockCaseStudies: CaseStudy[] = [
       { label: '新技师独立上岗周期', value: '由 6 个月 → 1 个月' }
     ],
     coverImage: 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=600&auto=format&fit=crop&q=80',
+    images: [
+      'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1565043589221-1a6fd9ae45c7?w=800&auto=format&fit=crop&q=80'
+    ],
     tags: ['智能制造', '工业离线一体机', '设备停机压降', '车间实操']
   }
 ];

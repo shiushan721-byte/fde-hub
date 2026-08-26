@@ -26,7 +26,7 @@ import { api } from './lib/api';
 import { ensureMarketplaceSession } from './lib/marketplaceAuth';
 
 import {
-  mockServicePackages,
+  mockCaseStudies,
   HellomeAgentItem
 } from './data/mockData';
 import { FDEExpert, AgentSolution, ConsultationFormState } from './types';
@@ -487,7 +487,7 @@ export default function App() {
             <FDEProfileView
               expert={activeAuthor}
               agentSolutions={catalog.solutions}
-              servicePackages={mockServicePackages}
+              caseStudies={mockCaseStudies}
               onBack={handleBackToHome}
               onConsult={handleOpenConsultExpert}
               onTryAgent={handleTryAgent}

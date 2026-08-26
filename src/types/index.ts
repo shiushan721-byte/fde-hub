@@ -115,8 +115,18 @@ export interface CaseStudy {
     label: string;
     value: string;
   }>;
-  coverImage: string;
+  /** @deprecated 使用 images；保留兼容旧数据 */
+  coverImage?: string;
+  /** 案例配图，支持多张 */
+  images?: string[];
   tags: string[];
+}
+
+export function getCaseStudyImages(c: Pick<CaseStudy, 'images' | 'coverImage'>): string[] {
+  if (Array.isArray(c.images) && c.images.length > 0) {
+    return c.images.filter(Boolean);
+  }
+  return c.coverImage ? [c.coverImage] : [];
 }
 
 export interface ClientReview {

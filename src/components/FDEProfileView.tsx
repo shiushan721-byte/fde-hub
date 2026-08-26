@@ -11,12 +11,13 @@ import {
   Check,
   QrCode
 } from 'lucide-react';
-import { FDEExpert, AgentSolution } from '../types';
+import { FDEExpert, AgentSolution, CaseStudy, getCaseStudyImages } from '../types';
 import { FDEBadge } from './FDEBadge';
 
 interface FDEProfileViewProps {
   expert: FDEExpert;
   agentSolutions: AgentSolution[];
+  caseStudies?: CaseStudy[];
   onBack: () => void;
   onConsult: (expert: FDEExpert, initialPrompt?: string) => void;
   onTryAgent: (agent: AgentSolution) => void;
@@ -30,6 +31,7 @@ interface FDEProfileViewProps {
 export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
   expert,
   agentSolutions,
+  caseStudies = [],
   onBack,
   onConsult,
   onTryAgent,
@@ -41,10 +43,12 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
 }) => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
 
   // Filter items authored by or assigned to this expert
   const expertSolutions = agentSolutions.filter((a) => a.authorId === expert.id);
   const displaySolutions = expertSolutions;
+  const displayCases = caseStudies.filter((c) => c.expertId === expert.id);
 
   // Aggregate engagement across this expert's agents
   const totalLikes = displaySolutions.reduce((acc, curr) => acc + (curr.likesCount || 0), 0);
@@ -283,7 +287,127 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
               </div>
             )}
         </div>
+
+        {displayCases.length > 0 && (
+          <div className="mt-10 space-y-4">
+            <div className="mb-2 flex items-center gap-2">
+              <Sparkles size={16} className="text-blue-600" />
+              <h2 className="text-sm font-bold text-slate-900">落地案例 ({displayCases.length})</h2>
+            </div>
+            <div className="space-y-5">
+              {displayCases.map((c) => {
+                const imgs = getCaseStudyImages(c);
+                return (
+                  <div
+                    key={c.id}
+                    className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-4"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-md border border-blue-200/60">
+                            {c.clientIndustry}
+                          </span>
+                          <span className="text-xs text-slate-500">服务对象：{c.clientName}</span>
+                        </div>
+                        <h3 className="text-base sm:text-lg font-bold text-slate-900 mt-1.5">{c.title}</h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onConsult(expert, `想了解您在案例「${c.title}」中的落地实现与交付方案`)
+                        }
+                        className="px-3.5 py-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-200/60 transition-colors cursor-pointer shrink-0 flex items-center gap-1.5"
+                      >
+                        <MessageSquare size={13} />
+                        <span>咨询同款方案</span>
+                      </button>
+                    </div>
+
+                    {imgs.length > 0 && (
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        {imgs.map((url, idx) => (
+                          <button
+                            key={`${c.id}-img-${idx}`}
+                            type="button"
+                            onClick={() =>
+                              setPreviewImage({ url, label: `${c.title} · 图 ${idx + 1}` })
+                            }
+                            className="shrink-0 w-36 sm:w-44 aspect-[16/10] rounded-xl overflow-hidden border border-slate-200 bg-slate-100 cursor-pointer group"
+                          >
+                            <img
+                              src={url}
+                              alt={`${c.title} ${idx + 1}`}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                      <div className="p-3.5 bg-rose-50/60 rounded-2xl border border-rose-100 space-y-1">
+                        <span className="font-bold text-rose-900">业务痛点</span>
+                        <p className="text-rose-950 leading-relaxed">{c.challenge}</p>
+                      </div>
+                      <div className="p-3.5 bg-blue-50/60 rounded-2xl border border-blue-100 space-y-1">
+                        <span className="font-bold text-blue-900">解决方案</span>
+                        <p className="text-blue-950 leading-relaxed">{c.solution}</p>
+                      </div>
+                      <div className="p-3.5 bg-emerald-50/60 rounded-2xl border border-emerald-100 space-y-2">
+                        <span className="font-bold text-emerald-900">产出与 ROI</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          {c.roiMetrics.map((m, idx) => (
+                            <div
+                              key={idx}
+                              className="bg-white p-2 rounded-xl border border-emerald-200 text-center"
+                            >
+                              <span className="text-sm font-extrabold text-emerald-700 block">
+                                {m.value}
+                              </span>
+                              <span className="text-[10px] text-slate-500 block mt-0.5">{m.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-6"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 p-4 max-w-3xl w-full space-y-3 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-bold text-slate-900 truncate">{previewImage.label}</h3>
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <img
+              src={previewImage.url}
+              alt={previewImage.label}
+              referrerPolicy="no-referrer"
+              className="w-full rounded-xl border border-slate-100 bg-slate-50"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Share Modal Dialog */}
       {showShareModal && (
