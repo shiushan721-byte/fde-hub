@@ -2041,12 +2041,14 @@ const DeliveriesPage = () => {
 const ExpertProfileBlock = ({
   heading,
   name,
+  title,
   bio,
   domainTags,
   highlight
 }: {
   heading?: string;
   name: string;
+  title?: string;
   bio: string;
   domainTags: string[];
   highlight?: boolean;
@@ -2068,6 +2070,10 @@ const ExpertProfileBlock = ({
     <div className="space-y-1">
       <div className="text-[11px] text-slate-400">专家名称</div>
       <div className="text-sm font-bold text-slate-900">{name || '—'}</div>
+    </div>
+    <div className="space-y-1">
+      <div className="text-[11px] text-slate-400">专家头衔</div>
+      <div className="text-xs text-slate-700">{title?.trim() || '—'}</div>
     </div>
     <div className="space-y-1">
       <div className="text-[11px] text-slate-400">专家简介</div>
@@ -2109,11 +2115,10 @@ const ExpertsPage = ({
   const [actionBusy, setActionBusy] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
   const [detailTarget, setDetailTarget] = useState<{
-    mode: 'view' | 'review';
     name: string;
+    title: string;
     bio: string;
     domainTags: string[];
-    pending?: { name: string; bio: string; domainTags: string[] } | null;
     realName?: string;
     idCardMasked?: string;
     idCardFrontUrl?: string;
@@ -2134,7 +2139,6 @@ const ExpertsPage = ({
     publishedAgentsCount?: number;
     followersCount?: number;
     appliedAt?: string;
-    pendingProfile?: { name: string; bio: string; domainTags: string[] } | null;
     realName?: string;
     idCardMasked?: string;
     idCardFrontUrl?: string;
@@ -2201,7 +2205,6 @@ const ExpertsPage = ({
               const cert = expert.certification;
               const frozen = cert?.status === 'frozen';
               const publishedCount = expert.publishedAgentsCount || 0;
-              const pending = expert.pendingProfile || null;
               return (
                 <tr key={expert.id} className="border-t border-slate-100 align-top">
                   <td className="p-3 text-slate-500 tabular-nums">{total - index}</td>
@@ -2216,24 +2219,19 @@ const ExpertsPage = ({
                       type="button"
                       onClick={() =>
                         setDetailTarget({
-                          mode: pending ? 'review' : 'view',
                           name: expert.name,
+                          title: expert.title || '',
                           bio: expert.bio || '',
                           domainTags: expert.domainTags || [],
-                          pending,
                           realName: expert.realName || '',
                           idCardMasked: expert.idCardMasked || '',
                           idCardFrontUrl: expert.idCardFrontUrl || '',
                           idCardBackUrl: expert.idCardBackUrl || ''
                         })
                       }
-                      className={`font-bold cursor-pointer ${
-                        pending
-                          ? 'text-amber-600 hover:text-amber-700'
-                          : 'text-blue-600 hover:text-blue-700'
-                      }`}
+                      className="font-bold cursor-pointer text-blue-600 hover:text-blue-700"
                     >
-                      {pending ? '待审核' : '查看详情'}
+                      查看详情
                     </button>
                   </td>
                   <td className="p-3 whitespace-nowrap">
@@ -2354,9 +2352,7 @@ const ExpertsPage = ({
           >
             <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h3 className="text-sm font-black text-slate-900 truncate">
-                  {detailTarget.mode === 'review' ? '专家详情 · 待审核' : '专家详情'}
-                </h3>
+                <h3 className="text-sm font-black text-slate-900 truncate">专家详情</h3>
                 <p className="text-[11px] text-slate-400 mt-0.5 truncate">{detailTarget.name}</p>
               </div>
               <button
@@ -2445,29 +2441,12 @@ const ExpertsPage = ({
                 </div>
               )}
 
-              {detailTarget.mode === 'review' && detailTarget.pending ? (
-                <>
-                  <ExpertProfileBlock
-                    heading="当前线上版本"
-                    name={detailTarget.name}
-                    bio={detailTarget.bio}
-                    domainTags={detailTarget.domainTags}
-                  />
-                  <ExpertProfileBlock
-                    heading="本次提交（待审核）"
-                    name={detailTarget.pending.name}
-                    bio={detailTarget.pending.bio}
-                    domainTags={detailTarget.pending.domainTags}
-                    highlight
-                  />
-                </>
-              ) : (
-                <ExpertProfileBlock
-                  name={detailTarget.name}
-                  bio={detailTarget.bio}
-                  domainTags={detailTarget.domainTags}
-                />
-              )}
+              <ExpertProfileBlock
+                name={detailTarget.name}
+                title={detailTarget.title}
+                bio={detailTarget.bio}
+                domainTags={detailTarget.domainTags}
+              />
             </div>
           </div>
         </div>
