@@ -109,8 +109,10 @@ export interface CaseStudy {
   title: string;
   clientIndustry: string;
   clientName: string;
-  challenge: string;
+  /** @deprecated 不再在前台展示 */
+  challenge?: string;
   solution: string;
+  /** 产出结果：value=结果，label=说明；最多 4 条 */
   roiMetrics: Array<{
     label: string;
     value: string;

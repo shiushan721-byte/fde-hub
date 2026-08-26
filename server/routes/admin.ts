@@ -535,7 +535,7 @@ adminRouter.get('/experts', async (_req, res) => {
   });
   const expertIds = experts.map((e) => e.id);
   const userIds = experts.map((e) => e.userId).filter((id): id is string => Boolean(id));
-  const [publishedCounts, applications, realNames] = await Promise.all([
+  const [publishedCounts, applications, realNames, expertCases] = await Promise.all([
     expertIds.length
       ? prisma.agent.groupBy({
           by: ['authorId'],
@@ -563,6 +563,12 @@ adminRouter.get('/experts', async (_req, res) => {
             idCardBackUrl: true
           }
         })
+      : Promise.resolve([]),
+    expertIds.length
+      ? prisma.expertCase.findMany({
+          where: { expertId: { in: expertIds } },
+          select: { expertId: true, payload: true }
+        })
       : Promise.resolve([])
   ]);
   const countByAuthor = new Map(
@@ -576,6 +582,12 @@ adminRouter.get('/experts', async (_req, res) => {
   const rnByUserId = new Map<string, (typeof realNames)[number]>();
   for (const rn of realNames) {
     if (!rnByUserId.has(rn.userId)) rnByUserId.set(rn.userId, rn);
+  }
+  const casesByExpert = new Map<string, Record<string, unknown>[]>();
+  for (const row of expertCases) {
+    const list = casesByExpert.get(row.expertId) || [];
+    list.push(parseJson<Record<string, unknown>>(row.payload, {}));
+    casesByExpert.set(row.expertId, list);
   }
 
   return ok(
@@ -605,6 +617,7 @@ adminRouter.get('/experts', async (_req, res) => {
           expert.certification?.certifiedAt?.toISOString() ||
           expert.createdAt.toISOString(),
         pendingProfile,
+        cases: casesByExpert.get(expert.id) || [],
         realName: rn?.realName || rn?.realNameMasked || '',
         idCardMasked: rn?.idCardMasked || '',
         idCardFrontUrl: rn?.idCardFrontUrl || '',

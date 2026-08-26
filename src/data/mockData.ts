@@ -862,6 +862,128 @@ export const mockCaseStudies: CaseStudy[] = [
       'https://images.unsplash.com/photo-1565043589221-1a6fd9ae45c7?w=800&auto=format&fit=crop&q=80'
     ],
     tags: ['智能制造', '工业离线一体机', '设备停机压降', '车间实操']
+  },
+  {
+    id: 'case-zhouchen-1',
+    expertId: 'fde-zhouchen',
+    title: '某连锁零售总部：跨部门流程梳理与智能体落地蓝图',
+    clientIndustry: '零售连锁 / 企业服务',
+    clientName: '华南某区域连锁超市总部（80+ 门店）',
+    solution:
+      '用两周工作坊拆解采购、仓配、门店报损三条链路，输出可落地的智能体优先级清单与 Hermes PoC 路径，并完成飞书审批流与知识库挂载方案。',
+    roiMetrics: [
+      { label: '流程节点梳理完成', value: '46 个' },
+      { label: '可自动化场景识别', value: '12 项' },
+      { label: '首期 PoC 上线周期', value: '3 周' },
+      { label: '跨部门对齐会议压缩', value: '-40%' }
+    ],
+    coverImage: 'https://images.unsplash.com/photo-1552664730-d307ca884978?w=600&auto=format&fit=crop&q=80',
+    images: [
+      'https://images.unsplash.com/photo-1552664730-d307ca884978?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=800&auto=format&fit=crop&q=80'
+    ],
+    tags: ['流程梳理', '需求调研', '智能体规划', '飞书集成']
+  },
+  {
+    id: 'case-zhouchen-2',
+    expertId: 'fde-zhouchen',
+    title: '某制造型企业：售后工单智能分派试点',
+    clientIndustry: '离散制造',
+    clientName: '东莞某精密模具厂售后中心',
+    solution:
+      '基于历史工单与设备型号知识库，搭建售后智能分派助手，自动识别紧急度并推荐技师；对接钉钉群机器人推送处理进度。',
+    roiMetrics: [
+      { label: '工单首响时长缩短', value: '从 4h → 35min' },
+      { label: '分派准确率', value: '91%' },
+      { label: '试点覆盖产线', value: '3 条' }
+    ],
+    coverImage: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=600&auto=format&fit=crop&q=80',
+    images: [
+      'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1504917595217-d4dc5ebe6122?w=800&auto=format&fit=crop&q=80'
+    ],
+    tags: ['工单分派', '知识库', '钉钉集成']
+  },
+  {
+    id: 'case-zhangheng-1',
+    expertId: 'fde-zhangheng',
+    title: '某券商研究所：招股书与财报结构化抽取',
+    clientIndustry: '金融科技',
+    clientName: '上海某中型券商研究部',
+    solution:
+      '搭建招股书/年报字段抽取与风控红旗检测流水线，输出结构化表格并对接内部研报 CMS，人工复核工作量显著下降。',
+    roiMetrics: [
+      { label: '单篇研报整理耗时', value: '从 6h → 40min' },
+      { label: '关键字段抽取准确率', value: '94%' },
+      { label: '月均处理文档量', value: '180+ 份' }
+    ],
+    coverImage: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&auto=format&fit=crop&q=80',
+    images: [
+      'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&auto=format&fit=crop&q=80'
+    ],
+    tags: ['财报结构化', '合规筛查', '研报提效']
+  },
+  {
+    id: 'case-chenzimo-1',
+    expertId: 'fde-chenzimo',
+    title: '某建筑央企：合同条款风险穿透审查',
+    clientIndustry: '建筑工程与法务科技',
+    clientName: '某央企基建项目法务部',
+    solution:
+      '将历史争议条款沉淀为审查规则，部署合同智能审查助手，自动标注延期、付款、违约金等高风险条款并生成修改建议。',
+    roiMetrics: [
+      { label: '单份合同初审时长', value: '从 2 天 → 3h' },
+      { label: '高风险条款漏检率', value: '-70%' },
+      { label: '信创环境适配', value: '已通过' }
+    ],
+    coverImage: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=600&auto=format&fit=crop&q=80',
+    images: [
+      'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1507679799987-4e9946947b4d?w=800&auto=format&fit=crop&q=80'
+    ],
+    tags: ['合同审查', '法律法规', '信创适配']
+  },
+  {
+    id: 'case-maya-1',
+    expertId: 'fde-maya',
+    title: '某美妆品牌：小红书爆款脚本矩阵投放',
+    clientIndustry: '内容营销',
+    clientName: '杭州某新锐美妆品牌增长部',
+    solution:
+      '搭建爆款脚本生成与多账号排期工作流，按人群钩子自动产出 Hook-Body-CTA 结构文案，并同步投放素材库。',
+    roiMetrics: [
+      { label: '月均爆款素材产出', value: '120+ 条' },
+      { label: '单条素材制作周期', value: '从 2 天 → 20min' },
+      { label: '投放 CTR 提升', value: '+28%' }
+    ],
+    coverImage: 'https://images.unsplash.com/photo-1611162616475-46b635cb6868?w=600&auto=format&fit=crop&q=80',
+    images: [
+      'https://images.unsplash.com/photo-1611162616475-46b635cb6868?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1563986768609-322da13575f3?w=800&auto=format&fit=crop&q=80'
+    ],
+    tags: ['爆款脚本', '小红书矩阵', '内容增长']
+  },
+  {
+    id: 'case-emily-1',
+    expertId: 'fde-emily',
+    title: '某三甲医院：慢病随访与导诊助手试点',
+    clientIndustry: '医疗健康',
+    clientName: '华东某三甲医院内分泌科',
+    solution:
+      '基于随访手册与院内知识库搭建慢病随访助手，支持复诊提醒、用药问答与异常指标升级人工；对接微信服务号触达患者。',
+    roiMetrics: [
+      { label: '随访覆盖率提升', value: '+35%' },
+      { label: '护士重复答疑时长', value: '-50%' },
+      { label: '试点患者满意度', value: '4.7/5' }
+    ],
+    coverImage: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=600&auto=format&fit=crop&q=80',
+    images: [
+      'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1516549655169-df83a0774514?w=800&auto=format&fit=crop&q=80'
+    ],
+    tags: ['慢病随访', '导诊', '医疗知识库']
   }
 ];
 

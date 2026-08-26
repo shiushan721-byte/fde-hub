@@ -234,31 +234,41 @@ export const DeliveryProposalModal: React.FC<{
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  variant?: 'modal' | 'drawer';
   children: React.ReactNode;
-}> = ({ isOpen, onClose, title = '定制交付方案', children }) => {
+}> = ({ isOpen, onClose, title = '定制交付方案', variant = 'modal', children }) => {
   if (!isOpen) return null;
+  const isDrawer = variant === 'drawer';
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+      className={
+        isDrawer
+          ? 'fixed inset-0 z-50 bg-black/40 flex justify-end animate-in fade-in duration-200'
+          : 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs'
+      }
       onClick={onClose}
     >
       <div
-        className="bg-white w-full max-w-2xl max-h-[88vh] rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col"
+        className={
+          isDrawer
+            ? 'w-full max-w-3xl h-full bg-white border-l border-slate-200 shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-right duration-300'
+            : 'bg-white w-full max-w-2xl max-h-[88vh] rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col'
+        }
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label={title}
       >
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-          <h3 className="text-sm font-bold text-slate-900">{title}</h3>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <h3 className="text-base font-bold text-slate-900">{title}</h3>
           <button
             type="button"
             onClick={onClose}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
           >
-            <X size={16} />
+            <X size={18} />
           </button>
         </div>
-        <div className="p-4 overflow-y-auto flex-1">{children}</div>
+        <div className={`overflow-y-auto flex-1 ${isDrawer ? 'p-6' : 'p-4'}`}>{children}</div>
       </div>
     </div>
   );

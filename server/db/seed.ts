@@ -26,6 +26,7 @@ export async function seedDatabase(force = false) {
     await ensureSampleExpertPendingProfile();
     await ensureExpertNos();
     await ensureAgentComments();
+    await ensureExpertCasesSynced();
     return { seeded: false, agents: existing };
   }
 
@@ -537,6 +538,27 @@ async function ensureSampleExpertPendingProfile() {
   });
 }
 
+/** 同步 mock 落地案例到 ExpertCase（含多图） */
+async function ensureExpertCasesSynced() {
+  for (const item of mockCaseStudies) {
+    const existing = await prisma.expertCase.findUnique({ where: { id: item.id } });
+    if (!existing) {
+      await prisma.expertCase.create({
+        data: {
+          id: item.id,
+          expertId: item.expertId,
+          payload: toJson(item)
+        }
+      });
+      continue;
+    }
+    await prisma.expertCase.update({
+      where: { id: item.id },
+      data: { payload: toJson(item) }
+    });
+  }
+}
+
 export async function ensureExpertApplicationSeed() {
   try {
     await ensureDemoUserAndCertifications();
@@ -544,6 +566,7 @@ export async function ensureExpertApplicationSeed() {
     await ensureSampleCustomOrders();
     await ensureSampleExpertPendingProfile();
     await ensureAgentComments();
+    await ensureExpertCasesSynced();
   } catch (error) {
     console.warn('ensureExpertApplicationSeed skipped:', error);
   }

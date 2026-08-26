@@ -22,6 +22,20 @@ import {
   hasViewableProposal
 } from '../components/DeliveryProposalReviewPanel';
 import type { DeliveryProposal } from '../types/deliveryProposal';
+import { getCaseStudyImages } from '../types';
+
+type AdminCaseItem = {
+  id?: string;
+  title?: string;
+  clientIndustry?: string;
+  clientName?: string;
+  solution?: string;
+  challenge?: string;
+  coverImage?: string;
+  images?: string[];
+  roiMetrics?: Array<{ label: string; value: string }>;
+  tags?: string[];
+};
 
 type AdminPage =
   | 'agents'
@@ -583,30 +597,35 @@ const CustomAgentsPage = () => {
 
       {detailItem && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+          className="fixed inset-0 z-50 bg-black/40 flex justify-end animate-in fade-in duration-200"
           onClick={() => setDetailItem(null)}
         >
           <div
-            className="bg-white w-full max-w-lg rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
+            className="w-full max-w-3xl h-full bg-white border-l border-slate-200 shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-right duration-300"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-labelledby="admin-custom-requirement-title"
           >
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 id="admin-custom-requirement-title" className="text-sm font-bold text-slate-900">
-                定制需求详情
-              </h3>
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+              <div className="min-w-0">
+                <h3 id="admin-custom-requirement-title" className="text-base font-bold text-slate-900">
+                  定制需求详情
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5 truncate">
+                  {detailItem.order?.orderNo || detailItem.title}
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setDetailItem(null)}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
                 aria-label="关闭"
               >
-                <X size={16} />
+                <X size={18} />
               </button>
             </div>
-            <div className="px-5 py-4 space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-3">
                 <div>
                   <div className="text-slate-400">编号</div>
                   <div className="font-mono text-slate-800 mt-0.5">
@@ -647,22 +666,13 @@ const CustomAgentsPage = () => {
               </div>
               <div>
                 <div className="text-slate-400 mb-1.5">需求描述</div>
-                <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-xl p-3 border border-slate-100">
+                <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-xl p-4 border border-slate-100">
                   {detailItem.requirement ||
                     detailItem.desc ||
                     detailItem.order?.title ||
                     '暂无需求描述'}
                 </p>
               </div>
-            </div>
-            <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setDetailItem(null)}
-                className="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold cursor-pointer"
-              >
-                关闭
-              </button>
             </div>
           </div>
         </div>
@@ -672,6 +682,7 @@ const CustomAgentsPage = () => {
         hasViewableProposal(proposalItem.order.deliveryProposal as DeliveryProposal) && (
           <DeliveryProposalModal
             isOpen
+            variant="drawer"
             onClose={() => setProposalItem(null)}
             title={`定制交付方案 · ${proposalItem.order.orderNo}`}
           >
@@ -1137,27 +1148,27 @@ const AgentsPage = ({
 
       {detailTarget && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/40 flex justify-end animate-in fade-in duration-200"
           onClick={() => setDetailTarget(null)}
         >
           <div
-            className="bg-white w-full max-w-lg max-h-[80vh] rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col"
+            className="w-full max-w-3xl h-full bg-white border-l border-slate-200 shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-right duration-300"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
               <div className="min-w-0">
-                <h3 className="text-sm font-black text-slate-900 truncate">智能体详情</h3>
-                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{detailTarget.title}</p>
+                <h3 className="text-base font-black text-slate-900 truncate">智能体详情</h3>
+                <p className="text-xs text-slate-400 mt-0.5 truncate">{detailTarget.title}</p>
               </div>
               <button
                 type="button"
                 onClick={() => setDetailTarget(null)}
                 className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
               >
-                <X size={16} />
+                <X size={18} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
               {detailTarget.coverImage ? (
                 <div className="rounded-xl overflow-hidden bg-slate-100 ring-1 ring-slate-200/80">
                   <img
@@ -1173,10 +1184,10 @@ const AgentsPage = ({
                 </div>
               )}
               <div className="space-y-2">
-                <h4 className="text-sm font-black text-slate-900 leading-snug">
+                <h4 className="text-base font-black text-slate-900 leading-snug">
                   {detailTarget.title}
                 </h4>
-                <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
+                <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
                   {detailTarget.desc?.trim() || '暂无简介'}
                 </p>
               </div>
@@ -2119,6 +2130,7 @@ const ExpertsPage = ({
     title: string;
     bio: string;
     domainTags: string[];
+    cases: AdminCaseItem[];
     realName?: string;
     idCardMasked?: string;
     idCardFrontUrl?: string;
@@ -2139,6 +2151,7 @@ const ExpertsPage = ({
     publishedAgentsCount?: number;
     followersCount?: number;
     appliedAt?: string;
+    cases?: AdminCaseItem[];
     realName?: string;
     idCardMasked?: string;
     idCardFrontUrl?: string;
@@ -2223,6 +2236,7 @@ const ExpertsPage = ({
                           title: expert.title || '',
                           bio: expert.bio || '',
                           domainTags: expert.domainTags || [],
+                          cases: expert.cases || [],
                           realName: expert.realName || '',
                           idCardMasked: expert.idCardMasked || '',
                           idCardFrontUrl: expert.idCardFrontUrl || '',
@@ -2343,27 +2357,27 @@ const ExpertsPage = ({
 
       {detailTarget && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/40 flex justify-end animate-in fade-in duration-200"
           onClick={() => setDetailTarget(null)}
         >
           <div
-            className="bg-white w-full max-w-xl max-h-[80vh] rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col"
+            className="w-full max-w-3xl h-full bg-white border-l border-slate-200 shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-right duration-300"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
               <div className="min-w-0">
-                <h3 className="text-sm font-black text-slate-900 truncate">专家详情</h3>
-                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{detailTarget.name}</p>
+                <h3 className="text-base font-black text-slate-900 truncate">专家详情</h3>
+                <p className="text-xs text-slate-400 mt-0.5 truncate">{detailTarget.name}</p>
               </div>
               <button
                 type="button"
                 onClick={() => setDetailTarget(null)}
                 className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
               >
-                <X size={16} />
+                <X size={18} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-5">
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
               {(detailTarget.realName ||
                 detailTarget.idCardMasked ||
                 detailTarget.idCardFrontUrl ||
@@ -2447,6 +2461,89 @@ const ExpertsPage = ({
                 bio={detailTarget.bio}
                 domainTags={detailTarget.domainTags}
               />
+
+              <div className="space-y-3">
+                <div className="text-[11px] font-bold text-slate-500">
+                  落地案例 ({detailTarget.cases.length})
+                </div>
+                {detailTarget.cases.length === 0 && (
+                  <p className="text-xs text-slate-400 text-center py-6 rounded-xl border border-dashed border-slate-200">
+                    暂无上传案例
+                  </p>
+                )}
+                {detailTarget.cases.map((c, idx) => {
+                  const imgs = getCaseStudyImages(c);
+                  return (
+                    <div
+                      key={c.id || `case-${idx}`}
+                      className="rounded-xl border border-slate-200 p-4 space-y-3 bg-slate-50/60"
+                    >
+                      {imgs.length > 0 && (
+                        <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                          {imgs.map((url, imgIdx) => (
+                            <button
+                              key={`${c.id || idx}-img-${imgIdx}`}
+                              type="button"
+                              onClick={() =>
+                                setPreviewImage({
+                                  url,
+                                  label: `${c.title || '案例'} · 图 ${imgIdx + 1}`
+                                })
+                              }
+                              className="w-28 aspect-[16/10] rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shrink-0 cursor-pointer"
+                            >
+                              <img
+                                src={url}
+                                alt={`${c.title || '案例'} ${imgIdx + 1}`}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {c.clientIndustry && (
+                            <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">
+                              {c.clientIndustry}
+                            </span>
+                          )}
+                          <div className="text-sm font-bold text-slate-900">
+                            {c.title || '未命名案例'}
+                          </div>
+                        </div>
+                        {c.clientName && (
+                          <div className="text-[11px] text-slate-500">服务对象：{c.clientName}</div>
+                        )}
+                        {c.solution && (
+                          <p className="text-xs text-slate-700 leading-relaxed">
+                            <span className="text-blue-800 font-semibold">方案：</span>
+                            {c.solution}
+                          </p>
+                        )}
+                        {(c.roiMetrics || []).length > 0 && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                            {c.roiMetrics!.slice(0, 4).map((m, mIdx) => (
+                              <div
+                                key={mIdx}
+                                className="rounded-lg border border-emerald-100 bg-white px-2.5 py-2"
+                              >
+                                <div className="text-sm font-extrabold text-emerald-700">
+                                  {m.value || '—'}
+                                </div>
+                                <div className="text-[10px] text-slate-500 mt-0.5">
+                                  {m.label || '说明'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

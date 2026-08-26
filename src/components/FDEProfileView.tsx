@@ -5,11 +5,7 @@ import {
   MessageSquare,
   Play,
   Sparkles,
-  Layers,
-  Share2,
-  Copy,
-  Check,
-  QrCode
+  Layers
 } from 'lucide-react';
 import { FDEExpert, AgentSolution, CaseStudy, getCaseStudyImages } from '../types';
 import { FDEBadge } from './FDEBadge';
@@ -41,8 +37,6 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
   favoriteAgentIds = [],
   onToggleFavoriteAgent
 }) => {
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
 
   // Filter items authored by or assigned to this expert
@@ -56,14 +50,6 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
     (acc, curr) => acc + (curr.favoritesCount ?? 0),
     0
   );
-
-  const handleCopyShareLink = () => {
-    const shareUrl = `${window.location.origin}/#expert/${expert.id}`;
-    navigator.clipboard?.writeText(shareUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
-  };
-
 
   return (
     <div id="creator-public-profile-page" className="min-h-screen bg-slate-50/70 pb-24">
@@ -80,17 +66,6 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
           </button>
 
           <div className="flex items-center gap-2.5">
-            {/* Share profile button */}
-            <button
-              id="btn-share-profile"
-              onClick={() => setShowShareModal(true)}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="分享 AI 专家主页"
-            >
-              <Share2 size={14} className="text-slate-500" />
-              <span>分享主页</span>
-            </button>
-
             {/* Favorite Creator */}
             <button
               id="btn-profile-fav"
@@ -302,26 +277,14 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
                     key={c.id}
                     className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-4"
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-md border border-blue-200/60">
-                            {c.clientIndustry}
-                          </span>
-                          <span className="text-xs text-slate-500">服务对象：{c.clientName}</span>
-                        </div>
-                        <h3 className="text-base sm:text-lg font-bold text-slate-900 mt-1.5">{c.title}</h3>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-md border border-blue-200/60">
+                          {c.clientIndustry}
+                        </span>
+                        <span className="text-xs text-slate-500">服务对象：{c.clientName}</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onConsult(expert, `想了解您在案例「${c.title}」中的落地实现与交付方案`)
-                        }
-                        className="px-3.5 py-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-200/60 transition-colors cursor-pointer shrink-0 flex items-center gap-1.5"
-                      >
-                        <MessageSquare size={13} />
-                        <span>咨询同款方案</span>
-                      </button>
+                      <h3 className="text-base sm:text-lg font-bold text-slate-900 mt-1.5">{c.title}</h3>
                     </div>
 
                     {imgs.length > 0 && (
@@ -346,27 +309,25 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
                       </div>
                     )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                      <div className="p-3.5 bg-rose-50/60 rounded-2xl border border-rose-100 space-y-1">
-                        <span className="font-bold text-rose-900">业务痛点</span>
-                        <p className="text-rose-950 leading-relaxed">{c.challenge}</p>
-                      </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                       <div className="p-3.5 bg-blue-50/60 rounded-2xl border border-blue-100 space-y-1">
                         <span className="font-bold text-blue-900">解决方案</span>
                         <p className="text-blue-950 leading-relaxed">{c.solution}</p>
                       </div>
                       <div className="p-3.5 bg-emerald-50/60 rounded-2xl border border-emerald-100 space-y-2">
-                        <span className="font-bold text-emerald-900">产出与 ROI</span>
-                        <div className="grid grid-cols-2 gap-2">
-                          {c.roiMetrics.map((m, idx) => (
+                        <span className="font-bold text-emerald-900">产出结果</span>
+                        <div className="space-y-1.5">
+                          {(c.roiMetrics || []).slice(0, 4).map((m, idx) => (
                             <div
                               key={idx}
-                              className="bg-white p-2 rounded-xl border border-emerald-200 text-center"
+                              className="bg-white px-3 py-2 rounded-xl border border-emerald-200 flex items-baseline justify-between gap-3"
                             >
-                              <span className="text-sm font-extrabold text-emerald-700 block">
-                                {m.value}
+                              <span className="text-sm font-extrabold text-emerald-700 shrink-0">
+                                {m.value || '—'}
                               </span>
-                              <span className="text-[10px] text-slate-500 block mt-0.5">{m.label}</span>
+                              <span className="text-[11px] text-slate-500 text-right">
+                                {m.label || '说明'}
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -405,61 +366,6 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
               referrerPolicy="no-referrer"
               className="w-full rounded-xl border border-slate-100 bg-slate-50"
             />
-          </div>
-        </div>
-      )}
-
-      {/* Share Modal Dialog */}
-      {showShareModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl border border-slate-200 animate-in zoom-in-95">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Share2 size={16} className="text-blue-600" />
-                <h3 className="font-bold text-sm text-slate-900">分享创作者公开主页</h3>
-              </div>
-              <button
-                onClick={() => setShowShareModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-center space-y-3">
-              <img
-                src={expert.avatar}
-                alt={expert.name}
-                className="w-16 h-16 rounded-2xl mx-auto object-cover ring-2 ring-blue-500"
-              />
-              <div>
-                <h4 className="font-bold text-slate-900 text-sm">{expert.name}</h4>
-                <p className="text-xs text-slate-500">{expert.title}</p>
-              </div>
-              <div className="p-3 bg-white rounded-xl border border-slate-200 inline-block shadow-2xs">
-                <QrCode size={100} className="text-slate-800" />
-                <span className="text-[10px] text-slate-400 block mt-1">微信扫码直接访问作品主页</span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[11px] font-bold text-slate-700">主页专属链接</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={`${window.location.origin}/#expert/${expert.id}`}
-                  className="w-full px-3 py-2 bg-slate-100 text-xs text-slate-700 rounded-xl font-mono border border-slate-200 outline-none"
-                />
-                <button
-                  onClick={handleCopyShareLink}
-                  className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
-                >
-                  {copiedLink ? <Check size={14} /> : <Copy size={14} />}
-                  <span>{copiedLink ? '已复制' : '复制'}</span>
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}

@@ -189,13 +189,12 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     title: '',
     clientIndustry: '跨境电商',
     clientName: '',
-    challenge: '',
     solution: '',
     images: [],
     coverImage: '',
     roiMetrics: [
-      { label: '效率提升', value: '+300%' },
-      { label: '月度降本', value: '￥85,000' }
+      { value: '', label: '' },
+      { value: '', label: '' }
     ]
   });
 
@@ -272,7 +271,15 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
 
   const handleAddCaseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCase.title || !newCase.challenge || !newCase.solution) return;
+    if (!newCase.title || !newCase.solution) return;
+    const metrics = (newCase.roiMetrics || [])
+      .map((m) => ({ value: (m.value || '').trim(), label: (m.label || '').trim() }))
+      .filter((m) => m.value || m.label)
+      .slice(0, 4);
+    if (metrics.length === 0) {
+      alert('请至少填写 1 条产出结果');
+      return;
+    }
     const images =
       Array.isArray(newCase.images) && newCase.images.length > 0
         ? newCase.images
@@ -285,9 +292,8 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       title: newCase.title,
       clientIndustry: newCase.clientIndustry || '企业服务',
       clientName: newCase.clientName || '某知名出海品牌',
-      challenge: newCase.challenge,
       solution: newCase.solution,
-      roiMetrics: newCase.roiMetrics || [{ label: '交付周期', value: '3 天' }],
+      roiMetrics: metrics,
       images,
       coverImage:
         images[0] ||
@@ -300,11 +306,13 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       title: '',
       clientIndustry: '跨境电商',
       clientName: '',
-      challenge: '',
       solution: '',
       images: [],
       coverImage: '',
-      roiMetrics: [{ label: '效率提升', value: '+300%' }]
+      roiMetrics: [
+        { value: '', label: '' },
+        { value: '', label: '' }
+      ]
     });
   };
 
@@ -598,7 +606,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm">落地案例管理 ({casesList.length})</h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    展示已完成的企业落地实践，突出业务痛点、解决方案与 ROI
+                    展示已完成的企业落地实践，突出解决方案与产出结果
                   </p>
                 </div>
                 <button
@@ -656,13 +664,29 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
 
                       <div className="space-y-2 text-[11px] text-slate-600">
                         <div>
-                          <strong className="text-rose-800">痛点：</strong>
-                          {c.challenge}
-                        </div>
-                        <div>
                           <strong className="text-blue-800">方案：</strong>
                           {c.solution}
                         </div>
+                        {(c.roiMetrics || []).length > 0 && (
+                          <div className="space-y-1.5 pt-1">
+                            <strong className="text-emerald-800">产出结果：</strong>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                              {c.roiMetrics.slice(0, 4).map((m, idx) => (
+                                <div
+                                  key={idx}
+                                  className="rounded-lg border border-emerald-100 bg-white px-2.5 py-2"
+                                >
+                                  <div className="text-sm font-extrabold text-emerald-700">
+                                    {m.value || '—'}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5">
+                                    {m.label || '说明'}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1525,18 +1549,6 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-700">业务痛点 (Challenge)</label>
-                <textarea
-                  rows={2}
-                  required
-                  placeholder="描述客户在落地前遇到的效率瓶颈或成本问题..."
-                  value={newCase.challenge || ''}
-                  onChange={(e) => setNewCase({ ...newCase, challenge: e.target.value })}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none"
-                />
-              </div>
-
-              <div className="space-y-1">
                 <label className="font-bold text-slate-700">FDE 落地解决方案 (Solution)</label>
                 <textarea
                   rows={2}
@@ -1546,6 +1558,74 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                   onChange={(e) => setNewCase({ ...newCase, solution: e.target.value })}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="font-bold text-slate-700">产出结果（最多 4 条）</label>
+                  {(newCase.roiMetrics || []).length < 4 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setNewCase((prev) => ({
+                          ...prev,
+                          roiMetrics: [...(prev.roiMetrics || []), { value: '', label: '' }]
+                        }))
+                      }
+                      className="text-[11px] font-bold text-blue-600 hover:text-blue-700 cursor-pointer"
+                    >
+                      + 添加一条
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  {(newCase.roiMetrics || []).map((m, idx) => (
+                    <div key={idx} className="flex items-start gap-2">
+                      <div className="flex-1 grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          placeholder="结果，如 +32%"
+                          value={m.value}
+                          onChange={(e) =>
+                            setNewCase((prev) => {
+                              const next = [...(prev.roiMetrics || [])];
+                              next[idx] = { ...next[idx], value: e.target.value };
+                              return { ...prev, roiMetrics: next };
+                            })
+                          }
+                          className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                        />
+                        <input
+                          type="text"
+                          placeholder="说明，如 转化率提升"
+                          value={m.label}
+                          onChange={(e) =>
+                            setNewCase((prev) => {
+                              const next = [...(prev.roiMetrics || [])];
+                              next[idx] = { ...next[idx], label: e.target.value };
+                              return { ...prev, roiMetrics: next };
+                            })
+                          }
+                          className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                        />
+                      </div>
+                      {(newCase.roiMetrics || []).length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNewCase((prev) => ({
+                              ...prev,
+                              roiMetrics: (prev.roiMetrics || []).filter((_, i) => i !== idx)
+                            }))
+                          }
+                          className="mt-2 text-[11px] font-semibold text-rose-600 hover:text-rose-700 cursor-pointer shrink-0"
+                        >
+                          删除
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
