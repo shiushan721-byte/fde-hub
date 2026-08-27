@@ -1,16 +1,19 @@
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
+export type PayChannel = 'wechat' | 'alipay';
 
 export interface CreatePaymentInput {
   orderId: string;
   amount: number;
   currency?: string;
   description?: string;
+  channel?: PayChannel;
 }
 
 export interface PaymentResult {
   paymentId: string;
   status: PaymentStatus;
   checkoutUrl?: string;
+  channel?: PayChannel;
 }
 
 export interface RefundInput {
@@ -32,11 +35,13 @@ const paidIds = new Set<string>();
 /** 开发环境托管支付：创建后待支付，confirmPaid 模拟平台到账 */
 export const stubPaymentAdapter: PaymentAdapter = {
   async createPayment(input) {
-    const paymentId = `pay_stub_${input.orderId}_${Date.now()}`;
+    const channel = input.channel || 'wechat';
+    const paymentId = `pay_${channel}_${input.orderId}_${Date.now()}`;
     return {
       paymentId,
       status: 'pending',
-      checkoutUrl: `/mock-checkout/${paymentId}`
+      channel,
+      checkoutUrl: `/mock-checkout/${channel}/${paymentId}`
     };
   },
   async queryPayment(paymentId) {

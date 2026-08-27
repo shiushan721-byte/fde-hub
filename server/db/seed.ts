@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { ensureSampleCustomOrders } from './seedCustomOrders';
+import { ensureFinanceSynced } from './seedFinance';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { toJson } from '../lib/json';
@@ -27,10 +28,15 @@ export async function seedDatabase(force = false) {
     await ensureExpertNos();
     await ensureAgentComments();
     await ensureExpertCasesSynced();
+    await ensureFinanceSynced();
     return { seeded: false, agents: existing };
   }
 
   if (force) {
+    await prisma.walletLedger.deleteMany();
+    await prisma.withdrawal.deleteMany();
+    await prisma.paymentRecord.deleteMany();
+    await prisma.wallet.deleteMany();
     await prisma.userNotification.deleteMany();
     await prisma.customOrderEvent.deleteMany();
     await prisma.deliveryVersion.deleteMany();
@@ -301,6 +307,7 @@ export async function seedDatabase(force = false) {
   await ensureSampleExpertPendingProfile();
   await ensureExpertNos();
   await ensureAgentComments();
+  await ensureFinanceSynced();
 
   const count = await prisma.agent.count();
   return { seeded: true, agents: count };
@@ -567,6 +574,7 @@ export async function ensureExpertApplicationSeed() {
     await ensureSampleExpertPendingProfile();
     await ensureAgentComments();
     await ensureExpertCasesSynced();
+    await ensureFinanceSynced();
   } catch (error) {
     console.warn('ensureExpertApplicationSeed skipped:', error);
   }

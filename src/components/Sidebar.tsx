@@ -5,7 +5,7 @@ import {
   Sparkles,
   LayoutDashboard,
   ClipboardList,
-  Wallet,
+  Receipt,
   Key,
   PanelLeftClose,
   PanelLeft,
@@ -24,6 +24,7 @@ export type MainNavRoute =
   | 'hellome-home'
   | 'workspace'
   | 'orders'
+  | 'order-center'
   | 'fde-experts'
   | 'creator-center'
   | 'favorites'
@@ -83,13 +84,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: ClipboardList
     },
     {
+      key: 'order-center',
+      label: '订单中心',
+      icon: Receipt
+    },
+    {
       key: 'fde-experts',
       label: 'AI 专家库',
       icon: Users
     }
   ];
 
-  // Expert users get "我的专家主页" right below "AI 专家库"
   if (isExpert) {
     menuItems.push({
       key: 'creator-center',

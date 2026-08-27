@@ -17,6 +17,7 @@ import { seedDatabase, ensureExpertApplicationSeed } from './db/seed';
 import { ensureExpertNos } from './lib/expertNo';
 import { startCustomOrderJobScheduler } from './services/customOrderJobs';
 import { customServicesRouter } from './routes/customServices';
+import { walletRouter } from './routes/wallet';
 
 
 dotenv.config();
@@ -44,6 +45,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/me', meRouter);
 app.use('/api/custom-orders', customOrderRouter);
 app.use('/api/custom-services', customServicesRouter);
+app.use('/api/wallet', walletRouter);
 app.use('/api/public', publicRouter);
 app.use('/api/consultations', consultationRouter);
 app.use('/api/expert-applications', expertApplicationRouter);

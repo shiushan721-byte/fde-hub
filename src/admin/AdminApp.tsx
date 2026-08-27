@@ -8,7 +8,8 @@ import {
   Loader2,
   X,
   Download,
-  ChevronDown
+  ChevronDown,
+  Banknote
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import {
@@ -23,6 +24,12 @@ import {
 } from '../components/DeliveryProposalReviewPanel';
 import type { DeliveryProposal } from '../types/deliveryProposal';
 import { getCaseStudyImages } from '../types';
+import {
+  ExpertAccountsPage,
+  EscrowsPage,
+  SettlementsPage,
+  WithdrawalsPage
+} from './FinancePages';
 
 type AdminCaseItem = {
   id?: string;
@@ -44,7 +51,11 @@ type AdminPage =
   | 'experts'
   | 'applications'
   | 'leads'
-  | 'users';
+  | 'users'
+  | 'expert-accounts'
+  | 'settlements'
+  | 'withdrawals'
+  | 'escrows';
 
 type AdminUser = { id: string; email: string; name: string; role: string };
 
@@ -86,12 +97,25 @@ const nav: NavEntry[] = [
       { key: 'applications', label: '专家审核' }
     ]
   },
+  {
+    type: 'group',
+    id: 'finance',
+    label: '资金管理',
+    icon: Banknote,
+    children: [
+      { key: 'expert-accounts', label: '专家账户余额' },
+      { key: 'settlements', label: '订单结算' },
+      { key: 'withdrawals', label: '提现管理' },
+      { key: 'escrows', label: '资金托管' }
+    ]
+  },
   { type: 'link', key: 'users', label: '管理员', icon: Shield, superOnly: true }
 ];
 
 const GROUP_PAGE_KEYS: Record<string, AdminPage[]> = {
   'agent-mgmt': ['agents', 'custom-agents', 'deliveries', 'leads'],
-  'expert-mgmt': ['experts', 'applications']
+  'expert-mgmt': ['experts', 'applications'],
+  finance: ['expert-accounts', 'settlements', 'withdrawals', 'escrows']
 };
 
 const statusLabel: Record<string, string> = {
@@ -132,7 +156,8 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const [nonAdminHint, setNonAdminHint] = useState('');
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     'agent-mgmt': true,
-    'expert-mgmt': true
+    'expert-mgmt': true,
+    finance: true
   });
 
   const loadMe = async () => {
@@ -308,6 +333,10 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         )}
         {page === 'applications' && <ApplicationsPage />}
         {page === 'leads' && <LeadsPage />}
+        {page === 'expert-accounts' && <ExpertAccountsPage />}
+        {page === 'settlements' && <SettlementsPage />}
+        {page === 'withdrawals' && <WithdrawalsPage />}
+        {page === 'escrows' && <EscrowsPage />}
         {page === 'users' && me.role === 'super_admin' && <UsersPage />}
       </main>
     </div>

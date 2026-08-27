@@ -318,10 +318,12 @@ customOrderRouter.post('/:id/request-proposal-revision', async (req, res) => {
 });
 
 customOrderRouter.post('/:id/pay', async (req, res) => {
+  const channel = req.body?.channel === 'alipay' ? 'alipay' : 'wechat';
   try {
     const result = await initiatePayment({
       orderId: req.params.id,
-      buyerUserId: req.user!.id
+      buyerUserId: req.user!.id,
+      channel
     });
     return ok(res, {
       order: mapOrder(result.order),
@@ -335,10 +337,15 @@ customOrderRouter.post('/:id/pay', async (req, res) => {
 customOrderRouter.post('/:id/confirm-escrow', async (req, res) => {
   try {
     const isAdmin = req.user!.role === 'super_admin' || req.user!.role === 'operator';
+    const channel =
+      req.body?.channel === 'alipay' || req.body?.channel === 'wechat'
+        ? req.body.channel
+        : undefined;
     const order = await confirmEscrow({
       orderId: req.params.id,
       actorId: req.user!.id,
-      asAdmin: isAdmin
+      asAdmin: isAdmin,
+      channel
     });
     return ok(res, mapOrder(order));
   } catch (error) {

@@ -5,6 +5,7 @@ import {
   newId,
   settleOrder
 } from './customOrder';
+import { releasePendingIncomes } from './wallet';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -271,12 +272,14 @@ export async function runCustomOrderJobs(now = new Date()) {
   const reminders = await sendAcceptanceReminders(now);
   const autoAccepted = await autoAcceptExpiredOrders(now);
   const settled = await settleEligibleOrders(now);
+  const released = await releasePendingIncomes(now);
   return {
     at: now.toISOString(),
     unpaidClosed: unpaid.closed,
     remindersSent: reminders.sent,
     autoAccepted: autoAccepted.accepted,
-    settled: settled.settled
+    settled: settled.settled,
+    pendingReleased: released.released
   };
 }
 
@@ -292,7 +295,8 @@ export function startCustomOrderJobScheduler(intervalMs = 5 * 60 * 1000) {
           result.unpaidClosed ||
           result.remindersSent ||
           result.autoAccepted ||
-          result.settled
+          result.settled ||
+          result.pendingReleased
         ) {
           console.log('[custom-order-jobs]', result);
         }

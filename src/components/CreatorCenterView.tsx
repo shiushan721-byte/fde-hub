@@ -38,7 +38,8 @@ import {
   ThumbsUp,
   Crown,
   ArrowLeft,
-  Plus
+  Plus,
+  Wallet
 } from 'lucide-react';
 import {
   CreatorTierLevel,
@@ -63,6 +64,7 @@ import { CreatorCustomOrdersPanel } from './CustomOrderPanels';
 import { mockCustomerAgentInstances } from '../data/agentInstanceMockData';
 import { CustomerAgentInstance } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
+import { AccountView } from './AccountView';
 
 function platformSupportLabel(support: CreatorAgentItem['platformSupport']) {
   switch (support) {
@@ -92,6 +94,7 @@ export type CreatorCenterTab =
   | 'profile-editor'   // 1. 主页编辑
   | 'my-agents'        // 2. 智能体管理（含通用 / 专属子 Tab）
   | 'custom-services'  // 3. 定制服务（咨询 + 订单同一流程）
+  | 'account'          // 4. 账户（待提现 / 可提现 / 已提现）
   | 'customer-leads'   // 兼容旧入口：映射到定制服务
   | 'orders'           // 兼容旧入口：映射到定制服务
   | 'customer-instances' // 兼容旧入口：映射到智能体管理 · 专属
@@ -112,6 +115,7 @@ interface CreatorCenterViewProps {
   /** 从外部入口进入时提供返回 */
   onBack?: () => void;
   backLabel?: string;
+  onOpenRecharge?: () => void;
 }
 
 export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
@@ -124,7 +128,8 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
   userRole = 'expert',
   sessionLeads = [],
   onBack,
-  backLabel = '返回'
+  backLabel = '返回',
+  onOpenRecharge
 }) => {
   const [activeTab, setActiveTab] = useState<CreatorCenterTab>(() => {
     if (initialTab === 'realname-verify' || initialTab === 'customer-instances') return 'my-agents';
@@ -463,7 +468,8 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
         {[
           { key: 'profile-editor', label: '1. 主页编辑', icon: Edit3, count: null },
           { key: 'my-agents', label: '2. 智能体管理', icon: Bot, count: agentsList.length + instancesList.length },
-          { key: 'custom-services', label: '3. 定制服务', icon: Package, count: leadsList.filter((l) => l.status === 'new').length, badgeColor: 'bg-rose-500 text-white' }
+          { key: 'custom-services', label: '3. 定制服务', icon: Package, count: leadsList.filter((l) => l.status === 'new').length, badgeColor: 'bg-rose-500 text-white' },
+          { key: 'account', label: '4. 账户', icon: Wallet, count: null }
         ].map((tab) => {
           const Icon = tab.icon;
           const isCurrent = activeTab === tab.key;
@@ -906,6 +912,14 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
         <div className="space-y-6">
           <CreatorCustomOrdersPanel sessionLeads={sessionLeads} />
         </div>
+      )}
+
+      {activeTab === 'account' && (
+        <AccountView
+          onOpenRecharge={onOpenRecharge}
+          userRole={userRole}
+          embedded
+        />
       )}
 
       {/* ========================================================= */}

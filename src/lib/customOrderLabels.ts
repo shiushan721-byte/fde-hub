@@ -70,12 +70,40 @@ export const paymentStatusText: Record<string, string> = {
   pending: '待支付',
   escrowed: '托管中',
   released: '已释放',
-  settled: '已结算'
+  settled: '已结算',
+  refunded: '已退款',
+  expired: '已过期'
 };
 
+/** 买家侧：这笔定制款是否已实际支付（含托管 / 已结算） */
+export function isBuyerPaid(paymentStatus?: string) {
+  return ['escrowed', 'released', 'settled'].includes(paymentStatus || '');
+}
+
+export function paymentBadgeClass(paymentStatus?: string) {
+  switch (paymentStatus) {
+    case 'escrowed':
+      return 'bg-blue-50 text-blue-700 ring-blue-200';
+    case 'settled':
+    case 'released':
+      return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
+    case 'pending':
+      return 'bg-amber-50 text-amber-700 ring-amber-200';
+    case 'refunded':
+      return 'bg-rose-50 text-rose-700 ring-rose-200';
+    default:
+      return 'bg-slate-50 text-slate-600 ring-slate-200';
+  }
+}
+
 export function yuan(cents?: number) {
-  if (!cents) return '待报价';
+  if (cents == null || Number.isNaN(cents)) return '待报价';
+  if (cents <= 0) return '待报价';
   return `¥${(cents / 100).toFixed(2)}`;
+}
+
+export function yuanAmount(cents: number) {
+  return `¥${(Math.max(0, cents) / 100).toFixed(2)}`;
 }
 
 export function formatOrderTime(iso?: string) {

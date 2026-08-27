@@ -25,6 +25,9 @@ export type CustomServiceOrder = {
   serviceScope?: string;
   quoteNote?: string;
   paymentStatus?: string;
+  paymentChannel?: string;
+  paidAt?: string;
+  escrowedAt?: string;
   createdAt?: string;
   paymentDeadlineAt?: string;
   acceptanceDeadlineAt?: string;

@@ -13,6 +13,7 @@ import {
   unfreezeCertification,
   writeCertEventStandalone
 } from '../services/certification';
+import { markWithdrawalPaid, releasePendingIncomes, reviewWithdrawal } from '../services/wallet';
 
 export const adminRouter = Router();
 
@@ -1465,6 +1466,188 @@ adminRouter.get('/users', requireSuperAdmin, async (_req, res) => {
     select: { id: true, email: true, name: true, role: true, createdAt: true }
   });
   return ok(res, users);
+});
+
+adminRouter.get('/payments', async (_req, res) => {
+  const items = await prisma.paymentRecord.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+    include: { user: { select: { id: true, name: true, email: true } } }
+  });
+  const orderIds = [...new Set(items.map((p) => p.orderId))];
+  const orders = orderIds.length
+    ? await prisma.customOrder.findMany({
+        where: { id: { in: orderIds } },
+        select: {
+          id: true,
+          orderNo: true,
+          title: true,
+          status: true,
+          paymentStatus: true,
+          paymentChannel: true
+        }
+      })
+    : [];
+  const orderMap = new Map(orders.map((o) => [o.id, o]));
+  return ok(
+    res,
+    items.map((p) => ({
+      ...p,
+      order: orderMap.get(p.orderId) || null
+    }))
+  );
+});
+
+adminRouter.get('/expert-accounts', async (_req, res) => {
+  await releasePendingIncomes();
+  const experts = await prisma.expert.findMany({
+    where: { userId: { not: null } },
+    orderBy: { sortOrder: 'asc' },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          wallet: true,
+          withdrawals: {
+            select: { id: true, amountCents: true, status: true }
+          }
+        }
+      }
+    }
+  });
+
+  return ok(
+    res,
+    experts
+      .filter((expert) => expert.user)
+      .map((expert) => {
+        const user = expert.user!;
+        const wallet = user.wallet;
+        const withdrawals = user.withdrawals || [];
+        const withdrawnTotalCents = withdrawals
+          .filter((w) => w.status === 'paid' || w.status === 'succeeded')
+          .reduce((sum, w) => sum + w.amountCents, 0);
+        const inflight = withdrawals.filter((w) => w.status === 'pending' || w.status === 'approved');
+        return {
+          expertId: expert.id,
+          expertNo: expert.expertNo,
+          expertName: expert.name,
+          userId: user.id,
+          userName: user.name,
+          email: user.email,
+          pendingCents: wallet?.pendingCents || 0,
+          availableCents: wallet?.availableCents || 0,
+          frozenCents: wallet?.frozenCents || 0,
+          withdrawnTotalCents,
+          inflightCount: inflight.length,
+          inflightCents: inflight.reduce((sum, w) => sum + w.amountCents, 0),
+          wechatBound: wallet?.wechatBound || false,
+          wechatAccount: wallet?.wechatAccount || '',
+          alipayBound: wallet?.alipayBound || false,
+          alipayAccount: wallet?.alipayAccount || ''
+        };
+      })
+  );
+});
+
+adminRouter.get('/settlements', async (_req, res) => {
+  const items = await prisma.customOrder.findMany({
+    where: { status: { in: ['pending_acceptance', 'pending_settlement', 'completed'] } },
+    orderBy: { updatedAt: 'desc' },
+    take: 200,
+    include: {
+      buyer: { select: { id: true, name: true, email: true } },
+      creator: { select: { id: true, name: true, email: true } }
+    }
+  });
+  return ok(res, items);
+});
+
+adminRouter.get('/escrows', async (_req, res) => {
+  const items = await prisma.customOrder.findMany({
+    where: { paymentStatus: { in: ['escrowed', 'released'] } },
+    orderBy: { updatedAt: 'desc' },
+    take: 200,
+    include: {
+      buyer: { select: { id: true, name: true, email: true } },
+      creator: { select: { id: true, name: true, email: true } }
+    }
+  });
+  return ok(res, items);
+});
+
+adminRouter.get('/withdrawals', async (_req, res) => {
+  const items = await prisma.withdrawal.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          expert: { select: { name: true, expertNo: true } }
+        }
+      }
+    }
+  });
+  return ok(res, items);
+});
+
+const withdrawReviewSchema = z.object({
+  approved: z.boolean(),
+  reason: z.string().optional()
+});
+
+adminRouter.post('/withdrawals/:id/review', async (req, res) => {
+  const parsed = withdrawReviewSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const item = await reviewWithdrawal({
+      withdrawId: req.params.id,
+      approved: parsed.data.approved,
+      actorId: actorId(req) || '',
+      reason: parsed.data.reason
+    });
+    await writeAudit({
+      actorId: actorId(req),
+      action: parsed.data.approved ? 'approve_withdrawal' : 'reject_withdrawal',
+      targetType: 'withdrawal',
+      targetId: item.id,
+      diff: { status: item.status, reason: parsed.data.reason || '' }
+    });
+    return ok(res, item);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '审核失败');
+  }
+});
+
+const withdrawPaidSchema = z.object({
+  paidNote: z.string().min(1)
+});
+
+adminRouter.post('/withdrawals/:id/paid', async (req, res) => {
+  const parsed = withdrawPaidSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '请填写线下打款流水号或备注');
+  try {
+    const item = await markWithdrawalPaid({
+      withdrawId: req.params.id,
+      actorId: actorId(req) || '',
+      paidNote: parsed.data.paidNote
+    });
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'pay_withdrawal',
+      targetType: 'withdrawal',
+      targetId: item.id,
+      diff: { status: item.status, paidNote: parsed.data.paidNote }
+    });
+    return ok(res, item);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '确认打款失败');
+  }
 });
 
 adminRouter.get('/audit-logs', async (_req, res) => {

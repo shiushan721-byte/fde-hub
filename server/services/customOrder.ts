@@ -3,6 +3,8 @@ import { toJson, parseJson } from '../lib/json';
 import { runHermesValidation } from '../adapters/hermes';
 import { stubPaymentAdapter } from '../adapters/payment';
 import { writeAudit } from '../lib/audit';
+import { creditCreatorPendingIncome, reverseCreatorPendingIncome, type PayChannel } from './wallet';
+import { createPendingPayment, markPaymentPaid } from './payments';
 
 export function newId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -502,7 +504,9 @@ export async function requestProposalRevisionByBuyer(input: {
 export async function initiatePayment(input: {
   orderId: string;
   buyerUserId: string;
+  channel?: PayChannel;
 }) {
+  const channel: PayChannel = input.channel === 'alipay' ? 'alipay' : 'wechat';
   const order = await prisma.customOrder.findUnique({ where: { id: input.orderId } });
   if (!order) throw new Error('订单不存在');
   if (order.buyerUserId !== input.buyerUserId) throw new Error('仅下单用户可付款');
@@ -522,17 +526,27 @@ export async function initiatePayment(input: {
     throw new Error('订单已超时关闭，请重新发起方案');
   }
 
-  const payment = await stubPaymentAdapter.createPayment({
+  const record = await createPendingPayment({
+    orderId: order.id,
+    userId: input.buyerUserId,
+    amountCents: order.priceCents,
+    channel,
+    currency: order.currency
+  });
+
+  const stub = await stubPaymentAdapter.createPayment({
     orderId: order.id,
     amount: order.priceCents / 100,
     currency: order.currency,
-    description: `定制订单 ${order.orderNo} 托管付款`
+    description: `定制订单 ${order.orderNo} 托管付款`,
+    channel
   });
 
   const updated = await prisma.customOrder.update({
     where: { id: order.id },
     data: {
-      paymentId: payment.paymentId,
+      paymentId: record.id,
+      paymentChannel: channel,
       paymentStatus: 'pending',
       paidAt: null
     }
@@ -544,10 +558,25 @@ export async function initiatePayment(input: {
     eventType: 'payment_initiated',
     fromStatus: 'awaiting_payment',
     toStatus: 'awaiting_payment',
-    payload: { paymentId: payment.paymentId, checkoutUrl: payment.checkoutUrl }
+    payload: {
+      paymentId: record.id,
+      channel,
+      checkoutCode: record.checkoutCode,
+      checkoutUrl: stub.checkoutUrl
+    }
   });
 
-  return { order: updated, payment };
+  return {
+    order: updated,
+    payment: {
+      paymentId: record.id,
+      status: record.status,
+      channel,
+      amountCents: record.amountCents,
+      checkoutCode: record.checkoutCode,
+      checkoutUrl: stub.checkoutUrl
+    }
+  };
 }
 
 /**
@@ -558,6 +587,7 @@ export async function confirmEscrow(input: {
   orderId: string;
   actorId: string;
   asAdmin?: boolean;
+  channel?: PayChannel;
 }) {
   const order = await prisma.customOrder.findUnique({ where: { id: input.orderId } });
   if (!order) throw new Error('订单不存在');
@@ -566,18 +596,27 @@ export async function confirmEscrow(input: {
     throw new Error('仅下单用户或运营可确认付款');
   }
 
+  const channel: PayChannel =
+    input.channel === 'alipay' || input.channel === 'wechat'
+      ? input.channel
+      : order.paymentChannel === 'alipay'
+        ? 'alipay'
+        : 'wechat';
+
   let paymentId = order.paymentId;
   if (!paymentId) {
-    const payment = await stubPaymentAdapter.createPayment({
+    const record = await createPendingPayment({
       orderId: order.id,
-      amount: order.priceCents / 100,
-      currency: order.currency,
-      description: `定制订单 ${order.orderNo} 托管付款`
+      userId: order.buyerUserId,
+      amountCents: order.priceCents,
+      channel,
+      currency: order.currency
     });
-    paymentId = payment.paymentId;
+    paymentId = record.id;
   }
 
   await stubPaymentAdapter.confirmPaid(paymentId);
+  await markPaymentPaid(paymentId).catch(() => undefined);
   const now = new Date();
 
   if (!order.creatorUserId) throw new Error('订单未指定创作者');
@@ -589,6 +628,7 @@ export async function confirmEscrow(input: {
     data: {
       status: 'paid_pending_start',
       paymentId,
+      paymentChannel: channel,
       paymentStatus: 'escrowed',
       paidAt: now,
       escrowedAt: now,
@@ -602,7 +642,7 @@ export async function confirmEscrow(input: {
     eventType: 'payment_escrowed',
     fromStatus: 'awaiting_payment',
     toStatus: 'paid_pending_start',
-    payload: { paymentId, amountCents: order.priceCents, instanceId: instance.id }
+    payload: { paymentId, amountCents: order.priceCents, instanceId: instance.id, channel }
   });
 
   if (order.creatorUserId) {
@@ -797,7 +837,7 @@ export async function approveDelivery(input: {
   deliveryId: string;
   reviewerId: string;
 }) {
-  return prisma.$transaction(async (tx) => {
+  const updatedOrder = await prisma.$transaction(async (tx) => {
     const delivery = await tx.deliveryVersion.findUnique({ where: { id: input.deliveryId } });
     if (!delivery) throw new Error('交付版本不存在');
     if (delivery.status !== 'pending_ops_review') throw new Error('该版本当前不可审核通过');
@@ -903,6 +943,11 @@ export async function approveDelivery(input: {
 
     return updatedOrder;
   });
+
+  if (updatedOrder.creatorUserId) {
+    await creditCreatorPendingIncome(updatedOrder.id, updatedOrder.acceptanceStartedAt || new Date());
+  }
+  return updatedOrder;
 }
 
 export async function rejectDelivery(input: {
@@ -1042,8 +1087,8 @@ export async function settleOrder(orderId: string, actorId?: string) {
     await notify({
       userId: order.creatorUserId,
       type: 'order_settled',
-      title: '订单已结算至可提现余额',
-      body: `${order.orderNo} · 实收 ¥${(creatorPayoutCents / 100).toFixed(2)}（已扣平台服务费）`,
+      title: '定制订单已完成结算',
+      body: `${order.orderNo} · 收益已按 T+7 规则进入可提现（已扣平台服务费）`,
       link: `/creator-center?tab=orders&orderId=${order.id}`,
       payload: { orderId: order.id, creatorPayoutCents }
     });
@@ -1173,6 +1218,10 @@ export async function requestRevisionByBuyer(input: {
     });
   }
 
+  if (order.creatorUserId) {
+    await reverseCreatorPendingIncome(order.id);
+  }
+
   return updated;
 }
 
@@ -1211,6 +1260,8 @@ export async function openDisputeByBuyer(input: {
     reason: input.reason,
     payload: { evidenceNote: input.evidenceNote || '' }
   });
+
+  await reverseCreatorPendingIncome(order.id);
 
   if (order.creatorUserId) {
     await notify({

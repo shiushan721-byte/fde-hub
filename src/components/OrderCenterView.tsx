@@ -25,7 +25,8 @@ import {
   hasViewableProposal
 } from './DeliveryProposalReviewPanel';
 import { DeliveryProposal } from '../types/deliveryProposal';
-import { CustomServiceDeal, CustomServiceOrder } from '../types/customService';
+import { CustomServiceDeal } from '../types/customService';
+import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
 
 /** 买家视角：我的定制（咨询 → 方案 → 支付 → 交付 → 验收） */
 export const OrderCenterView: React.FC = () => {
@@ -39,6 +40,7 @@ export const OrderCenterView: React.FC = () => {
   const [revisionDeal, setRevisionDeal] = useState<CustomServiceDeal | null>(null);
   const [revisionFeedback, setRevisionFeedback] = useState('');
   const [revisionSubmitting, setRevisionSubmitting] = useState(false);
+  const [payDeal, setPayDeal] = useState<CustomServiceDeal | null>(null);
 
   const reload = async () => {
     setLoading(true);
@@ -83,20 +85,6 @@ export const OrderCenterView: React.FC = () => {
     () => deals.filter((d) => matchesCustomServiceFilter(d.stageKey, filter)),
     [deals, filter]
   );
-
-  const payAndEscrow = async (id: string) => {
-    setBusyId(id);
-    try {
-      await api(`/api/custom-orders/${id}/pay`, { method: 'POST', body: '{}' });
-      await api(`/api/custom-orders/${id}/confirm-escrow`, { method: 'POST', body: '{}' });
-      alert('已付款至平台托管。创作者将开始开发并提交交付审核。');
-      await reload();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '付款失败');
-    } finally {
-      setBusyId('');
-    }
-  };
 
   const confirmProposal = async (orderId: string) => {
     await api(`/api/custom-orders/${orderId}/confirm-proposal`, {
@@ -387,7 +375,7 @@ export const OrderCenterView: React.FC = () => {
                               <button
                                 type="button"
                                 disabled={busyId === o.id}
-                                onClick={() => payAndEscrow(o.id)}
+                                onClick={() => setPayDeal(deal)}
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-bold cursor-pointer disabled:opacity-60"
                               >
                                 {busyId === o.id ? (
@@ -395,7 +383,7 @@ export const OrderCenterView: React.FC = () => {
                                 ) : (
                                   <CreditCard size={11} />
                                 )}
-                                付款托管
+                                去支付
                               </button>
                               {o.paymentDeadlineAt && (
                                 <span className="text-[10px] text-amber-600">
@@ -577,6 +565,21 @@ export const OrderCenterView: React.FC = () => {
           onFeedbackChange={setRevisionFeedback}
           onClose={() => setRevisionDeal(null)}
           onSubmit={submitRevision}
+        />
+      )}
+
+      {payDeal?.order && (
+        <PaymentCheckoutDrawer
+          orderId={payDeal.order.id}
+          orderNo={payDeal.order.orderNo}
+          title={payDeal.order.title || payDeal.agentTitle}
+          amountCents={payDeal.order.priceCents || 0}
+          deadlineAt={payDeal.order.paymentDeadlineAt}
+          onClose={() => setPayDeal(null)}
+          onPaid={async () => {
+            setPayDeal(null);
+            await reload();
+          }}
         />
       )}
     </div>

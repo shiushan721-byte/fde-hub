@@ -5,7 +5,7 @@ import { HellomeHomeView } from './components/HellomeHomeView';
 import { FDEProfileView } from './components/FDEProfileView';
 import { WorkspaceView } from './components/WorkspaceView';
 import { OrderCenterView } from './components/OrderCenterView';
-import { AccountView } from './components/AccountView';
+import { BuyerOrderBillingView } from './components/BuyerOrderBillingView';
 import { ApiKeyView } from './components/ApiKeyView';
 import { AgentTestDrawer } from './components/AgentTestDrawer';
 import { ConsultationModal } from './components/ConsultationModal';
@@ -317,6 +317,14 @@ export default function App() {
             : currentRoute
         }
         onNavigate={(route) => {
+          if (route === 'account') {
+            setCreatorCenterTab('account');
+            setCurrentRoute('creator-center');
+            setActiveAuthorId(null);
+            setActiveDetailAgent(null);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+          }
           setCurrentRoute(route);
           setActiveAuthorId(null);
           setActiveDetailAgent(null);
@@ -345,6 +353,13 @@ export default function App() {
         <TopHeader
           currentRoute={currentRoute}
           onNavigate={(route) => {
+            if (route === 'account') {
+              setCreatorCenterTab('account');
+              setCurrentRoute('creator-center');
+              setActiveAuthorId(null);
+              setActiveDetailAgent(null);
+              return;
+            }
             setCurrentRoute(route);
             setActiveAuthorId(null);
             setActiveDetailAgent(null);
@@ -512,6 +527,7 @@ export default function App() {
                 }}
                 userRole={userRole}
                 sessionLeads={sessionConsultationLeads}
+                onOpenRecharge={() => setIsRechargeOpen(true)}
                 onBack={
                   creatorCenterBackRoute
                     ? () => {
@@ -528,10 +544,17 @@ export default function App() {
             </div>
           )}
 
-          {/* ROUTE: 买家「我的定制」（所有身份可见） */}
+          {/* ROUTE: 买家「我的定制」（履约流程） */}
           {currentRoute === 'orders' && (
             <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
               <OrderCenterView />
+            </div>
+          )}
+
+          {/* ROUTE: 买家「订单中心」（消费账单，独立于我的定制） */}
+          {currentRoute === 'order-center' && (
+            <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+              <BuyerOrderBillingView />
             </div>
           )}
 
@@ -554,13 +577,6 @@ export default function App() {
                 favoriteAgentIds={favoriteAgentIds}
                 likedAgentIds={likedAgentIds}
               />
-            </div>
-          )}
-
-          {/* ROUTE 5: Account & Funds */}
-          {currentRoute === 'account' && (
-            <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-              <AccountView onOpenRecharge={() => setIsRechargeOpen(true)} />
             </div>
           )}
 

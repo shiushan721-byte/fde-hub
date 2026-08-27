@@ -183,7 +183,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           <div className="text-xs font-bold text-slate-700">
             {currentRoute === 'workspace' && '我的智能体'}
             {currentRoute === 'orders' && '我的定制'}
-            {currentRoute === 'account' && '账户总览 · 词元充值与流水'}
+            {currentRoute === 'order-center' && '订单中心 · 定制消费账单'}
+            {currentRoute === 'account' && '账户 · 待提现 / 可提现 / 已提现'}
             {currentRoute === 'apikey' && 'API Key 管理中心'}
           </div>
         )}
@@ -285,6 +286,19 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               </div>
 
               <div className="py-2 px-2 space-y-1">
+                {isExpert && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    onNavigate('account');
+                  }}
+                  className="w-full px-3 py-2 rounded-xl text-left font-bold text-slate-800 hover:bg-slate-50 flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <ShieldCheck size={15} className="text-slate-500" />
+                  <span>账户管理</span>
+                </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {

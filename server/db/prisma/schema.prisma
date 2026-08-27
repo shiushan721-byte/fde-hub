@@ -27,6 +27,9 @@ model User {
   customOrdersAsCreator CustomOrder[]          @relation("OrderCreator")
   privateInstances      PrivateAgentInstance[] @relation("InstanceCustomer")
   notifications         UserNotification[]
+  wallet                Wallet?
+  payments              PaymentRecord[]
+  withdrawals           Withdrawal[]
 }
 
 model Session {
@@ -315,6 +318,8 @@ model CustomOrder {
   quotedAt              DateTime?
   paymentId             String    @default("")
   paymentStatus         String    @default("none")
+  /** wechat | alipay */
+  paymentChannel        String    @default("")
   paymentDeadlineAt     DateTime?
   paidAt                DateTime?
   escrowedAt            DateTime?
@@ -418,4 +423,85 @@ model UserNotification {
   payload   String   @default("{}")
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
+}
+
+/** 专家资金账户：待提现 / 可提现 */
+model Wallet {
+  id             String          @id
+  userId         String          @unique
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pendingCents   Int             @default(0)
+  availableCents Int             @default(0)
+  frozenCents    Int             @default(0)
+  wechatAccount  String          @default("")
+  wechatBound    Boolean         @default(false)
+  alipayAccount  String          @default("")
+  alipayBound    Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  ledgers        WalletLedger[]
+  withdrawals    Withdrawal[]
+}
+
+/** 资金流水：总收入记来源，提现记手续费 */
+model WalletLedger {
+  id                  String    @id
+  walletId            String
+  wallet              Wallet    @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  userId              String
+  /** income | withdrawal */
+  type                String
+  amountCents         Int
+  feeCents            Int       @default(0)
+  balanceAfterCents   Int
+  channel             String    @default("")
+  title               String
+  sourceOrderNo       String    @default("")
+  sourceBuyer         String    @default("")
+  sourceAgent         String    @default("")
+  relatedOrderId      String    @default("")
+  relatedPaymentId    String    @default("")
+  relatedWithdrawalId String    @default("")
+  availableAt         DateTime?
+  released            Boolean   @default(false)
+  reversed            Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+}
+
+/** 定制订单支付单（微信 / 支付宝沙箱） */
+model PaymentRecord {
+  id           String    @id
+  orderId      String
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel      String
+  amountCents  Int
+  currency     String    @default("CNY")
+  status       String    @default("pending")
+  checkoutCode String    @default("")
+  paidAt       DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+/** 专家收益提现 */
+model Withdrawal {
+  id          String    @id
+  withdrawNo  String    @unique
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletId    String
+  wallet      Wallet    @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  amountCents Int
+  feeCents    Int       @default(0)
+  channel     String
+  account     String    @default("")
+  /** pending → approved → paid | rejected | cancelled */
+  status      String    @default("pending")
+  reason      String    @default("")
+  paidNote    String    @default("")
+  reviewedBy  String    @default("")
+  reviewedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  processedAt DateTime?
 }
