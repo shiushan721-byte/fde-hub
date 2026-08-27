@@ -19,7 +19,7 @@ interface AccountViewProps {
   embedded?: boolean;
 }
 
-type PayChannel = 'wechat' | 'alipay';
+type PayChannel = 'alipay';
 
 type IncomeItem = {
   id: string;
@@ -56,8 +56,6 @@ type WalletOverview = {
   withdrawFeeMinCents: number;
   pendingHoldDays: number;
   payout: {
-    wechatBound: boolean;
-    wechatAccount: string;
     alipayBound: boolean;
     alipayAccount: string;
   };
@@ -90,7 +88,6 @@ function withdrawStatusText(status?: string) {
 }
 
 function channelText(channel?: string) {
-  if (channel === 'wechat') return '微信支付';
   if (channel === 'alipay') return '支付宝';
   return '—';
 }
@@ -110,9 +107,8 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
   const [error, setError] = useState('');
   const [wallet, setWallet] = useState<WalletOverview | null>(null);
   const [ledgerTab, setLedgerTab] = useState<'income' | 'withdraw'>('income');
-  const [wechatAccount, setWechatAccount] = useState('');
   const [alipayAccount, setAlipayAccount] = useState('');
-  const [withdrawChannel, setWithdrawChannel] = useState<PayChannel>('wechat');
+  const [withdrawChannel] = useState<PayChannel>('alipay');
   const [withdrawYuan, setWithdrawYuan] = useState('');
   const [busy, setBusy] = useState('');
 
@@ -123,7 +119,6 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
       await loginExpertSession();
       const data = await api<WalletOverview>('/api/wallet');
       setWallet(data);
-      setWechatAccount(data.payout.wechatAccount || '');
       setAlipayAccount(data.payout.alipayAccount || '');
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载账户失败');
@@ -148,13 +143,13 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
     return feeFor(n, wallet.withdrawFeeRate, wallet.withdrawFeeMinCents);
   }, [withdrawYuan, wallet]);
 
-  const bindAccount = async (channel: PayChannel) => {
-    const account = (channel === 'wechat' ? wechatAccount : alipayAccount).trim();
-    setBusy(`bind-${channel}`);
+  const bindAccount = async () => {
+    const account = alipayAccount.trim();
+    setBusy('bind-alipay');
     try {
       await api('/api/wallet/payout-accounts', {
         method: 'POST',
-        body: JSON.stringify({ channel, account })
+        body: JSON.stringify({ channel: 'alipay', account })
       });
       await reload();
     } catch (err) {
@@ -231,7 +226,7 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                 <Wallet size={16} className="text-amber-400" />
               </div>
               <div className="text-3xl font-extrabold font-display">{yuanPlain(wallet.availableCents)}</div>
-              <p className="text-[11px] text-slate-300">可提到微信或支付宝，每笔扣手续费</p>
+              <p className="text-[11px] text-slate-300">可提到支付宝，每笔扣手续费</p>
             </div>
             <div className="bg-white p-6 rounded-3xl border border-slate-200 space-y-3 shadow-2xs">
               <div className="flex items-center justify-between">
@@ -264,25 +259,6 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                 <h3 className="font-bold text-slate-900 text-sm">收款账号</h3>
               </div>
               <label className="block text-xs space-y-1.5">
-                <span className="font-bold text-slate-700">微信</span>
-                <div className="flex gap-2">
-                  <input
-                    value={wechatAccount}
-                    onChange={(e) => setWechatAccount(e.target.value)}
-                    placeholder="微信号"
-                    className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-xs"
-                  />
-                  <button
-                    type="button"
-                    disabled={busy === 'bind-wechat'}
-                    onClick={() => void bindAccount('wechat')}
-                    className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
-                  >
-                    {wallet.payout.wechatBound ? '更新' : '绑定'}
-                  </button>
-                </div>
-              </label>
-              <label className="block text-xs space-y-1.5">
                 <span className="font-bold text-slate-700">支付宝</span>
                 <div className="flex gap-2">
                   <input
@@ -294,7 +270,7 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                   <button
                     type="button"
                     disabled={busy === 'bind-alipay'}
-                    onClick={() => void bindAccount('alipay')}
+                    onClick={() => void bindAccount()}
                     className="px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
                   >
                     {wallet.payout.alipayBound ? '更新' : '绑定'}
@@ -307,32 +283,8 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
               <h3 className="font-bold text-slate-900 text-sm">提现</h3>
               <p className="text-[11px] text-slate-500">
                 可提现 {yuanPlain(wallet.availableCents)} · 手续费 {(wallet.withdrawFeeRate * 100).toFixed(0)}%，单笔最低{' '}
-                {yuanPlain(wallet.withdrawFeeMinCents)}。提交后进入审核，不是立即到账。
+                {yuanPlain(wallet.withdrawFeeMinCents)}。提交后进入审核，提到支付宝。
               </p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setWithdrawChannel('wechat')}
-                  className={`py-2 rounded-xl border text-xs font-bold cursor-pointer ${
-                    withdrawChannel === 'wechat'
-                      ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
-                      : 'border-slate-200 text-slate-600'
-                  }`}
-                >
-                  提到微信
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setWithdrawChannel('alipay')}
-                  className={`py-2 rounded-xl border text-xs font-bold cursor-pointer ${
-                    withdrawChannel === 'alipay'
-                      ? 'border-blue-500 bg-blue-50 text-blue-800'
-                      : 'border-slate-200 text-slate-600'
-                  }`}
-                >
-                  提到支付宝
-                </button>
-              </div>
               <div className="flex gap-2">
                 <input
                   type="number"
@@ -350,7 +302,7 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                   className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60 inline-flex items-center gap-1"
                 >
                   {busy === 'withdraw' && <Loader2 size={12} className="animate-spin" />}
-                  提现
+                  提现到支付宝
                 </button>
               </div>
               {feePreview > 0 && (

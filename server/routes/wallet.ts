@@ -22,13 +22,13 @@ walletRouter.get('/', async (req, res) => {
 });
 
 const bindSchema = z.object({
-  channel: z.enum(['wechat', 'alipay']),
+  channel: z.literal('alipay'),
   account: z.string().min(2).max(64)
 });
 
 walletRouter.post('/payout-accounts', async (req, res) => {
   const parsed = bindSchema.safeParse(req.body);
-  if (!parsed.success) return fail(res, '请填写有效的收款账号');
+  if (!parsed.success) return fail(res, '请填写有效的支付宝收款账号');
   try {
     const wallet = await bindPayoutAccount({
       userId: req.user!.id,
@@ -36,8 +36,6 @@ walletRouter.post('/payout-accounts', async (req, res) => {
       account: parsed.data.account
     });
     return ok(res, {
-      wechatBound: wallet.wechatBound,
-      wechatAccount: wallet.wechatAccount,
       alipayBound: wallet.alipayBound,
       alipayAccount: wallet.alipayAccount
     });
@@ -47,7 +45,7 @@ walletRouter.post('/payout-accounts', async (req, res) => {
 });
 
 const withdrawSchema = z.object({
-  channel: z.enum(['wechat', 'alipay']),
+  channel: z.literal('alipay').default('alipay'),
   amountYuan: z.number().positive().optional(),
   amountCents: z.number().int().positive().optional()
 });

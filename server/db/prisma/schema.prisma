@@ -13,6 +13,8 @@ model User {
   passwordHash          String
   name                  String
   role                  String
+  /** 手机号（专家提现审核等后台展示） */
+  phone                 String                 @default("")
   avatar                String?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt

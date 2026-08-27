@@ -536,7 +536,7 @@ adminRouter.get('/experts', async (_req, res) => {
   });
   const expertIds = experts.map((e) => e.id);
   const userIds = experts.map((e) => e.userId).filter((id): id is string => Boolean(id));
-  const [publishedCounts, applications, realNames, expertCases] = await Promise.all([
+  const [publishedCounts, applications, realNames, expertCases, wallets, users] = await Promise.all([
     expertIds.length
       ? prisma.agent.groupBy({
           by: ['authorId'],
@@ -570,6 +570,22 @@ adminRouter.get('/experts', async (_req, res) => {
           where: { expertId: { in: expertIds } },
           select: { expertId: true, payload: true }
         })
+      : Promise.resolve([]),
+    userIds.length
+      ? prisma.wallet.findMany({
+          where: { userId: { in: userIds } },
+          select: {
+            userId: true,
+            alipayBound: true,
+            alipayAccount: true
+          }
+        })
+      : Promise.resolve([]),
+    userIds.length
+      ? prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, phone: true }
+        })
       : Promise.resolve([])
   ]);
   const countByAuthor = new Map(
@@ -590,6 +606,8 @@ adminRouter.get('/experts', async (_req, res) => {
     list.push(parseJson<Record<string, unknown>>(row.payload, {}));
     casesByExpert.set(row.expertId, list);
   }
+  const walletByUserId = new Map(wallets.map((w) => [w.userId, w]));
+  const phoneByUserId = new Map(users.map((u) => [u.id, u.phone || '']));
 
   return ok(
     res,
@@ -610,6 +628,7 @@ adminRouter.get('/experts', async (_req, res) => {
           }
         : null;
       const rn = expert.userId ? rnByUserId.get(expert.userId) : null;
+      const wallet = expert.userId ? walletByUserId.get(expert.userId) : null;
       return {
         ...expertToPublic(expert),
         publishedAgentsCount: countByAuthor.get(expert.id) || 0,
@@ -623,6 +642,9 @@ adminRouter.get('/experts', async (_req, res) => {
         idCardMasked: rn?.idCardMasked || '',
         idCardFrontUrl: rn?.idCardFrontUrl || '',
         idCardBackUrl: rn?.idCardBackUrl || '',
+        alipayBound: wallet?.alipayBound || false,
+        alipayAccount: wallet?.alipayAccount || '',
+        phone: expert.userId ? phoneByUserId.get(expert.userId) || '' : '',
         certification: expert.certification
           ? {
               id: expert.certification.id,
@@ -1554,15 +1576,113 @@ adminRouter.get('/expert-accounts', async (_req, res) => {
 
 adminRouter.get('/settlements', async (_req, res) => {
   const items = await prisma.customOrder.findMany({
-    where: { status: { in: ['pending_acceptance', 'pending_settlement', 'completed'] } },
-    orderBy: { updatedAt: 'desc' },
+    where: {
+      status: {
+        in: [
+          'awaiting_payment',
+          'paid_pending_start',
+          'escrowed',
+          'in_development',
+          'in_review',
+          'revision',
+          'pending_acceptance',
+          'pending_settlement',
+          'completed'
+        ]
+      }
+    },
+    orderBy: { createdAt: 'desc' },
     take: 200,
     include: {
       buyer: { select: { id: true, name: true, email: true } },
-      creator: { select: { id: true, name: true, email: true } }
+      creator: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          expert: { select: { id: true, expertNo: true, name: true } }
+        }
+      }
     }
   });
-  return ok(res, items);
+
+  const leadIds = [...new Set(items.map((o) => o.leadId).filter(Boolean))] as string[];
+  const leads = leadIds.length
+    ? await prisma.consultationLead.findMany({
+        where: { id: { in: leadIds } },
+        select: { id: true, contactPhone: true, clientName: true }
+      })
+    : [];
+  const leadMap = new Map(leads.map((l) => [l.id, l]));
+
+  // 无关联线索时，用该买家最近一条线索手机号兜底
+  const buyerIdsMissingPhone = [
+    ...new Set(
+      items
+        .filter((o) => {
+          const lead = o.leadId ? leadMap.get(o.leadId) : null;
+          return !lead?.contactPhone;
+        })
+        .map((o) => o.buyerUserId)
+    )
+  ];
+  const buyerLeads =
+    buyerIdsMissingPhone.length > 0
+      ? await prisma.consultationLead.findMany({
+          where: {
+            userId: { in: buyerIdsMissingPhone },
+            contactPhone: { not: '' }
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { userId: true, contactPhone: true }
+        })
+      : [];
+  const buyerPhoneMap = new Map<string, string>();
+  for (const lead of buyerLeads) {
+    if (lead.userId && !buyerPhoneMap.has(lead.userId)) {
+      buyerPhoneMap.set(lead.userId, lead.contactPhone);
+    }
+  }
+
+  return ok(
+    res,
+    items.map((order) => {
+      const lead = order.leadId ? leadMap.get(order.leadId) : null;
+      const expert = order.creator?.expert;
+      return {
+        id: order.id,
+        orderNo: order.orderNo,
+        title: order.title,
+        baseAgentTitle: order.baseAgentTitle,
+        baseAgentVersion: order.baseAgentVersion,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        paymentChannel: order.paymentChannel,
+        priceCents: order.priceCents,
+        createdAt: order.createdAt,
+        buyer: order.buyer
+          ? {
+              id: order.buyer.id,
+              name: order.buyer.name,
+              email: order.buyer.email,
+              phone:
+                lead?.contactPhone ||
+                buyerPhoneMap.get(order.buyerUserId) ||
+                (order.buyerUserId === 'user-demo' ? '13900001111' : '')
+            }
+          : null,
+        seller: order.creator
+          ? {
+              id: expert?.expertNo || order.creator.id,
+              name: expert?.name || order.creator.name,
+              email: order.creator.email,
+              phone: order.creator.phone || ''
+            }
+          : null
+      };
+    })
+  );
 });
 
 adminRouter.get('/escrows', async (_req, res) => {
@@ -1588,6 +1708,7 @@ adminRouter.get('/withdrawals', async (_req, res) => {
           id: true,
           name: true,
           email: true,
+          phone: true,
           expert: { select: { name: true, expertNo: true } }
         }
       }

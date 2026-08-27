@@ -179,13 +179,11 @@ export async function bindPayoutAccount(input: {
 }) {
   const account = input.account.trim();
   if (!account) throw new Error('请填写收款账号');
+  if (input.channel !== 'alipay') throw new Error('目前仅支持绑定支付宝收款账号');
   const wallet = await getOrCreateWallet(input.userId);
   return prisma.wallet.update({
     where: { id: wallet.id },
-    data:
-      input.channel === 'wechat'
-        ? { wechatAccount: account, wechatBound: true }
-        : { alipayAccount: account, alipayBound: true }
+    data: { alipayAccount: account, alipayBound: true }
   });
 }
 
@@ -199,12 +197,10 @@ export async function requestWithdrawal(input: {
   const wallet = await getOrCreateWallet(input.userId);
   if (input.amountCents > wallet.availableCents) throw new Error('可提现余额不足');
 
-  const bound =
-    input.channel === 'wechat'
-      ? { ok: wallet.wechatBound, account: wallet.wechatAccount }
-      : { ok: wallet.alipayBound, account: wallet.alipayAccount };
+  if (input.channel !== 'alipay') throw new Error('目前仅支持提现至支付宝');
+  const bound = { ok: wallet.alipayBound, account: wallet.alipayAccount };
   if (!bound.ok || !bound.account) {
-    throw new Error(input.channel === 'wechat' ? '请先绑定微信收款账号' : '请先绑定支付宝收款账号');
+    throw new Error('请先绑定支付宝收款账号');
   }
 
   const feeCents = withdrawFeeCents(input.amountCents);
@@ -368,8 +364,6 @@ export async function getWalletOverview(userId: string) {
     withdrawFeeMinCents: WITHDRAW_FEE_MIN_CENTS,
     pendingHoldDays: 7,
     payout: {
-      wechatBound: wallet.wechatBound,
-      wechatAccount: wallet.wechatAccount,
       alipayBound: wallet.alipayBound,
       alipayAccount: wallet.alipayAccount
     },

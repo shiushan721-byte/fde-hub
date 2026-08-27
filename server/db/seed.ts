@@ -209,6 +209,7 @@ export async function seedDatabase(force = false) {
         passwordHash: await bcrypt.hash('hellome-expert', 10),
         name: expert.name,
         role: 'expert',
+        phone: `138${String(10000000 + index + 1).slice(-8)}`,
         avatar: expert.avatar
       }
     });

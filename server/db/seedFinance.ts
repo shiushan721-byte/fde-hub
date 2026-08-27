@@ -14,19 +14,21 @@ const BUYER_ID = 'user-demo';
 
 /** 为演示专家补齐钱包、收款绑定，并按待验收起算待提现/可提现 */
 export async function ensureFinanceSynced() {
-  const users = await prisma.user.findMany({ select: { id: true, role: true } });
+  const users = await prisma.user.findMany({
+    select: { id: true, role: true, phone: true, expert: { select: { sortOrder: true } } }
+  });
   for (const user of users) {
     await getOrCreateWallet(user.id);
+    if (user.role === 'expert' && !user.phone?.trim()) {
+      const n = user.expert?.sortOrder || 1;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { phone: `138${String(10000000 + n).slice(-8)}` }
+      });
+    }
   }
 
   const creatorWallet = await prisma.wallet.findUnique({ where: { userId: CREATOR_ID } });
-  if (creatorWallet && !creatorWallet.wechatBound) {
-    await bindPayoutAccount({
-      userId: CREATOR_ID,
-      channel: 'wechat',
-      account: 'linran_fde'
-    });
-  }
   if (creatorWallet && !creatorWallet.alipayBound) {
     await bindPayoutAccount({
       userId: CREATOR_ID,
@@ -91,8 +93,8 @@ export async function ensureFinanceSynced() {
           walletId: wallet.id,
           amountCents,
           feeCents,
-          channel: 'wechat',
-          account: wallet.wechatAccount || 'linran_fde',
+          channel: 'alipay',
+          account: wallet.alipayAccount || 'linran.fde@hellome.art',
           status: 'pending',
           reason: `手续费 ¥${(feeCents / 100).toFixed(2)}，实到 ¥${((amountCents - feeCents) / 100).toFixed(2)}`
         }

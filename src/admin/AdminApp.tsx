@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
   Users,
@@ -2154,6 +2154,8 @@ const ExpertsPage = ({
   const [actionReason, setActionReason] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
+  const [phoneQuery, setPhoneQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [detailTarget, setDetailTarget] = useState<{
     name: string;
     title: string;
@@ -2164,6 +2166,9 @@ const ExpertsPage = ({
     idCardMasked?: string;
     idCardFrontUrl?: string;
     idCardBackUrl?: string;
+    alipayBound?: boolean;
+    alipayAccount?: string;
+    phone?: string;
   } | null>(null);
   const { data, error, loading, reload } = useAdminQuery<Array<{
     id: string;
@@ -2177,6 +2182,7 @@ const ExpertsPage = ({
     featured: boolean;
     paused: boolean;
     status: string;
+    phone?: string;
     publishedAgentsCount?: number;
     followersCount?: number;
     appliedAt?: string;
@@ -2185,6 +2191,8 @@ const ExpertsPage = ({
     idCardMasked?: string;
     idCardFrontUrl?: string;
     idCardBackUrl?: string;
+    alipayBound?: boolean;
+    alipayAccount?: string;
     certification: null | {
       id: string;
       level: number;
@@ -2193,7 +2201,24 @@ const ExpertsPage = ({
     };
   }>>('/api/admin/experts');
 
-  const total = data?.length || 0;
+  const rows = useMemo(() => {
+    const list = data || [];
+    const phoneQ = phoneQuery.trim();
+    return list.filter((expert) => {
+      if (phoneQ && !(expert.phone || '').includes(phoneQ)) return false;
+      if (statusFilter) {
+        const certStatus = expert.certification?.status || '';
+        if (statusFilter === 'none') {
+          if (expert.certification) return false;
+        } else if (certStatus !== statusFilter) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [data, phoneQuery, statusFilter]);
+
+  const total = rows.length;
 
   const confirmAction = async () => {
     if (!actionTarget) return;
@@ -2221,10 +2246,35 @@ const ExpertsPage = ({
     }
   };
 
+  const inputClass = 'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-black">专家管理</h1>
+      <h1 className="text-xl font-black">专家管理</h1>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">手机号</span>
+          <input
+            type="text"
+            value={phoneQuery}
+            onChange={(e) => setPhoneQuery(e.target.value)}
+            placeholder="专家手机号"
+            className={`${inputClass} w-40`}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">认证状态</span>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">全部</option>
+            <option value="active">已生效</option>
+            <option value="frozen">已冻结</option>
+            <option value="none">无认证记录</option>
+          </select>
+        </label>
       </div>
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
@@ -2234,6 +2284,7 @@ const ExpertsPage = ({
             <tr>
               <th className="text-left p-3 w-14">序号</th>
               <th className="text-left p-3">专家</th>
+              <th className="text-left p-3 whitespace-nowrap">手机号</th>
               <th className="text-left p-3 whitespace-nowrap">专家详情</th>
               <th className="text-left p-3">认证状态</th>
               <th className="text-left p-3 whitespace-nowrap">已上架智能体</th>
@@ -2243,7 +2294,7 @@ const ExpertsPage = ({
             </tr>
           </thead>
           <tbody>
-            {(data || []).map((expert, index) => {
+            {rows.map((expert, index) => {
               const cert = expert.certification;
               const frozen = cert?.status === 'frozen';
               const publishedCount = expert.publishedAgentsCount || 0;
@@ -2255,6 +2306,9 @@ const ExpertsPage = ({
                     {expert.expertNo && (
                       <div className="text-[11px] font-mono text-slate-500 mt-0.5">{expert.expertNo}</div>
                     )}
+                  </td>
+                  <td className="p-3 font-mono text-slate-700 whitespace-nowrap">
+                    {expert.phone || '—'}
                   </td>
                   <td className="p-3 whitespace-nowrap">
                     <button
@@ -2269,7 +2323,10 @@ const ExpertsPage = ({
                           realName: expert.realName || '',
                           idCardMasked: expert.idCardMasked || '',
                           idCardFrontUrl: expert.idCardFrontUrl || '',
-                          idCardBackUrl: expert.idCardBackUrl || ''
+                          idCardBackUrl: expert.idCardBackUrl || '',
+                          alipayBound: expert.alipayBound || false,
+                          alipayAccount: expert.alipayAccount || '',
+                          phone: expert.phone || ''
                         })
                       }
                       className="font-bold cursor-pointer text-blue-600 hover:text-blue-700"
@@ -2379,8 +2436,8 @@ const ExpertsPage = ({
             })}
           </tbody>
         </table>
-        {data?.length === 0 && (
-          <p className="p-6 text-sm text-slate-400 text-center">暂无专家</p>
+        {!loading && rows.length === 0 && (
+          <p className="p-6 text-sm text-slate-400 text-center">暂无匹配的专家</p>
         )}
       </div>
 
@@ -2483,6 +2540,20 @@ const ExpertsPage = ({
                   )}
                 </div>
               )}
+
+              <div className="rounded-xl border border-slate-200 p-4 text-xs space-y-1">
+                <div className="text-[11px] font-bold text-slate-500">联系与收款</div>
+                <p className="text-slate-700">
+                  <span className="text-slate-400">手机号：</span>
+                  <span className="font-mono">{detailTarget.phone || '—'}</span>
+                </p>
+                <p className="text-slate-700">
+                  <span className="text-slate-400">支付宝：</span>
+                  {detailTarget.alipayBound && detailTarget.alipayAccount
+                    ? detailTarget.alipayAccount
+                    : '未绑定'}
+                </p>
+              </div>
 
               <ExpertProfileBlock
                 name={detailTarget.name}
