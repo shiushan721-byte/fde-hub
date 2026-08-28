@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { fail, ok } from '../lib/http';
 import { writeAudit } from '../lib/audit';
-import { parseJson } from '../lib/json';
+import { parseJson, toJson } from '../lib/json';
 import { agentToCatalog, agentToSolution, expertToPublic } from '../lib/mappers';
 import { engagementTotals } from '../lib/engagement';
 import { requireSuperAdmin } from '../middleware/auth';
@@ -14,6 +14,29 @@ import {
   writeCertEventStandalone
 } from '../services/certification';
 import { markWithdrawalPaid, releasePendingIncomes, reviewWithdrawal } from '../services/wallet';
+import {
+  createFeeRatePeriod,
+  deleteFeeRatePeriod,
+  getFinanceSettings,
+  listFeeRatePeriods,
+  updateFeeRatePeriod,
+  updateFinanceSettings
+} from '../services/financeSettings';
+import {
+  backfillFinanceJournals,
+  listFinanceAccounts,
+  listFinanceLedgerEntries
+} from '../services/platformFinance';
+import {
+  countExpertsByTagName,
+  createExpertTag,
+  listExpertTags,
+  listExpertsUsingTag,
+  offlineExpertTag,
+  onlineExpertTag,
+  updateExpertTag,
+  validateActiveDomainTags
+} from '../services/expertTags';
 
 export const adminRouter = Router();
 
@@ -663,6 +686,7 @@ const expertPatch = z.object({
   name: z.string().optional(),
   title: z.string().optional(),
   bio: z.string().optional(),
+  domainTags: z.array(z.string().min(1)).min(1).optional(),
   featured: z.boolean().optional(),
   sortOrder: z.number().int().optional()
 });
@@ -680,9 +704,29 @@ adminRouter.patch('/experts/:id', async (req, res) => {
   ) {
     return fail(res, '等级、认证状态与专家库资格只能通过审核或冻结流程变更');
   }
+
+  const { domainTags, ...rest } = parsed.data;
+  const data: {
+    name?: string;
+    title?: string;
+    bio?: string;
+    domainTags?: string;
+    featured?: boolean;
+    sortOrder?: number;
+  } = { ...rest };
+
+  if (domainTags) {
+    try {
+      const validated = await validateActiveDomainTags(domainTags);
+      data.domainTags = toJson(validated);
+    } catch (error) {
+      return fail(res, error instanceof Error ? error.message : '专家标签无效');
+    }
+  }
+
   const expert = await prisma.expert.update({
     where: { id: req.params.id },
-    data: parsed.data
+    data
   });
   await writeAudit({
     actorId: actorId(req),
@@ -1141,8 +1185,18 @@ adminRouter.post('/expert-applications/:id/approve', async (req, res) => {
   if (req.body?.level !== undefined || req.body?.targetLevel !== undefined) {
     return fail(res, '平台不分专家等级，审批不可传入等级字段');
   }
+  const body = z
+    .object({
+      domainTags: z.array(z.string().min(1)).min(1, '请至少选择一个专家标签')
+    })
+    .safeParse(req.body);
+  if (!body.success) {
+    return fail(res, body.error.issues[0]?.message || '请至少选择一个专家标签');
+  }
   try {
-    const result = await approveApplication(req.params.id, actorId(req));
+    const result = await approveApplication(req.params.id, actorId(req), {
+      domainTags: body.data.domainTags
+    });
     return ok(res, result.application);
   } catch (error) {
     return fail(res, error instanceof Error ? error.message : '审批失败');
@@ -1688,14 +1742,99 @@ adminRouter.get('/settlements', async (_req, res) => {
 adminRouter.get('/escrows', async (_req, res) => {
   const items = await prisma.customOrder.findMany({
     where: { paymentStatus: { in: ['escrowed', 'released'] } },
-    orderBy: { updatedAt: 'desc' },
+    orderBy: [{ settlementEligibleAt: 'asc' }, { updatedAt: 'desc' }],
     take: 200,
     include: {
       buyer: { select: { id: true, name: true, email: true } },
-      creator: { select: { id: true, name: true, email: true } }
+      creator: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          expert: { select: { id: true, expertNo: true, name: true } }
+        }
+      }
     }
   });
-  return ok(res, items);
+
+  const leadIds = [...new Set(items.map((o) => o.leadId).filter(Boolean))] as string[];
+  const leads = leadIds.length
+    ? await prisma.consultationLead.findMany({
+        where: { id: { in: leadIds } },
+        select: { id: true, contactPhone: true }
+      })
+    : [];
+  const leadMap = new Map(leads.map((l) => [l.id, l]));
+
+  const buyerIdsMissingPhone = [
+    ...new Set(
+      items
+        .filter((o) => {
+          const lead = o.leadId ? leadMap.get(o.leadId) : null;
+          return !lead?.contactPhone;
+        })
+        .map((o) => o.buyerUserId)
+    )
+  ];
+  const buyerLeads =
+    buyerIdsMissingPhone.length > 0
+      ? await prisma.consultationLead.findMany({
+          where: {
+            userId: { in: buyerIdsMissingPhone },
+            contactPhone: { not: '' }
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { userId: true, contactPhone: true }
+        })
+      : [];
+  const buyerPhoneMap = new Map<string, string>();
+  for (const lead of buyerLeads) {
+    if (lead.userId && !buyerPhoneMap.has(lead.userId)) {
+      buyerPhoneMap.set(lead.userId, lead.contactPhone);
+    }
+  }
+
+  return ok(
+    res,
+    items.map((order) => {
+      const lead = order.leadId ? leadMap.get(order.leadId) : null;
+      const expert = order.creator?.expert;
+      return {
+        id: order.id,
+        orderNo: order.orderNo,
+        title: order.title,
+        baseAgentTitle: order.baseAgentTitle,
+        baseAgentVersion: order.baseAgentVersion,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        paymentChannel: order.paymentChannel,
+        priceCents: order.priceCents,
+        paidAt: order.paidAt,
+        escrowedAt: order.escrowedAt,
+        settlementEligibleAt: order.settlementEligibleAt,
+        buyer: order.buyer
+          ? {
+              id: order.buyer.id,
+              name: order.buyer.name,
+              email: order.buyer.email,
+              phone:
+                lead?.contactPhone ||
+                buyerPhoneMap.get(order.buyerUserId) ||
+                (order.buyerUserId === 'user-demo' ? '13900001111' : '')
+            }
+          : null,
+        seller: order.creator
+          ? {
+              id: expert?.expertNo || order.creator.id,
+              name: expert?.name || order.creator.name,
+              email: order.creator.email,
+              phone: order.creator.phone || ''
+            }
+          : null
+      };
+    })
+  );
 });
 
 adminRouter.get('/withdrawals', async (_req, res) => {
@@ -1768,6 +1907,254 @@ adminRouter.post('/withdrawals/:id/paid', async (req, res) => {
     return ok(res, item);
   } catch (error) {
     return fail(res, error instanceof Error ? error.message : '确认打款失败');
+  }
+});
+
+adminRouter.get('/finance-settings', async (_req, res) => {
+  const [settings, periods] = await Promise.all([getFinanceSettings(), listFeeRatePeriods()]);
+  return ok(res, { settings, periods });
+});
+
+const financeSettingsSchema = z.object({
+  fallbackFeeRateBps: z.number().int().min(0).max(10000).optional(),
+  acceptanceDays: z.number().int().min(1).max(90).optional(),
+  settlementHoldHours: z.number().int().min(0).max(720).optional(),
+  pendingHoldDays: z.number().int().min(0).max(90).optional()
+});
+
+adminRouter.patch('/finance-settings', async (req, res) => {
+  const parsed = financeSettingsSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const settings = await updateFinanceSettings(parsed.data);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'update_finance_settings',
+      targetType: 'finance_settings',
+      targetId: settings.id,
+      diff: parsed.data
+    });
+    return ok(res, settings);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '保存失败');
+  }
+});
+
+const feePeriodSchema = z.object({
+  startAt: z.string().min(1),
+  endAt: z.string().min(1),
+  rateBps: z.number().int().min(0).max(10000),
+  note: z.string().optional(),
+  enabled: z.boolean().optional()
+});
+
+adminRouter.post('/finance-settings/fee-periods', async (req, res) => {
+  const parsed = feePeriodSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const item = await createFeeRatePeriod({
+      startAt: new Date(parsed.data.startAt),
+      endAt: new Date(parsed.data.endAt),
+      rateBps: parsed.data.rateBps,
+      note: parsed.data.note,
+      enabled: parsed.data.enabled
+    });
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'create_fee_rate_period',
+      targetType: 'fee_rate_period',
+      targetId: item.id,
+      diff: parsed.data
+    });
+    return ok(res, item);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '创建失败');
+  }
+});
+
+adminRouter.patch('/finance-settings/fee-periods/:id', async (req, res) => {
+  const parsed = feePeriodSchema.partial().safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const item = await updateFeeRatePeriod(req.params.id, {
+      startAt: parsed.data.startAt ? new Date(parsed.data.startAt) : undefined,
+      endAt: parsed.data.endAt ? new Date(parsed.data.endAt) : undefined,
+      rateBps: parsed.data.rateBps,
+      note: parsed.data.note,
+      enabled: parsed.data.enabled
+    });
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'update_fee_rate_period',
+      targetType: 'fee_rate_period',
+      targetId: item.id,
+      diff: parsed.data
+    });
+    return ok(res, item);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '更新失败');
+  }
+});
+
+adminRouter.delete('/finance-settings/fee-periods/:id', async (req, res) => {
+  try {
+    const item = await deleteFeeRatePeriod(req.params.id);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'delete_fee_rate_period',
+      targetType: 'fee_rate_period',
+      targetId: item.id,
+      diff: { id: item.id }
+    });
+    return ok(res, item);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '删除失败');
+  }
+});
+
+adminRouter.get('/finance-accounts', async (_req, res) => {
+  const accounts = await listFinanceAccounts();
+  return ok(
+    res,
+    accounts.map((a, index, arr) => ({
+      ...a,
+      serial: arr.length - index
+    }))
+  );
+});
+
+adminRouter.get('/finance-ledger', async (req, res) => {
+  const accountId = typeof req.query.accountId === 'string' ? req.query.accountId : undefined;
+  const bizOrderNo = typeof req.query.bizOrderNo === 'string' ? req.query.bizOrderNo : undefined;
+  const flowNo = typeof req.query.flowNo === 'string' ? req.query.flowNo : undefined;
+  const bizType = typeof req.query.bizType === 'string' ? req.query.bizType : undefined;
+  const dateFrom =
+    typeof req.query.dateFrom === 'string' && req.query.dateFrom
+      ? new Date(`${req.query.dateFrom}T00:00:00`)
+      : undefined;
+  const dateTo =
+    typeof req.query.dateTo === 'string' && req.query.dateTo
+      ? new Date(`${req.query.dateTo}T23:59:59.999`)
+      : undefined;
+
+  const items = await listFinanceLedgerEntries({
+    accountId,
+    bizOrderNo,
+    flowNo,
+    bizType,
+    dateFrom,
+    dateTo
+  });
+  return ok(res, items);
+});
+
+adminRouter.post('/finance-ledger/backfill', async (req, res) => {
+  try {
+    const result = await backfillFinanceJournals();
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'backfill_finance_ledger',
+      targetType: 'finance_ledger',
+      targetId: 'all',
+      diff: result
+    });
+    return ok(res, result);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '补记账失败');
+  }
+});
+
+adminRouter.get('/expert-tags', async (_req, res) => {
+  const [tags, countByName] = await Promise.all([listExpertTags({ status: 'all' }), countExpertsByTagName()]);
+  const withUsage = tags.map((tag) => ({
+    ...tag,
+    expertCount: countByName.get(tag.name) || 0
+  }));
+  return ok(res, withUsage);
+});
+
+adminRouter.get('/expert-tags/:id/experts', async (req, res) => {
+  const tag = await prisma.expertTag.findUnique({ where: { id: req.params.id } });
+  if (!tag) return fail(res, '标签不存在', 404, 'NOT_FOUND');
+  const experts = await listExpertsUsingTag(tag.name);
+  return ok(res, experts);
+});
+
+const expertTagCreateSchema = z.object({
+  name: z.string().min(1),
+  sortOrder: z.number().int().optional()
+});
+
+adminRouter.post('/expert-tags', async (req, res) => {
+  const parsed = expertTagCreateSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const tag = await createExpertTag(parsed.data);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'create_expert_tag',
+      targetType: 'expert_tag',
+      targetId: tag.id,
+      diff: parsed.data
+    });
+    return ok(res, tag);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '创建失败');
+  }
+});
+
+adminRouter.patch('/expert-tags/:id', async (req, res) => {
+  const parsed = z
+    .object({
+      name: z.string().min(1).optional(),
+      sortOrder: z.number().int().optional()
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const tag = await updateExpertTag(req.params.id, parsed.data);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'update_expert_tag',
+      targetType: 'expert_tag',
+      targetId: tag.id,
+      diff: parsed.data
+    });
+    return ok(res, tag);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '更新失败');
+  }
+});
+
+adminRouter.post('/expert-tags/:id/offline', async (req, res) => {
+  try {
+    const tag = await offlineExpertTag(req.params.id);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'offline_expert_tag',
+      targetType: 'expert_tag',
+      targetId: tag.id,
+      diff: {}
+    });
+    return ok(res, tag);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '下架失败');
+  }
+});
+
+adminRouter.post('/expert-tags/:id/online', async (req, res) => {
+  try {
+    const tag = await onlineExpertTag(req.params.id);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'online_expert_tag',
+      targetType: 'expert_tag',
+      targetId: tag.id,
+      diff: {}
+    });
+    return ok(res, tag);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '上架失败');
   }
 });
 

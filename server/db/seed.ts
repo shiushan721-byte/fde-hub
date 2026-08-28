@@ -1,6 +1,9 @@
 import dotenv from 'dotenv';
 import { ensureSampleCustomOrders } from './seedCustomOrders';
 import { ensureFinanceSynced } from './seedFinance';
+import { ensureSampleInReviewAgents } from './seedInReviewAgents';
+import { ensureExpertDomainTagsAligned } from './seedExpertTagUsage';
+import { ensureExpertTags } from '../services/expertTags';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { toJson } from '../lib/json';
@@ -29,6 +32,9 @@ export async function seedDatabase(force = false) {
     await ensureAgentComments();
     await ensureExpertCasesSynced();
     await ensureFinanceSynced();
+    await ensureExpertTags();
+    await ensureSampleInReviewAgents();
+    await ensureExpertDomainTagsAligned();
     return { seeded: false, agents: existing };
   }
 
@@ -37,6 +43,12 @@ export async function seedDatabase(force = false) {
     await prisma.withdrawal.deleteMany();
     await prisma.paymentRecord.deleteMany();
     await prisma.wallet.deleteMany();
+    await prisma.platformFeeRatePeriod.deleteMany();
+    await prisma.financeSettings.deleteMany();
+    await prisma.financeLedgerEntry.deleteMany();
+    await prisma.financeJournal.deleteMany();
+    await prisma.financeAccount.deleteMany();
+    await prisma.expertTag.deleteMany();
     await prisma.userNotification.deleteMany();
     await prisma.customOrderEvent.deleteMany();
     await prisma.deliveryVersion.deleteMany();
@@ -309,6 +321,9 @@ export async function seedDatabase(force = false) {
   await ensureExpertNos();
   await ensureAgentComments();
   await ensureFinanceSynced();
+  await ensureExpertTags();
+  await ensureSampleInReviewAgents();
+  await ensureExpertDomainTagsAligned();
 
   const count = await prisma.agent.count();
   return { seeded: true, agents: count };
@@ -576,6 +591,8 @@ export async function ensureExpertApplicationSeed() {
     await ensureAgentComments();
     await ensureExpertCasesSynced();
     await ensureFinanceSynced();
+    await ensureSampleInReviewAgents();
+    await ensureExpertDomainTagsAligned();
   } catch (error) {
     console.warn('ensureExpertApplicationSeed skipped:', error);
   }

@@ -5,6 +5,12 @@ import { stubPaymentAdapter } from '../adapters/payment';
 import { writeAudit } from '../lib/audit';
 import { creditCreatorPendingIncome, reverseCreatorPendingIncome, type PayChannel } from './wallet';
 import { createPendingPayment, markPaymentPaid } from './payments';
+import {
+  getAcceptanceDeadlineFromNow,
+  getSettlementEligibleFromNow,
+  platformFeeCentsForPrice
+} from './financeSettings';
+import { postEscrowReceived, postOrderSettlement } from './platformFinance';
 
 export function newId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -656,6 +662,16 @@ export async function confirmEscrow(input: {
     });
   }
 
+  await postEscrowReceived({
+    orderId: order.id,
+    orderNo: order.orderNo,
+    amountCents: order.priceCents,
+    channel,
+    paymentId,
+    operatorId: input.actorId,
+    at: now
+  }).catch((err) => console.warn('[finance] postEscrowReceived', err));
+
   return updated;
 }
 
@@ -837,6 +853,8 @@ export async function approveDelivery(input: {
   deliveryId: string;
   reviewerId: string;
 }) {
+  const { deadline, acceptanceDays } = await getAcceptanceDeadlineFromNow();
+
   const updatedOrder = await prisma.$transaction(async (tx) => {
     const delivery = await tx.deliveryVersion.findUnique({ where: { id: input.deliveryId } });
     if (!delivery) throw new Error('交付版本不存在');
@@ -844,8 +862,6 @@ export async function approveDelivery(input: {
 
     const order = await tx.customOrder.findUnique({ where: { id: delivery.orderId } });
     if (!order) throw new Error('订单不存在');
-
-    const deadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     await tx.deliveryVersion.update({
       where: { id: delivery.id },
@@ -890,7 +906,8 @@ export async function approveDelivery(input: {
         payload: toJson({
           deliveryId: delivery.id,
           version: delivery.version,
-          acceptanceDeadlineAt: deadline.toISOString()
+          acceptanceDeadlineAt: deadline.toISOString(),
+          acceptanceDays
         })
       }
     });
@@ -1033,9 +1050,6 @@ export async function rejectDelivery(input: {
   return delivery;
 }
 
-const PLATFORM_FEE_RATE = 0.1;
-const SETTLEMENT_HOLD_MS = 24 * 60 * 60 * 1000;
-
 export async function settleOrder(orderId: string, actorId?: string) {
   const order = await prisma.customOrder.findUnique({ where: { id: orderId } });
   if (!order) throw new Error('订单不存在');
@@ -1049,17 +1063,17 @@ export async function settleOrder(orderId: string, actorId?: string) {
     order.settlementEligibleAt > new Date() &&
     actorId !== 'ops_force'
   ) {
-    throw new Error('订单仍在 24 小时待结算观察期');
+    throw new Error('订单仍在待结算观察期');
   }
 
-  const platformFeeCents =
-    order.platformFeeCents > 0
-      ? order.platformFeeCents
-      : Math.round(order.priceCents * PLATFORM_FEE_RATE);
-  const creatorPayoutCents =
-    order.creatorPayoutCents > 0
-      ? order.creatorPayoutCents
-      : Math.max(0, order.priceCents - platformFeeCents);
+  let platformFeeCents = order.platformFeeCents;
+  let creatorPayoutCents = order.creatorPayoutCents;
+  if (platformFeeCents <= 0 || creatorPayoutCents <= 0) {
+    const fee = await platformFeeCentsForPrice(order.priceCents, order.paidAt || new Date());
+    platformFeeCents = platformFeeCents > 0 ? platformFeeCents : fee.feeCents;
+    creatorPayoutCents =
+      creatorPayoutCents > 0 ? creatorPayoutCents : Math.max(0, order.priceCents - platformFeeCents);
+  }
   const now = new Date();
 
   const updated = await prisma.customOrder.update({
@@ -1094,6 +1108,16 @@ export async function settleOrder(orderId: string, actorId?: string) {
     });
   }
 
+  await postOrderSettlement({
+    orderId: order.id,
+    orderNo: order.orderNo,
+    priceCents: order.priceCents,
+    platformFeeCents,
+    creatorPayoutCents,
+    operatorId: actorId,
+    at: now
+  }).catch((err) => console.warn('[finance] postOrderSettlement', err));
+
   return updated;
 }
 
@@ -1109,7 +1133,7 @@ export async function acceptDeliveryByBuyer(input: {
   if (order.status !== 'pending_acceptance') throw new Error('当前状态不可验收');
   if (order.disputeStatus === 'open') throw new Error('争议处理中，不可验收');
 
-  const eligibleAt = new Date(Date.now() + SETTLEMENT_HOLD_MS);
+  const { eligibleAt, settlementHoldHours } = await getSettlementEligibleFromNow();
   const updated = await prisma.customOrder.update({
     where: { id: order.id },
     data: {
@@ -1127,10 +1151,11 @@ export async function acceptDeliveryByBuyer(input: {
     toStatus: 'pending_settlement',
     reason:
       input.feedback ||
-      (input.source === 'system_auto' ? '七天无异议自动验收' : '验收通过'),
+      (input.source === 'system_auto' ? '到期无异议自动验收' : '验收通过'),
     payload: {
       feedback: input.feedback || '',
       settlementEligibleAt: eligibleAt.toISOString(),
+      settlementHoldHours,
       source: input.source || 'buyer'
     }
   });
@@ -1143,7 +1168,7 @@ export async function acceptDeliveryByBuyer(input: {
         input.source === 'system_auto'
           ? '订单已自动验收，进入待结算'
           : '客户已验收，进入待结算',
-      body: `${order.orderNo} · 约 24 小时后结算`,
+      body: `${order.orderNo} · 约 ${settlementHoldHours} 小时后结算`,
       link: `/creator-center?tab=orders&orderId=${order.id}`,
       payload: { orderId: order.id, settlementEligibleAt: eligibleAt.toISOString() }
     });
@@ -1325,8 +1350,9 @@ export async function resolveDisputeByOps(input: {
     const refundCents = Math.max(0, Math.min(input.refundCents || 0, order.priceCents));
     if (refundCents <= 0) throw new Error('请填写有效的部分退款金额');
     const remaining = order.priceCents - refundCents;
-    const platformFeeCents = Math.round(remaining * PLATFORM_FEE_RATE);
-    const eligibleAt = new Date(Date.now() + SETTLEMENT_HOLD_MS);
+    const fee = await platformFeeCentsForPrice(remaining, order.paidAt || new Date());
+    const platformFeeCents = fee.feeCents;
+    const { eligibleAt } = await getSettlementEligibleFromNow();
     nextStatus = 'pending_settlement';
     data.status = 'pending_settlement';
     data.settlementStatus = 'pending_settlement';
@@ -1336,7 +1362,7 @@ export async function resolveDisputeByOps(input: {
     data.priceCents = remaining;
     data.quoteNote = `${order.quoteNote || ''}｜争议部分退款 ¥${(refundCents / 100).toFixed(2)}`.trim();
   } else {
-    const eligibleAt = new Date(Date.now() + SETTLEMENT_HOLD_MS);
+    const { eligibleAt } = await getSettlementEligibleFromNow();
     nextStatus = 'pending_settlement';
     data.status = 'pending_settlement';
     data.settlementStatus = 'pending_settlement';

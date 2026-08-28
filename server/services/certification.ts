@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { toJson } from '../lib/json';
 import { EXPERT_VERIFY_META } from '../lib/mappers';
 import { allocateNextExpertNo } from '../lib/expertNo';
+import { validateActiveDomainTags } from './expertTags';
 
 type Tx = Omit<
   typeof prisma,
@@ -90,7 +91,11 @@ export async function getUserCertification(userId: string) {
   });
 }
 
-export async function approveApplication(applicationId: string, actorId?: string) {
+export async function approveApplication(
+  applicationId: string,
+  actorId?: string,
+  options?: { domainTags?: string[] }
+) {
   return prisma.$transaction(async (tx) => {
     const application = await tx.expertApplication.findUnique({ where: { id: applicationId } });
     if (!application) throw new Error('申请不存在');
@@ -108,7 +113,18 @@ export async function approveApplication(applicationId: string, actorId?: string
 
     const meta = EXPERT_VERIFY_META;
     const snapshot = JSON.parse(application.submittedProfileSnapshot || '{}') as Record<string, any>;
-    const domains: string[] = Array.isArray(snapshot.domainTags) ? snapshot.domainTags : [];
+    const snapshotDomains: string[] = Array.isArray(snapshot.domainTags)
+      ? snapshot.domainTags.map(String)
+      : [];
+    const domains =
+      options?.domainTags && options.domainTags.length > 0
+        ? await validateActiveDomainTags(options.domainTags)
+        : snapshotDomains.length > 0
+          ? await validateActiveDomainTags(snapshotDomains)
+          : [];
+    if (domains.length === 0) {
+      throw new Error('审批通过前请至少选择一个已上架的专家标签');
+    }
 
     let expertId = existingCert?.expertId || application.expertId || newId('fde');
     const existingExpert = await tx.expert.findUnique({ where: { id: expertId } });

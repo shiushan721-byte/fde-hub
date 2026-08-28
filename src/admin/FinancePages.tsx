@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { api } from '../lib/api';
-import { creatorStatusText } from '../lib/customOrderLabels';
 
 function useAdminQuery<T>(path: string, extraKey = '') {
   const [data, setData] = useState<T | null>(null);
@@ -50,18 +49,6 @@ const withdrawStatusLabel: Record<string, string> = {
   succeeded: '已到账',
   cancelled: '已取消'
 };
-
-const paymentStatusLabel: Record<string, string> = {
-  none: '未支付',
-  pending: '待支付',
-  escrowed: '托管中',
-  released: '已释放',
-  settled: '已结算',
-  refunded: '已退款',
-  expired: '已过期'
-};
-
-type Person = { id?: string; name?: string; email?: string } | null;
 
 type ExpertAccountRow = {
   expertId: string;
@@ -129,14 +116,17 @@ type EscrowRow = {
   id: string;
   orderNo: string;
   title: string;
+  baseAgentTitle?: string;
+  baseAgentVersion?: string;
   status: string;
   paymentStatus: string;
   paymentChannel?: string;
   priceCents: number;
   paidAt?: string | null;
   escrowedAt?: string | null;
-  buyer?: Person;
-  creator?: Person;
+  settlementEligibleAt?: string | null;
+  buyer?: { id?: string; name?: string; email?: string; phone?: string } | null;
+  seller?: { id?: string; name?: string; email?: string; phone?: string } | null;
 };
 
 type WithdrawalRow = {
@@ -495,19 +485,86 @@ export const SettlementsPage = () => {
 };
 
 export const EscrowsPage = () => {
-  const { data, error, loading, reload } = useAdminQuery<EscrowRow[]>('/api/admin/escrows');
-  const total = (data || []).reduce((sum, row) => sum + row.priceCents, 0);
+  const { data, error, loading } = useAdminQuery<EscrowRow[]>('/api/admin/escrows');
+  const [orderNo, setOrderNo] = useState('');
+  const [phone, setPhone] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  const rows = useMemo(() => {
+    const list = data || [];
+    const orderQ = orderNo.trim().toLowerCase();
+    const phoneQ = phone.trim();
+    const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+    const toTs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+
+    return list.filter((row) => {
+      if (orderQ && !row.orderNo.toLowerCase().includes(orderQ)) return false;
+
+      if (phoneQ) {
+        const buyerPhone = row.buyer?.phone || '';
+        const sellerPhone = row.seller?.phone || '';
+        if (!buyerPhone.includes(phoneQ) && !sellerPhone.includes(phoneQ)) return false;
+      }
+
+      if (fromTs != null || toTs != null) {
+        const due = row.settlementEligibleAt
+          ? new Date(row.settlementEligibleAt).getTime()
+          : NaN;
+        if (!Number.isFinite(due)) return false;
+        if (fromTs != null && due < fromTs) return false;
+        if (toTs != null && due > toTs) return false;
+      }
+
+      return true;
+    });
+  }, [data, orderNo, phone, dateFrom, dateTo]);
+
+  const inputClass =
+    'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="资金托管"
-        desc="买家已付、平台托管中的定制订单。验收完成并过观察期后释放至专家待提现/可提现。"
-        onReload={reload}
-      />
-      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs">
-        当前托管 <span className="font-black">{data?.length || 0}</span> 笔，合计{' '}
-        <span className="font-black">{yuan(total)}</span>
+      <h1 className="text-xl font-black">资金托管</h1>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">订单号</span>
+          <input
+            type="text"
+            value={orderNo}
+            onChange={(e) => setOrderNo(e.target.value)}
+            placeholder="订单编号"
+            className={`${inputClass} w-44`}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">手机号</span>
+          <input
+            type="text"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="买家 / 卖家"
+            className={`${inputClass} w-36`}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">到期开始</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className={inputClass}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">到期结束</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className={inputClass}
+          />
+        </label>
       </div>
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
@@ -515,41 +572,56 @@ export const EscrowsPage = () => {
         <table className="w-full text-xs">
           <thead className="bg-slate-50 text-slate-500">
             <tr>
-              <th className="text-left p-3">托管时间</th>
-              <th className="text-left p-3">订单</th>
+              <th className="text-left p-3 w-14">序号</th>
+              <th className="text-left p-3">订单编号</th>
+              <th className="text-left p-3">订单智能体</th>
               <th className="text-left p-3">买家</th>
-              <th className="text-left p-3">专家</th>
-              <th className="text-left p-3">渠道</th>
-              <th className="text-right p-3">托管金额</th>
-              <th className="text-left p-3">资金状态</th>
+              <th className="text-left p-3">卖家</th>
+              <th className="text-right p-3">订单金额</th>
+              <th className="text-left p-3">资金托管到期时间</th>
             </tr>
           </thead>
           <tbody>
-            {(data || []).map((row) => (
+            {rows.map((row, index) => (
               <tr key={row.id} className="border-t border-slate-100">
-                <td className="p-3 text-slate-500 whitespace-nowrap">
-                  {formatTime(row.escrowedAt || row.paidAt)}
+                <td className="p-3 text-slate-500 tabular-nums">{rows.length - index}</td>
+                <td className="p-3 font-mono text-[11px] text-slate-700 whitespace-nowrap">
+                  {row.orderNo}
                 </td>
                 <td className="p-3">
-                  <div className="font-bold">{row.orderNo}</div>
-                  <div className="text-slate-400">{row.title}</div>
+                  <div className="font-bold text-slate-900">
+                    {row.baseAgentTitle || row.title || '—'}
+                  </div>
+                  <div className="text-slate-400 mt-0.5">
+                    {row.baseAgentVersion ? `版本 ${row.baseAgentVersion}` : '—'}
+                  </div>
                 </td>
                 <td className="p-3">
-                  {row.buyer?.name || '—'}
-                  {row.buyer?.email && <div className="text-slate-400">{row.buyer.email}</div>}
+                  <div className="font-bold text-slate-900">{row.buyer?.name || '—'}</div>
+                  <div className="text-slate-500 mt-0.5 font-mono">
+                    {row.buyer?.phone || '—'}
+                  </div>
                 </td>
-                <td className="p-3">{row.creator?.name || '—'}</td>
-                <td className="p-3">{channelText(row.paymentChannel)}</td>
+                <td className="p-3">
+                  <div className="font-bold text-slate-900">{row.seller?.name || '—'}</div>
+                  <div className="text-slate-500 mt-0.5 font-mono">
+                    {row.seller?.phone || '—'}
+                  </div>
+                  <div className="text-slate-400 mt-0.5 font-mono text-[10px]">
+                    {row.seller?.id || '—'}
+                  </div>
+                </td>
                 <td className="p-3 text-right font-bold">{yuan(row.priceCents)}</td>
-                <td className="p-3">
-                  {paymentStatusLabel[row.paymentStatus] || row.paymentStatus}
-                  <div className="text-slate-400">{creatorStatusText[row.status] || row.status}</div>
+                <td className="p-3 text-slate-500 whitespace-nowrap">
+                  {formatTime(row.settlementEligibleAt)}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {data?.length === 0 && <p className="p-6 text-sm text-slate-400 text-center">暂无托管中的资金</p>}
+        {!loading && rows.length === 0 && (
+          <p className="p-6 text-sm text-slate-400 text-center">暂无匹配的托管订单</p>
+        )}
       </div>
     </div>
   );
@@ -562,12 +634,52 @@ export const WithdrawalsPage = () => {
   const [rejectReason, setRejectReason] = useState('');
   const [paidNote, setPaidNote] = useState('');
   const [busy, setBusy] = useState('');
+  const [phone, setPhone] = useState('');
+  const [alipayAccount, setAlipayAccount] = useState('');
+  const [withdrawNo, setWithdrawNo] = useState('');
+  const [status, setStatus] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const reviewRows = useMemo(
     () => (data || []).filter((w) => w.status === 'pending' || w.status === 'approved'),
     [data]
   );
-  const rows = tab === 'review' ? reviewRows : data || [];
+
+  const rows = useMemo(() => {
+    const base = tab === 'review' ? reviewRows : data || [];
+    const phoneQ = phone.trim();
+    const accountQ = alipayAccount.trim().toLowerCase();
+    const noQ = withdrawNo.trim().toLowerCase();
+    const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+    const toTs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+
+    return base.filter((w) => {
+      if (phoneQ && !(w.user?.phone || '').includes(phoneQ)) return false;
+      if (accountQ && !(w.account || '').toLowerCase().includes(accountQ)) return false;
+      if (noQ && !(w.withdrawNo || '').toLowerCase().includes(noQ)) return false;
+      if (status && w.status !== status) return false;
+
+      if (fromTs != null || toTs != null) {
+        const created = w.createdAt ? new Date(w.createdAt).getTime() : NaN;
+        if (!Number.isFinite(created)) return false;
+        if (fromTs != null && created < fromTs) return false;
+        if (toTs != null && created > toTs) return false;
+      }
+
+      return true;
+    });
+  }, [
+    tab,
+    reviewRows,
+    data,
+    phone,
+    alipayAccount,
+    withdrawNo,
+    status,
+    dateFrom,
+    dateTo
+  ]);
 
   const expertName = (w: WithdrawalRow) => w.user?.expert?.name || w.user?.name || '—';
 
@@ -615,13 +727,78 @@ export const WithdrawalsPage = () => {
     }
   };
 
+  const inputClass =
+    'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
+
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="提现管理"
-        desc="专家提现先冻结可提现余额，审核通过后线下打款，再确认到账；驳回则退回可提现"
-        onReload={reload}
-      />
+      <h1 className="text-xl font-black">提现管理</h1>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">手机号</span>
+          <input
+            type="text"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="专家手机号"
+            className={`${inputClass} w-36`}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">支付宝账号</span>
+          <input
+            type="text"
+            value={alipayAccount}
+            onChange={(e) => setAlipayAccount(e.target.value)}
+            placeholder="收款账号"
+            className={`${inputClass} w-40`}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">提现单号</span>
+          <input
+            type="text"
+            value={withdrawNo}
+            onChange={(e) => setWithdrawNo(e.target.value)}
+            placeholder="单号"
+            className={`${inputClass} w-44`}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">状态</span>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">全部</option>
+            <option value="pending">待审核</option>
+            <option value="approved">已通过待打款</option>
+            <option value="paid">已打款</option>
+            <option value="rejected">已驳回</option>
+            <option value="succeeded">已到账</option>
+            <option value="cancelled">已取消</option>
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">开始时间</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className={inputClass}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">结束时间</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className={inputClass}
+          />
+        </label>
+      </div>
       <div className="flex rounded-xl border border-slate-200 p-0.5 w-fit bg-white">
         <button
           type="button"
@@ -693,9 +870,9 @@ export const WithdrawalsPage = () => {
             ))}
           </tbody>
         </table>
-        {rows.length === 0 && (
+        {!loading && rows.length === 0 && (
           <p className="p-6 text-sm text-slate-400 text-center">
-            {tab === 'review' ? '暂无待处理提现' : '暂无提现记录'}
+            {tab === 'review' ? '暂无待处理提现' : '暂无匹配的提现记录'}
           </p>
         )}
       </div>
@@ -789,6 +966,625 @@ export const WithdrawalsPage = () => {
           </div>
         </SideDrawer>
       )}
+    </div>
+  );
+};
+
+type FinanceSettingsDto = {
+  id: string;
+  fallbackFeeRateBps: number;
+  acceptanceDays: number;
+  settlementHoldHours: number;
+  pendingHoldDays: number;
+  updatedAt?: string;
+};
+
+type FeePeriodDto = {
+  id: string;
+  startAt: string;
+  endAt: string;
+  rateBps: number;
+  note: string;
+  enabled: boolean;
+};
+
+function bpsToPercentInput(bps: number) {
+  return (bps / 100).toFixed(2);
+}
+
+function percentInputToBps(value: string) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+  return Math.round(n * 100);
+}
+
+function fromLocalInput(value: string) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString();
+}
+
+export const FinanceRulesPage = () => {
+  const { data, error, loading, reload } = useAdminQuery<{
+    settings: FinanceSettingsDto;
+    periods: FeePeriodDto[];
+  }>('/api/admin/finance-settings');
+
+  const [fallbackPercent, setFallbackPercent] = useState('');
+  const [acceptanceDays, setAcceptanceDays] = useState('');
+  const [settlementHoldHours, setSettlementHoldHours] = useState('');
+  const [pendingHoldDays, setPendingHoldDays] = useState('');
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  const [draftStart, setDraftStart] = useState('');
+  const [draftEnd, setDraftEnd] = useState('');
+  const [draftRate, setDraftRate] = useState('10');
+  const [draftNote, setDraftNote] = useState('');
+  const [busyPeriod, setBusyPeriod] = useState('');
+
+  useEffect(() => {
+    if (!data?.settings) return;
+    setFallbackPercent(bpsToPercentInput(data.settings.fallbackFeeRateBps));
+    setAcceptanceDays(String(data.settings.acceptanceDays));
+    setSettlementHoldHours(String(data.settings.settlementHoldHours));
+    setPendingHoldDays(String(data.settings.pendingHoldDays));
+  }, [data?.settings]);
+
+  const inputClass =
+    'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
+
+  const saveSettings = async () => {
+    const fallbackFeeRateBps = percentInputToBps(fallbackPercent);
+    if (fallbackFeeRateBps == null) {
+      alert('托底费率请输入 0–100 的数字，如 10 表示 10%');
+      return;
+    }
+    const days = Number(acceptanceDays);
+    const hours = Number(settlementHoldHours);
+    const hold = Number(pendingHoldDays);
+    if (!Number.isInteger(days) || days < 1 || days > 90) {
+      alert('用户验收天数须为 1–90 的整数');
+      return;
+    }
+    if (!Number.isInteger(hours) || hours < 0 || hours > 720) {
+      alert('观察期小时数须为 0–720 的整数');
+      return;
+    }
+    if (!Number.isInteger(hold) || hold < 0 || hold > 90) {
+      alert('待提现冻结天数须为 0–90 的整数');
+      return;
+    }
+    setSavingSettings(true);
+    try {
+      await api('/api/admin/finance-settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          fallbackFeeRateBps,
+          acceptanceDays: days,
+          settlementHoldHours: hours,
+          pendingHoldDays: hold
+        })
+      });
+      await reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const createPeriod = async () => {
+    const rateBps = percentInputToBps(draftRate);
+    if (rateBps == null) {
+      alert('时段费率请输入 0–100 的数字');
+      return;
+    }
+    if (!draftStart || !draftEnd) {
+      alert('请填写开始与结束时间');
+      return;
+    }
+    setBusyPeriod('create');
+    try {
+      await api('/api/admin/finance-settings/fee-periods', {
+        method: 'POST',
+        body: JSON.stringify({
+          startAt: fromLocalInput(draftStart),
+          endAt: fromLocalInput(draftEnd),
+          rateBps,
+          note: draftNote,
+          enabled: true
+        })
+      });
+      setDraftStart('');
+      setDraftEnd('');
+      setDraftRate('10');
+      setDraftNote('');
+      await reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '创建失败');
+    } finally {
+      setBusyPeriod('');
+    }
+  };
+
+  const togglePeriod = async (period: FeePeriodDto) => {
+    setBusyPeriod(period.id);
+    try {
+      await api(`/api/admin/finance-settings/fee-periods/${period.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: !period.enabled })
+      });
+      await reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '更新失败');
+    } finally {
+      setBusyPeriod('');
+    }
+  };
+
+  const removePeriod = async (period: FeePeriodDto) => {
+    if (!confirm(`确认删除时段 ${formatTime(period.startAt)} ~ ${formatTime(period.endAt)}？`)) {
+      return;
+    }
+    setBusyPeriod(period.id);
+    try {
+      await api(`/api/admin/finance-settings/fee-periods/${period.id}`, {
+        method: 'DELETE'
+      });
+      await reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '删除失败');
+    } finally {
+      setBusyPeriod('');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-black">费率与结算规则</h1>
+        <p className="text-xs text-slate-500 mt-1">
+          服务费按支付成功时间匹配分时段费率（左闭右开、不可重叠），无匹配则用托底；验收/观察/待提现天数仅影响之后新写入的截止时间。
+        </p>
+      </div>
+
+      {loading && <p className="text-sm text-slate-500">加载中…</p>}
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
+        <div className="text-sm font-black">全局规则</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <label className="space-y-1">
+            <span className="block text-[11px] text-slate-500">托底服务费率 (%)</span>
+            <input
+              type="number"
+              step="0.01"
+              min={0}
+              max={100}
+              value={fallbackPercent}
+              onChange={(e) => setFallbackPercent(e.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-[11px] text-slate-500">用户验收天数</span>
+            <input
+              type="number"
+              min={1}
+              max={90}
+              value={acceptanceDays}
+              onChange={(e) => setAcceptanceDays(e.target.value)}
+              className={inputClass}
+            />
+            <span className="block text-[10px] text-slate-400">推送后未确认则自动验收</span>
+          </label>
+          <label className="space-y-1">
+            <span className="block text-[11px] text-slate-500">验收后观察期 (小时)</span>
+            <input
+              type="number"
+              min={0}
+              max={720}
+              value={settlementHoldHours}
+              onChange={(e) => setSettlementHoldHours(e.target.value)}
+              className={inputClass}
+            />
+            <span className="block text-[10px] text-slate-400">满后可结算释放</span>
+          </label>
+          <label className="space-y-1">
+            <span className="block text-[11px] text-slate-500">待提现冻结天数</span>
+            <input
+              type="number"
+              min={0}
+              max={90}
+              value={pendingHoldDays}
+              onChange={(e) => setPendingHoldDays(e.target.value)}
+              className={inputClass}
+            />
+            <span className="block text-[10px] text-slate-400">待提现 → 可提现</span>
+          </label>
+        </div>
+        <button
+          type="button"
+          disabled={savingSettings}
+          onClick={() => void saveSettings()}
+          className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+        >
+          {savingSettings ? '保存中…' : '保存全局规则'}
+        </button>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
+        <div className="text-sm font-black">分时段服务费率</div>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="space-y-1">
+            <span className="block text-[11px] text-slate-500">开始时间</span>
+            <input
+              type="datetime-local"
+              value={draftStart}
+              onChange={(e) => setDraftStart(e.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-[11px] text-slate-500">结束时间（不含）</span>
+            <input
+              type="datetime-local"
+              value={draftEnd}
+              onChange={(e) => setDraftEnd(e.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-[11px] text-slate-500">费率 (%)</span>
+            <input
+              type="number"
+              step="0.01"
+              min={0}
+              max={100}
+              value={draftRate}
+              onChange={(e) => setDraftRate(e.target.value)}
+              className={`${inputClass} w-24`}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-[11px] text-slate-500">备注</span>
+            <input
+              type="text"
+              value={draftNote}
+              onChange={(e) => setDraftNote(e.target.value)}
+              placeholder="可选"
+              className={`${inputClass} w-40`}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={busyPeriod === 'create'}
+            onClick={() => void createPeriod()}
+            className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+          >
+            {busyPeriod === 'create' ? '创建中…' : '添加时段'}
+          </button>
+        </div>
+
+        <div className="rounded-xl border border-slate-100 overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="text-left p-3">开始</th>
+                <th className="text-left p-3">结束（不含）</th>
+                <th className="text-right p-3">费率</th>
+                <th className="text-left p-3">备注</th>
+                <th className="text-left p-3">状态</th>
+                <th className="text-right p-3">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.periods || []).map((p) => (
+                <tr key={p.id} className="border-t border-slate-100">
+                  <td className="p-3 whitespace-nowrap">{formatTime(p.startAt)}</td>
+                  <td className="p-3 whitespace-nowrap">{formatTime(p.endAt)}</td>
+                  <td className="p-3 text-right font-bold">{bpsToPercentInput(p.rateBps)}%</td>
+                  <td className="p-3 text-slate-500">{p.note || '—'}</td>
+                  <td className="p-3">
+                    {p.enabled ? (
+                      <span className="text-emerald-700 font-bold">启用</span>
+                    ) : (
+                      <span className="text-slate-400">停用</span>
+                    )}
+                  </td>
+                  <td className="p-3 text-right space-x-2 whitespace-nowrap">
+                    <button
+                      type="button"
+                      disabled={busyPeriod === p.id}
+                      onClick={() => void togglePeriod(p)}
+                      className="font-bold text-slate-700 cursor-pointer disabled:opacity-60"
+                    >
+                      {p.enabled ? '停用' : '启用'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyPeriod === p.id}
+                      onClick={() => void removePeriod(p)}
+                      className="font-bold text-rose-600 cursor-pointer disabled:opacity-60"
+                    >
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!loading && (data?.periods || []).length === 0 && (
+            <p className="p-6 text-sm text-slate-400 text-center">暂无时段费率，将全程使用托底费率</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+type FinanceAccountRow = {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+  balanceCents: number;
+  sortOrder: number;
+};
+
+type FinanceLedgerRow = {
+  id: string;
+  flowNo: string;
+  amountCents: number;
+  balanceAfterCents: number;
+  bizOrderNo: string;
+  bizType: string;
+  operationType: string;
+  createdAt: string;
+  account?: { id: string; code: string; name: string; type: string } | null;
+  journal?: {
+    operatorName?: string;
+    operatorId?: string;
+    remark?: string;
+  } | null;
+};
+
+export const FinanceBalancesPage = () => {
+  const { data, error, loading } = useAdminQuery<FinanceAccountRow[]>('/api/admin/finance-accounts');
+  const rows = data || [];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-black">余额管理</h1>
+        <p className="text-xs text-slate-500 mt-1">平台财务科目余额，用于对账核对</p>
+      </div>
+      {loading && <p className="text-sm text-slate-500">加载中…</p>}
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              <th className="text-left p-3 w-14">序号</th>
+              <th className="text-left p-3">账户名称</th>
+              <th className="text-left p-3">账户类型</th>
+              <th className="text-right p-3">账户余额(元)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={row.id} className="border-t border-slate-100">
+                <td className="p-3 text-slate-500 tabular-nums">{index + 1}</td>
+                <td className="p-3 font-bold text-slate-900">{row.name}</td>
+                <td className="p-3">
+                  {row.type === 'income' ? (
+                    <span className="text-emerald-700 font-bold">收入</span>
+                  ) : (
+                    <span className="text-amber-700 font-bold">支出</span>
+                  )}
+                </td>
+                <td className="p-3 text-right font-black tabular-nums">{yuan(row.balanceCents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!loading && rows.length === 0 && (
+          <p className="p-6 text-sm text-slate-400 text-center">暂无财务科目</p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export const FinanceLedgerPage = () => {
+  const [flowNo, setFlowNo] = useState('');
+  const [bizOrderNo, setBizOrderNo] = useState('');
+  const [accountId, setAccountId] = useState('');
+  const [bizType, setBizType] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [applied, setApplied] = useState({
+    flowNo: '',
+    bizOrderNo: '',
+    accountId: '',
+    bizType: '',
+    dateFrom: '',
+    dateTo: ''
+  });
+
+  const accountsQuery = useAdminQuery<FinanceAccountRow[]>('/api/admin/finance-accounts');
+  const qs = new URLSearchParams();
+  if (applied.flowNo) qs.set('flowNo', applied.flowNo);
+  if (applied.bizOrderNo) qs.set('bizOrderNo', applied.bizOrderNo);
+  if (applied.accountId) qs.set('accountId', applied.accountId);
+  if (applied.bizType) qs.set('bizType', applied.bizType);
+  if (applied.dateFrom) qs.set('dateFrom', applied.dateFrom);
+  if (applied.dateTo) qs.set('dateTo', applied.dateTo);
+  const path = `/api/admin/finance-ledger${qs.toString() ? `?${qs}` : ''}`;
+  const { data, error, loading, reload } = useAdminQuery<FinanceLedgerRow[]>(
+    path,
+    qs.toString()
+  );
+
+  const inputClass =
+    'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
+  const rows = data || [];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-black">账户变动明细</h1>
+        <p className="text-xs text-slate-500 mt-1">
+          按财务流水与业务单号核对科目变动（支付托管、结算释放、提现出入账）
+        </p>
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">财务流水号</span>
+          <input
+            type="text"
+            value={flowNo}
+            onChange={(e) => setFlowNo(e.target.value)}
+            placeholder="FLOW…"
+            className={`${inputClass} w-44`}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">业务单号</span>
+          <input
+            type="text"
+            value={bizOrderNo}
+            onChange={(e) => setBizOrderNo(e.target.value)}
+            placeholder="订单号 / 提现单号"
+            className={`${inputClass} w-44`}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">财务账户</span>
+          <select
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            className={`${inputClass} max-w-[220px]`}
+          >
+            <option value="">全部</option>
+            {(accountsQuery.data || []).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">业务类型</span>
+          <select
+            value={bizType}
+            onChange={(e) => setBizType(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">全部</option>
+            <option value="payment">支付托管</option>
+            <option value="settlement">订单结算</option>
+            <option value="withdrawal">提现</option>
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">开始时间</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className={inputClass}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-[11px] text-slate-500">结束时间</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className={inputClass}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() =>
+            setApplied({
+              flowNo: flowNo.trim(),
+              bizOrderNo: bizOrderNo.trim(),
+              accountId,
+              bizType,
+              dateFrom,
+              dateTo
+            })
+          }
+          className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer"
+        >
+          查询
+        </button>
+        <button
+          type="button"
+          onClick={() => void reload()}
+          className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+        >
+          刷新
+        </button>
+      </div>
+      {loading && <p className="text-sm text-slate-500">加载中…</p>}
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden overflow-x-auto">
+        <table className="w-full text-xs min-w-[960px]">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              <th className="text-left p-3 w-14">序号</th>
+              <th className="text-left p-3">财务流水号</th>
+              <th className="text-left p-3">业务单号</th>
+              <th className="text-left p-3">财务账户</th>
+              <th className="text-left p-3">操作类型</th>
+              <th className="text-right p-3">变动金额</th>
+              <th className="text-right p-3">余额</th>
+              <th className="text-left p-3">操作人</th>
+              <th className="text-left p-3">时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={row.id} className="border-t border-slate-100">
+                <td className="p-3 text-slate-500 tabular-nums">{rows.length - index}</td>
+                <td className="p-3 font-mono text-[11px] whitespace-nowrap">{row.flowNo}</td>
+                <td className="p-3 font-mono text-[11px] whitespace-nowrap">
+                  {row.bizOrderNo || '—'}
+                </td>
+                <td className="p-3">
+                  <div className="font-bold">{row.account?.name || '—'}</div>
+                  <div className="text-slate-400 text-[10px]">
+                    {row.account?.type === 'income' ? '收入' : '支出'}
+                  </div>
+                </td>
+                <td className="p-3 whitespace-nowrap">{row.operationType || '—'}</td>
+                <td
+                  className={`p-3 text-right font-bold tabular-nums ${
+                    row.amountCents >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                  }`}
+                >
+                  {row.amountCents >= 0 ? '+' : ''}
+                  {yuan(row.amountCents)}
+                </td>
+                <td className="p-3 text-right tabular-nums">{yuan(row.balanceAfterCents)}</td>
+                <td className="p-3 text-slate-500">
+                  {row.journal?.operatorName || row.journal?.operatorId || '—'}
+                </td>
+                <td className="p-3 text-slate-500 whitespace-nowrap">
+                  {formatTime(row.createdAt)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!loading && rows.length === 0 && (
+          <p className="p-6 text-sm text-slate-400 text-center">暂无匹配的变动明细</p>
+        )}
+      </div>
     </div>
   );
 };

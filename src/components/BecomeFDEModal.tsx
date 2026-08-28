@@ -58,6 +58,16 @@ export const BecomeFDEModal: React.FC<BecomeFDEModalProps> = ({
   const [targetTier] = useState<2 | 3>(defaultTarget);
   const [selectedAgentId, setSelectedAgentId] = useState<string>(mockAgentSolutions[0]?.id || 'agent_ecommerce_cs');
   const [selectedDomains, setSelectedDomains] = useState<string[]>(['电商零售', '私有化部署']);
+  const [availableDomains, setAvailableDomains] = useState<string[]>([
+    '电商零售',
+    '智能制造',
+    '内容营销',
+    '法律金融',
+    '医疗健康',
+    '知识库检索',
+    '办公协同',
+    '私有化部署'
+  ]);
   const [caseDescription, setCaseDescription] = useState(
     '主导交付跨境电商全渠道客服自愈沙箱智能体，过去90天累计执行 3,500 次，Hermes 稳定性 99.4%，平均评分 4.92。'
   );
@@ -70,20 +80,21 @@ export const BecomeFDEModal: React.FC<BecomeFDEModalProps> = ({
     setStep(1);
     setIsApproved(false);
     setSubmitError('');
+    void api<Array<{ name: string }>>('/api/public/expert-tags')
+      .then((tags) => {
+        const names = tags.map((t) => t.name).filter(Boolean);
+        if (names.length > 0) {
+          setAvailableDomains(names);
+          setSelectedDomains((prev) => {
+            const valid = prev.filter((d) => names.includes(d));
+            return valid.length > 0 ? valid : [names[0]];
+          });
+        }
+      })
+      .catch(() => undefined);
   }, [isOpen, currentTier]);
 
   if (!isOpen) return null;
-
-  const availableDomains = [
-    '电商零售',
-    '智能制造',
-    '内容营销',
-    '法律金融',
-    '医疗健康',
-    '知识库检索',
-    '办公协同',
-    '私有化部署'
-  ];
 
   const toggleDomain = (domain: string) => {
     if (selectedDomains.includes(domain)) {

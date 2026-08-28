@@ -12,6 +12,7 @@ import {
   newId,
   writeCertEventStandalone
 } from '../services/certification';
+import { validateActiveDomainTags } from '../services/expertTags';
 
 export const meRouter = Router();
 meRouter.use(requireAuth);
@@ -228,11 +229,20 @@ meRouter.post('/expert-applications', async (req, res) => {
 
   const data = parsed.data;
 
+  let validatedDomainTags: string[] = [];
+  if (data.domainTags && data.domainTags.length > 0) {
+    try {
+      validatedDomainTags = await validateActiveDomainTags(data.domainTags);
+    } catch (error) {
+      return fail(res, error instanceof Error ? error.message : '专家标签无效');
+    }
+  }
+
   const snapshot = {
     applicantName: data.applicantName,
     expertTitle: data.expertTitle || '',
     bio: data.bio || '',
-    domainTags: data.domainTags || [],
+    domainTags: validatedDomainTags,
     location: data.location || '',
     serviceModes: data.serviceModes || ['远程交付'],
     caseDescription: data.caseDescription || '',

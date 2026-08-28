@@ -65,6 +65,7 @@ import { mockCustomerAgentInstances } from '../data/agentInstanceMockData';
 import { CustomerAgentInstance } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
 import { AccountView } from './AccountView';
+import { api } from '../lib/api';
 
 function platformSupportLabel(support: CreatorAgentItem['platformSupport']) {
   switch (support) {
@@ -184,8 +185,14 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     responseTime: '< 2 小时响应',
     domainTags: ['跨境电商', '爆款文案', '广告投放', '多语种本地化', '私有化部署']
   });
-  const [newTagInput, setNewTagInput] = useState('');
+  const [tagCatalog, setTagCatalog] = useState<string[]>([]);
   const [profileSavedToast, setProfileSavedToast] = useState(false);
+
+  useEffect(() => {
+    void api<Array<{ name: string }>>('/api/public/expert-tags')
+      .then((tags) => setTagCatalog(tags.map((t) => t.name).filter(Boolean)))
+      .catch(() => undefined);
+  }, []);
 
   // Case Studies State (案例管理)
   const [casesList, setCasesList] = useState<CaseStudy[]>(() => mockCaseStudies.slice(0, 3));
@@ -557,7 +564,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
 
               {/* Domain Tags Editor */}
               <div className="space-y-2 text-xs">
-                <label className="font-bold text-slate-700">擅长领域与技术标签 (最多 6 个)</label>
+                <label className="font-bold text-slate-700">擅长领域标签（最多 6 个，仅可选平台上架标签）</label>
                 <div className="flex flex-wrap gap-2 items-center">
                   {profileData.domainTags.map((tag) => (
                     <span
@@ -579,30 +586,28 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                       </button>
                     </span>
                   ))}
-                  {profileData.domainTags.length < 6 && (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="text"
-                        placeholder="新增标签 (回车添加)"
-                        value={newTagInput}
-                        onChange={(e) => setNewTagInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            if (newTagInput.trim() && !profileData.domainTags.includes(newTagInput.trim())) {
-                              setProfileData({
-                                ...profileData,
-                                domainTags: [...profileData.domainTags, newTagInput.trim()]
-                              });
-                              setNewTagInput('');
-                            }
-                          }
-                        }}
-                        className="p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  )}
                 </div>
+                {profileData.domainTags.length < 6 && tagCatalog.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {tagCatalog
+                      .filter((tag) => !profileData.domainTags.includes(tag))
+                      .map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() =>
+                            setProfileData({
+                              ...profileData,
+                              domainTags: [...profileData.domainTags, tag]
+                            })
+                          }
+                          className="px-2.5 py-1 rounded-lg border border-dashed border-slate-300 text-slate-600 text-xs font-semibold hover:border-blue-400 hover:text-blue-700 cursor-pointer"
+                        >
+                          + {tag}
+                        </button>
+                      ))}
+                  </div>
+                )}
               </div>
             </form>
 

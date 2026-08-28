@@ -9,7 +9,8 @@ import {
   X,
   Download,
   ChevronDown,
-  Banknote
+  Banknote,
+  Landmark
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import {
@@ -27,9 +28,13 @@ import { getCaseStudyImages } from '../types';
 import {
   ExpertAccountsPage,
   EscrowsPage,
+  FinanceBalancesPage,
+  FinanceLedgerPage,
+  FinanceRulesPage,
   SettlementsPage,
   WithdrawalsPage
 } from './FinancePages';
+import { ExpertTagsPage } from './ExpertTagsPage';
 
 type AdminCaseItem = {
   id?: string;
@@ -44,18 +49,30 @@ type AdminCaseItem = {
   tags?: string[];
 };
 
+type ExpertTagRow = {
+  id: string;
+  name: string;
+  status: string;
+  sortOrder?: number;
+  expertCount?: number;
+};
+
 type AdminPage =
   | 'agents'
   | 'custom-agents'
   | 'deliveries'
   | 'experts'
   | 'applications'
+  | 'expert-tags'
   | 'leads'
   | 'users'
   | 'expert-accounts'
   | 'settlements'
   | 'withdrawals'
-  | 'escrows';
+  | 'escrows'
+  | 'finance-rules'
+  | 'finance-balances'
+  | 'finance-ledger';
 
 type AdminUser = { id: string; email: string; name: string; role: string };
 
@@ -94,17 +111,29 @@ const nav: NavEntry[] = [
     icon: Users,
     children: [
       { key: 'experts', label: '专家管理' },
+      { key: 'expert-tags', label: '专家标签管理' },
       { key: 'applications', label: '专家审核' }
     ]
   },
   {
     type: 'group',
-    id: 'finance',
+    id: 'fund-mgmt',
     label: '资金管理',
     icon: Banknote,
     children: [
       { key: 'expert-accounts', label: '专家账户余额' },
       { key: 'settlements', label: '订单结算' },
+      { key: 'finance-rules', label: '费率与结算规则' }
+    ]
+  },
+  {
+    type: 'group',
+    id: 'finance-mgmt',
+    label: '财务管理',
+    icon: Landmark,
+    children: [
+      { key: 'finance-balances', label: '余额管理' },
+      { key: 'finance-ledger', label: '账户变动明细' },
       { key: 'withdrawals', label: '提现管理' },
       { key: 'escrows', label: '资金托管' }
     ]
@@ -114,8 +143,9 @@ const nav: NavEntry[] = [
 
 const GROUP_PAGE_KEYS: Record<string, AdminPage[]> = {
   'agent-mgmt': ['agents', 'custom-agents', 'deliveries', 'leads'],
-  'expert-mgmt': ['experts', 'applications'],
-  finance: ['expert-accounts', 'settlements', 'withdrawals', 'escrows']
+  'expert-mgmt': ['experts', 'expert-tags', 'applications'],
+  'fund-mgmt': ['expert-accounts', 'settlements', 'finance-rules'],
+  'finance-mgmt': ['finance-balances', 'finance-ledger', 'withdrawals', 'escrows']
 };
 
 const statusLabel: Record<string, string> = {
@@ -157,7 +187,8 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     'agent-mgmt': true,
     'expert-mgmt': true,
-    finance: true
+    'fund-mgmt': true,
+    'finance-mgmt': true
   });
 
   const loadMe = async () => {
@@ -331,12 +362,16 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
             }}
           />
         )}
+        {page === 'expert-tags' && <ExpertTagsPage />}
         {page === 'applications' && <ApplicationsPage />}
         {page === 'leads' && <LeadsPage />}
         {page === 'expert-accounts' && <ExpertAccountsPage />}
         {page === 'settlements' && <SettlementsPage />}
         {page === 'withdrawals' && <WithdrawalsPage />}
         {page === 'escrows' && <EscrowsPage />}
+        {page === 'finance-rules' && <FinanceRulesPage />}
+        {page === 'finance-balances' && <FinanceBalancesPage />}
+        {page === 'finance-ledger' && <FinanceLedgerPage />}
         {page === 'users' && me.role === 'super_admin' && <UsersPage />}
       </main>
     </div>
@@ -1304,6 +1339,17 @@ const AgentsPage = ({
 const ApplicationsPage = () => {
   const [filter, setFilter] = useState('pending');
   const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
+  const [approveModal, setApproveModal] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [approveTags, setApproveTags] = useState<string[]>([]);
+  const [approveBusy, setApproveBusy] = useState(false);
+  const { data: tagCatalog } = useAdminQuery<ExpertTagRow[]>('/api/admin/expert-tags');
+  const activeTagOptions = useMemo(
+    () => (tagCatalog || []).filter((t) => t.status === 'active'),
+    [tagCatalog]
+  );
   const { data, error, loading, reload } = useAdminQuery<Array<{
     id: string;
     type: string;
@@ -1335,6 +1381,38 @@ const ApplicationsPage = () => {
       body: JSON.stringify(body || {})
     });
     reload();
+  };
+
+  const openApproveModal = (app: { id: string; applicantName: string }) => {
+    setApproveModal({
+      id: app.id,
+      name: app.applicantName
+    });
+    setApproveTags([]);
+  };
+
+  const confirmApprove = async () => {
+    if (!approveModal) return;
+    if (approveTags.length === 0) {
+      alert('请至少选择一个已上架的专家标签');
+      return;
+    }
+    setApproveBusy(true);
+    try {
+      await runAction(approveModal.id, 'approve', { domainTags: approveTags });
+      setApproveModal(null);
+      setApproveTags([]);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '审批失败');
+    } finally {
+      setApproveBusy(false);
+    }
+  };
+
+  const toggleApproveTag = (name: string) => {
+    setApproveTags((prev) =>
+      prev.includes(name) ? prev.filter((t) => t !== name) : [...prev, name]
+    );
   };
 
   return (
@@ -1450,13 +1528,6 @@ const ApplicationsPage = () => {
                 补充要求：{app.supplementRequest}
               </p>
             )}
-            <div className="flex flex-wrap gap-1">
-              {(app.domainTags || []).map((tag) => (
-                <span key={tag} className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">
-                  {tag}
-                </span>
-              ))}
-            </div>
             {app.status === 'rejected' && app.rejectReason && (
               <p className="text-xs text-rose-600">驳回原因：{app.rejectReason}</p>
             )}
@@ -1474,7 +1545,12 @@ const ApplicationsPage = () => {
                 <button
                   type="button"
                   className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer flex items-center gap-1"
-                  onClick={() => runAction(app.id, 'approve', {})}
+                  onClick={() =>
+                    openApproveModal({
+                      id: app.id,
+                      applicantName: app.applicantName
+                    })
+                  }
                 >
                   <Check size={12} />
                     通过
@@ -1522,6 +1598,59 @@ const ApplicationsPage = () => {
               alt={previewImage.label}
               className="w-full rounded-xl border border-slate-100 bg-slate-50"
             />
+          </div>
+        </div>
+      )}
+      {approveModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => setApproveModal(null)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 p-5 w-full max-w-lg space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-black">审核通过 · 选择专家标签</h3>
+            <p className="text-xs text-slate-500">申请人：{approveModal.name}</p>
+            <div className="flex flex-wrap gap-2">
+              {activeTagOptions.map((tag) => {
+                const on = approveTags.includes(tag.name);
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    onClick={() => toggleApproveTag(tag.name)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold border cursor-pointer ${
+                      on
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    {tag.name}
+                  </button>
+                );
+              })}
+            </div>
+            {activeTagOptions.length === 0 && (
+              <p className="text-xs text-rose-600">暂无已上架标签，请先在专家标签管理中创建。</p>
+            )}
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setApproveModal(null)}
+                className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={approveBusy || approveTags.length === 0}
+                onClick={() => void confirmApprove()}
+                className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                {approveBusy ? '提交中…' : '确认通过'}
+              </button>
+            </div>
           </div>
         </div>
       )}

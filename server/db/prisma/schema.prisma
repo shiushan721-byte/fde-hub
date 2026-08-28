@@ -157,6 +157,17 @@ model Expert {
   certification   ExpertCertification?
 }
 
+/** 平台统一维护的专家领域标签（上架才在前台展示/可选） */
+model ExpertTag {
+  id        String   @id
+  name      String   @unique
+  sortOrder Int      @default(0)
+  /** active | offline */
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model ExpertCase {
   id       String @id
   expertId String
@@ -506,4 +517,93 @@ model Withdrawal {
   reviewedAt  DateTime?
   createdAt   DateTime  @default(now())
   processedAt DateTime?
+}
+
+/** 全局资金 / 结算规则（单例 id=default） */
+model FinanceSettings {
+  id                  String   @id @default("default")
+  /** 托底平台服务费率，万分比：1000 = 10% */
+  fallbackFeeRateBps  Int      @default(1000)
+  /** 交付推送后用户验收天数，到期未确认则自动验收 */
+  acceptanceDays      Int      @default(7)
+  /** 验收后观察期（小时），满后可结算释放 */
+  settlementHoldHours Int      @default(24)
+  /** 待提现 → 可提现冻结天数（自进入待验收起算） */
+  pendingHoldDays     Int      @default(7)
+  updatedAt           DateTime @updatedAt
+}
+
+/**
+ * 分时段平台服务费率。区间 [startAt, endAt) 左闭右开，启用时段禁止重叠。
+ * 结算取费率时优先匹配「支付成功时间」落入的时段，否则用托底费率。
+ */
+model PlatformFeeRatePeriod {
+  id        String   @id
+  startAt   DateTime
+  endAt     DateTime
+  /** 万分比：1000 = 10% */
+  rateBps   Int
+  note      String   @default("")
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled, startAt, endAt])
+}
+
+/** 平台财务科目（对账：收入 / 支出） */
+model FinanceAccount {
+  id           String               @id
+  code         String               @unique
+  name         String
+  /** income | expense */
+  type         String
+  balanceCents Int                  @default(0)
+  sortOrder    Int                  @default(0)
+  enabled      Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  entries      FinanceLedgerEntry[]
+}
+
+/** 平台财务凭证（一笔业务对应一个流水号，下挂多科目分录） */
+model FinanceJournal {
+  id                  String               @id
+  flowNo              String               @unique
+  /** 幂等键，如 escrow:orderId / settle:orderId / wd_req:withdrawId */
+  idempotencyKey      String               @unique
+  bizType             String
+  bizOrderNo          String               @default("")
+  operationType       String               @default("")
+  relatedOrderId      String               @default("")
+  relatedPaymentId    String               @default("")
+  relatedWithdrawalId String               @default("")
+  operatorId          String               @default("")
+  operatorName        String               @default("")
+  remark              String               @default("")
+  createdAt           DateTime             @default(now())
+  entries             FinanceLedgerEntry[]
+}
+
+/** 科目变动明细（对账行） */
+model FinanceLedgerEntry {
+  id               String         @id
+  journalId        String
+  journal          FinanceJournal @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  flowNo           String
+  accountId        String
+  account          FinanceAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  /** 正数增加科目余额，负数减少 */
+  amountCents      Int
+  balanceAfterCents Int
+  bizOrderNo       String         @default("")
+  bizType          String         @default("")
+  operationType    String         @default("")
+  createdAt        DateTime       @default(now())
+
+  @@index([flowNo])
+  @@index([bizOrderNo])
+  @@index([accountId, createdAt])
+  @@index([createdAt])
+  @@index([bizType])
 }

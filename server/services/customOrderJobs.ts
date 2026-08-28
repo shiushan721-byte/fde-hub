@@ -6,6 +6,7 @@ import {
   settleOrder
 } from './customOrder';
 import { releasePendingIncomes } from './wallet';
+import { getFinanceSettings } from './financeSettings';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -194,10 +195,10 @@ export async function sendAcceptanceReminders(now = new Date()) {
 }
 
 /**
- * 七天无异议自动验收：
+ * 验收期到期无异议自动验收：
  * - 已推送且处于待验收
  * - 无争议 / 未申请修改
- * - 验收截止已过
+ * - 验收截止已过（截止时间在推送时按后台「用户验收天数」写入）
  */
 export async function autoAcceptExpiredOrders(now = new Date()) {
   const orders = await prisma.customOrder.findMany({
@@ -220,14 +221,14 @@ export async function autoAcceptExpiredOrders(now = new Date()) {
       await acceptDeliveryByBuyer({
         orderId: order.id,
         buyerUserId: order.buyerUserId,
-        feedback: '系统七天无异议自动验收',
+        feedback: '系统到期无异议自动验收',
         source: 'system_auto'
       });
       await notify({
         userId: order.buyerUserId,
         type: 'order_auto_accepted',
         title: '订单已自动验收',
-        body: `${order.orderNo} · 七天验收期结束且无异议`,
+        body: `${order.orderNo} · 验收期结束且无异议`,
         link: `/orders?orderId=${order.id}`,
         payload: { orderId: order.id }
       });
@@ -240,8 +241,11 @@ export async function autoAcceptExpiredOrders(now = new Date()) {
   return { accepted };
 }
 
-/** 验收后满 24h 进入可提现结算（争议中不结算） */
+/** 验收后满观察期进入结算（争议中不结算）；无到期时间时按全局观察小时兜底 */
 export async function settleEligibleOrders(now = new Date()) {
+  const settings = await getFinanceSettings();
+  const holdMs = settings.settlementHoldHours * 60 * 60 * 1000;
+
   const orders = await prisma.customOrder.findMany({
     where: {
       status: 'pending_settlement',
@@ -249,7 +253,7 @@ export async function settleEligibleOrders(now = new Date()) {
       disputeStatus: { not: 'open' },
       OR: [
         { settlementEligibleAt: { lte: now } },
-        { settlementEligibleAt: null, updatedAt: { lte: new Date(now.getTime() - DAY_MS) } }
+        { settlementEligibleAt: null, updatedAt: { lte: new Date(now.getTime() - holdMs) } }
       ]
     }
   });

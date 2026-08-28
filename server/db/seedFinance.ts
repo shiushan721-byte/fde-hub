@@ -8,12 +8,21 @@ import {
   releasePendingIncomes,
   withdrawFeeCents
 } from '../services/wallet';
+import { ensureFinanceSettings } from '../services/financeSettings';
+import {
+  backfillFinanceJournals,
+  ensureFinanceAccounts
+} from '../services/platformFinance';
 
 const CREATOR_ID = 'user-fde-linran';
 const BUYER_ID = 'user-demo';
 
 /** 为演示专家补齐钱包、收款绑定，并按待验收起算待提现/可提现 */
 export async function ensureFinanceSynced() {
+  await ensureFinanceSettings();
+  await ensureFinanceAccounts();
+  await backfillFinanceJournals();
+
   const users = await prisma.user.findMany({
     select: { id: true, role: true, phone: true, expert: { select: { sortOrder: true } } }
   });

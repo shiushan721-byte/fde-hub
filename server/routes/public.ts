@@ -3,6 +3,11 @@ import { prisma } from '../lib/prisma';
 import { parseJson } from '../lib/json';
 import { ok } from '../lib/http';
 import { agentToCatalog, agentToSolution, expertToPublic } from '../lib/mappers';
+import {
+  filterActiveDomainTags,
+  getActiveExpertTagNameSet,
+  listExpertTags
+} from '../services/expertTags';
 
 export const publicRouter = Router();
 
@@ -60,7 +65,13 @@ publicRouter.get('/agents/:id', async (req, res) => {
   return ok(res, agent.kind === 'solution' ? agentToSolution(agent) : agentToCatalog(agent));
 });
 
+publicRouter.get('/expert-tags', async (_req, res) => {
+  const tags = await listExpertTags({ status: 'active' });
+  return ok(res, tags.map((t) => ({ id: t.id, name: t.name, sortOrder: t.sortOrder })));
+});
+
 publicRouter.get('/experts', async (_req, res) => {
+  const activeTagNames = await getActiveExpertTagNameSet();
   const experts = await prisma.expert.findMany({
     where: { listed: true, status: 'active', paused: false }
   });
@@ -90,12 +101,13 @@ publicRouter.get('/experts', async (_req, res) => {
     res,
     experts.map((expert) => {
       const pub = expertToPublic(expert);
+      const domainTags = filterActiveDomainTags(pub.domainTags, activeTagNames);
       const publishedAgentsCount = countByAuthor.get(expert.id) || 0;
       const stats =
         pub.stats && typeof pub.stats === 'object' && !Array.isArray(pub.stats)
           ? { ...(pub.stats as Record<string, unknown>), publishedAgentsCount }
           : { publishedAgentsCount };
-      return { ...pub, stats };
+      return { ...pub, domainTags, stats };
     })
   );
 });
@@ -116,19 +128,22 @@ publicRouter.get('/experts/:id', async (req, res) => {
     return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: '专家不存在或未公开' } });
   }
 
-  const [cases, reviews, services, solutions] = await Promise.all([
+  const [cases, reviews, services, solutions, activeTagNames] = await Promise.all([
     prisma.expertCase.findMany({ where: { expertId: expert.id } }),
     prisma.expertReview.findMany({ where: { expertId: expert.id } }),
     prisma.expertService.findMany({ where: { expertId: expert.id } }),
     prisma.agent.findMany({
       where: { authorId: expert.id, kind: 'solution', status: 'published' },
       orderBy: { sortOrder: 'asc' }
-    })
+    }),
+    getActiveExpertTagNameSet()
   ]);
 
+  const pub = expertToPublic(expert);
   return ok(res, {
     expert: {
-      ...expertToPublic(expert),
+      ...pub,
+      domainTags: filterActiveDomainTags(pub.domainTags, activeTagNames),
       certificationStatus: certStatus || (publiclyListed ? 'active' : undefined),
       certificationFrozen: certStatus === 'frozen'
     },

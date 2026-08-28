@@ -1,10 +1,22 @@
 import { prisma } from '../lib/prisma';
+import {
+  getFinanceSettings,
+  getPendingHoldMs,
+  resolvePlatformFeeRate
+} from './financeSettings';
+import {
+  postWithdrawalPaid,
+  postWithdrawalRejected,
+  postWithdrawalRequested
+} from './platformFinance';
 
 export type PayChannel = 'wechat' | 'alipay';
 
+/** @deprecated 使用 getFinanceSettings / resolvePlatformFeeRate；保留常量作默认展示兜底 */
 export const PLATFORM_FEE_RATE = 0.1;
 export const WITHDRAW_FEE_RATE = 0.01;
 export const WITHDRAW_FEE_MIN_CENTS = 100;
+/** @deprecated 使用 getPendingHoldMs() */
 export const PENDING_HOLD_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function newWalletId(prefix: string) {
@@ -24,9 +36,14 @@ export function channelLabel(channel?: string) {
   return channel || '—';
 }
 
-export function creatorPayoutCents(priceCents: number, existingPayout?: number) {
+export async function creatorPayoutCents(
+  priceCents: number,
+  existingPayout?: number,
+  at?: Date | null
+) {
   if (existingPayout && existingPayout > 0) return existingPayout;
-  return Math.max(0, priceCents - Math.round(priceCents * PLATFORM_FEE_RATE));
+  const { rate } = await resolvePlatformFeeRate(at || new Date());
+  return Math.max(0, priceCents - Math.round(priceCents * rate));
 }
 
 export function withdrawFeeCents(amountCents: number) {
@@ -58,15 +75,20 @@ export async function creditCreatorPendingIncome(orderId: string, startedAt?: Da
   });
   if (already) return getOrCreateWallet(order.creatorUserId);
 
-  const payoutCents = creatorPayoutCents(order.priceCents, order.creatorPayoutCents);
+  const payoutCents = await creatorPayoutCents(
+    order.priceCents,
+    order.creatorPayoutCents,
+    order.paidAt
+  );
   if (payoutCents <= 0) return null;
 
   const legacy = await prisma.walletLedger.findFirst({
     where: { relatedOrderId: order.id, type: 'settlement_in' }
   });
 
+  const holdMs = await getPendingHoldMs();
   const start = startedAt || order.acceptanceStartedAt || new Date();
-  const availableAt = new Date(start.getTime() + PENDING_HOLD_MS);
+  const availableAt = new Date(start.getTime() + holdMs);
   const now = new Date();
   const releaseNow = Boolean(legacy) || availableAt <= now;
 
@@ -230,6 +252,13 @@ export async function requestWithdrawal(input: {
     }
   });
 
+  await postWithdrawalRequested({
+    withdrawId: withdraw.id,
+    withdrawNo: withdraw.withdrawNo,
+    amountCents: input.amountCents,
+    operatorId: input.userId
+  }).catch((err) => console.warn('[finance] postWithdrawalRequested', err));
+
   return { ...withdraw, netCents };
 }
 
@@ -268,7 +297,7 @@ export async function reviewWithdrawal(input: {
       frozenCents: Math.max(0, wallet.frozenCents - withdraw.amountCents)
     }
   });
-  return prisma.withdrawal.update({
+  const rejected = await prisma.withdrawal.update({
     where: { id: withdraw.id },
     data: {
       status: 'rejected',
@@ -278,6 +307,13 @@ export async function reviewWithdrawal(input: {
       processedAt: new Date()
     }
   });
+  await postWithdrawalRejected({
+    withdrawId: withdraw.id,
+    withdrawNo: withdraw.withdrawNo,
+    amountCents: withdraw.amountCents,
+    operatorId: input.actorId
+  }).catch((err) => console.warn('[finance] postWithdrawalRejected', err));
+  return rejected;
 }
 
 export async function markWithdrawalPaid(input: {
@@ -316,7 +352,7 @@ export async function markWithdrawalPaid(input: {
       relatedWithdrawalId: withdraw.id
     }
   });
-  return prisma.withdrawal.update({
+  const paid = await prisma.withdrawal.update({
     where: { id: withdraw.id },
     data: {
       status: 'paid',
@@ -324,6 +360,14 @@ export async function markWithdrawalPaid(input: {
       processedAt: new Date()
     }
   });
+  await postWithdrawalPaid({
+    withdrawId: withdraw.id,
+    withdrawNo: withdraw.withdrawNo,
+    amountCents: withdraw.amountCents,
+    feeCents: withdraw.feeCents,
+    operatorId: input.actorId
+  }).catch((err) => console.warn('[finance] postWithdrawalPaid', err));
+  return paid;
 }
 
 export async function getWalletOverview(userId: string) {
@@ -352,6 +396,8 @@ export async function getWalletOverview(userId: string) {
     .filter((w) => w.status === 'paid' || w.status === 'succeeded')
     .reduce((sum, w) => sum + w.feeCents, 0);
 
+  const settings = await getFinanceSettings();
+
   return {
     userId,
     pendingCents: wallet.pendingCents,
@@ -362,7 +408,7 @@ export async function getWalletOverview(userId: string) {
     totalIncomeCents,
     withdrawFeeRate: WITHDRAW_FEE_RATE,
     withdrawFeeMinCents: WITHDRAW_FEE_MIN_CENTS,
-    pendingHoldDays: 7,
+    pendingHoldDays: settings.pendingHoldDays,
     payout: {
       alipayBound: wallet.alipayBound,
       alipayAccount: wallet.alipayAccount
