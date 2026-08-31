@@ -15,11 +15,20 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(path, {
-    credentials: 'include',
-    ...init,
-    headers
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      credentials: 'include',
+      ...init,
+      headers
+    });
+  } catch {
+    throw new ApiError(
+      '无法连接后台 API，请运行 npm run dev:all（或分别启动 dev + dev:api）',
+      0,
+      'NETWORK_ERROR'
+    );
+  }
 
   const json = (await res.json().catch(() => null)) as
     | { ok: boolean; data?: T; error?: { code?: string; message?: string } }

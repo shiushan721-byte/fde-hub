@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CatalogContext, CatalogState, HomeSettings } from '../lib/catalog';
 import { api } from '../lib/api';
@@ -43,6 +43,12 @@ export const CatalogProvider: React.FC<{ children: React.ReactNode }> = ({ child
     retry: 1
   });
 
+  useEffect(() => {
+    if (source !== 'api' || query.isFetching || !query.isError) return;
+    setDemoSource('mock');
+    setSourceState('mock');
+  }, [source, query.isError, query.isFetching]);
+
   const setSource = (next: DemoSource) => {
     setDemoSource(next);
     setSourceState(next);
@@ -53,7 +59,7 @@ export const CatalogProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const apiFailed = source === 'api' && !!query.error;
     const live = source === 'api' && query.data && !apiFailed;
     const apiError = apiFailed
-      ? (query.error as Error | undefined)?.message || '后台数据加载失败'
+      ? (query.error as Error | undefined)?.message || '后台数据加载失败，已切回本地 Mock'
       : null;
     return {
       source,

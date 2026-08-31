@@ -176,6 +176,8 @@ model Expert {
   paused          Boolean  @default(false)
   sortOrder       Int      @default(0)
   status          String   @default("active")
+  /** 运营后台备注，不对前台展示 */
+  adminNotes      String   @default("")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   certification   ExpertCertification?
@@ -223,6 +225,10 @@ model ConsultationLead {
   budgetEstimate String   @default("")
   status         String   @default("new")
   notes          String   @default("")
+  /** 运营跟进：未联系 / 已联系 */
+  adminContactStatus String @default("uncontacted")
+  /** 运营跟进备注，不对用户展示 */
+  adminNotes     String   @default("")
   payload        String   @default("{}")
   assigneeId     String?
   createdAt      DateTime @default(now())
@@ -382,6 +388,10 @@ model CustomOrder {
   leadId                String?
   instanceId            String?
   currentDeliveryId     String?
+  /** 运营跟进：未联系 / 已联系 */
+  adminContactStatus    String    @default("uncontacted")
+  /** 运营跟进备注 */
+  adminNotes            String    @default("")
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
   instance              PrivateAgentInstance?

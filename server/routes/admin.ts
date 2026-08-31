@@ -670,6 +670,7 @@ adminRouter.get('/experts', async (_req, res) => {
         alipayBound: wallet?.alipayBound || false,
         alipayAccount: wallet?.alipayAccount || '',
         phone: expert.userId ? phoneByUserId.get(expert.userId) || '' : '',
+        adminNotes: expert.adminNotes || '',
         certification: expert.certification
           ? {
               id: expert.certification.id,
@@ -690,7 +691,29 @@ const expertPatch = z.object({
   bio: z.string().optional(),
   domainTags: z.array(z.string().min(1)).min(1).optional(),
   featured: z.boolean().optional(),
-  sortOrder: z.number().int().optional()
+  sortOrder: z.number().int().optional(),
+  adminNotes: z.string().max(2000).optional()
+});
+
+adminRouter.patch('/experts/:id/admin-notes', async (req, res) => {
+  const parsed = z.object({ adminNotes: z.string().max(2000) }).safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const expert = await prisma.expert.update({
+      where: { id: req.params.id },
+      data: { adminNotes: parsed.data.adminNotes }
+    });
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'update_expert_admin_notes',
+      targetType: 'expert',
+      targetId: expert.id,
+      diff: { adminNotes: parsed.data.adminNotes }
+    });
+    return ok(res, { id: expert.id, adminNotes: expert.adminNotes || '' });
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '保存备注失败');
+  }
 });
 
 adminRouter.patch('/experts/:id', async (req, res) => {
@@ -715,6 +738,7 @@ adminRouter.patch('/experts/:id', async (req, res) => {
     domainTags?: string;
     featured?: boolean;
     sortOrder?: number;
+    adminNotes?: string;
   } = { ...rest };
 
   if (domainTags) {
@@ -724,6 +748,10 @@ adminRouter.patch('/experts/:id', async (req, res) => {
     } catch (error) {
       return fail(res, error instanceof Error ? error.message : '专家标签无效');
     }
+  }
+
+  if (Object.keys(data).length === 0) {
+    return fail(res, '没有可更新的字段');
   }
 
   const expert = await prisma.expert.update({
@@ -748,15 +776,15 @@ adminRouter.get('/leads', async (req, res) => {
     prisma.consultationLead.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        user: { select: { id: true, name: true, email: true } },
+        user: { select: { id: true, name: true, email: true, phone: true } },
         messages: { orderBy: { createdAt: 'asc' }, take: 3 }
       }
     }),
     prisma.customOrder.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        buyer: { select: { id: true, name: true, email: true } },
-        creator: { select: { id: true, name: true, email: true } },
+        buyer: { select: { id: true, name: true, email: true, phone: true } },
+        creator: { select: { id: true, name: true, email: true, phone: true } },
         instance: { select: { id: true, status: true, title: true } }
       }
     })
@@ -773,7 +801,13 @@ adminRouter.get('/leads', async (req, res) => {
   const experts = expertIds.length
     ? await prisma.expert.findMany({
         where: { id: { in: expertIds } },
-        select: { id: true, name: true, title: true, userId: true }
+        select: {
+          id: true,
+          name: true,
+          title: true,
+          userId: true,
+          user: { select: { phone: true } }
+        }
       })
     : [];
   const expertById = new Map(experts.map((e) => [e.id, e]));
@@ -824,15 +858,19 @@ adminRouter.get('/leads', async (req, res) => {
       clientName: lead.clientName,
       clientCompany: lead.clientCompany,
       contactPhone: lead.contactPhone,
+      clientPhone: lead.user?.phone?.trim() || lead.contactPhone?.trim() || '',
       user: lead.user,
       expertId: lead.expertId,
       expertName: expert?.name || null,
       expertTitle: expert?.title || null,
+      expertPhone: expert?.user?.phone?.trim() || '',
       agentId: lead.agentId || order?.baseAgentId || '',
       agentTitle: lead.agentTitle || order?.baseAgentTitle || '',
       requirement,
       summary: lead.summary,
       leadStatus: lead.status,
+      adminContactStatus: lead.adminContactStatus || 'uncontacted',
+      adminNotes: lead.adminNotes || '',
       funnelStatus,
       order: order
         ? {
@@ -865,15 +903,19 @@ adminRouter.get('/leads', async (req, res) => {
         clientName: order.buyer?.name || '—',
         clientCompany: '',
         contactPhone: '',
+        clientPhone: order.buyer?.phone?.trim() || '',
         user: order.buyer,
         expertId: order.expertId,
         expertName: expert?.name || order.creator?.name || null,
         expertTitle: expert?.title || null,
+        expertPhone: expert?.user?.phone?.trim() || order.creator?.phone?.trim() || '',
         agentId: order.baseAgentId,
         agentTitle: order.baseAgentTitle,
         requirement,
         summary: order.title,
         leadStatus: order.status === 'closed' ? 'closed' : 'new',
+        adminContactStatus: order.adminContactStatus || 'uncontacted',
+        adminNotes: order.adminNotes || '',
         funnelStatus: funnelFromOrder(order),
         order: {
           id: order.id,
@@ -895,6 +937,60 @@ adminRouter.get('/leads', async (req, res) => {
       : mapped;
 
   return ok(res, filtered);
+});
+
+adminRouter.patch('/leads/:id/follow-up', async (req, res) => {
+  const parsed = z
+    .object({
+      adminContactStatus: z.enum(['uncontacted', 'contacted']),
+      adminNotes: z.string().max(2000)
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+
+  const rowId = req.params.id;
+  const isOrderRow = rowId.startsWith('order:');
+  const targetId = isOrderRow ? rowId.slice('order:'.length) : rowId;
+
+  try {
+    if (isOrderRow) {
+      const order = await prisma.customOrder.update({
+        where: { id: targetId },
+        data: parsed.data
+      });
+      await writeAudit({
+        actorId: actorId(req),
+        action: 'update_lead_follow_up',
+        targetType: 'custom_order',
+        targetId: order.id,
+        diff: parsed.data
+      });
+      return ok(res, {
+        id: rowId,
+        adminContactStatus: order.adminContactStatus,
+        adminNotes: order.adminNotes
+      });
+    }
+
+    const lead = await prisma.consultationLead.update({
+      where: { id: targetId },
+      data: parsed.data
+    });
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'update_lead_follow_up',
+      targetType: 'lead',
+      targetId: lead.id,
+      diff: parsed.data
+    });
+    return ok(res, {
+      id: lead.id,
+      adminContactStatus: lead.adminContactStatus,
+      adminNotes: lead.adminNotes
+    });
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '保存跟进失败');
+  }
 });
 
 const leadPatch = z.object({

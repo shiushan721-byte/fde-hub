@@ -979,7 +979,7 @@ type FinanceSettingsDto = {
   updatedAt?: string;
 };
 
-type FinanceRuleField = 'fallbackFeeRateBps' | 'acceptanceDays' | 'settlementHoldHours' | 'pendingHoldDays';
+type FinanceRuleField = 'fallbackFeeRateBps' | 'acceptanceDays' | 'pendingHoldDays';
 
 function bpsToPercentInput(bps: number) {
   return (bps / 100).toFixed(2);
@@ -998,7 +998,6 @@ export const FinanceRulesPage = () => {
 
   const [fallbackPercent, setFallbackPercent] = useState('');
   const [acceptanceDays, setAcceptanceDays] = useState('');
-  const [settlementHoldHours, setSettlementHoldHours] = useState('');
   const [pendingHoldDays, setPendingHoldDays] = useState('');
   const [savingField, setSavingField] = useState<FinanceRuleField | ''>('');
 
@@ -1006,7 +1005,6 @@ export const FinanceRulesPage = () => {
     if (!data?.settings) return;
     setFallbackPercent(bpsToPercentInput(data.settings.fallbackFeeRateBps));
     setAcceptanceDays(String(data.settings.acceptanceDays));
-    setSettlementHoldHours(String(data.settings.settlementHoldHours));
     setPendingHoldDays(String(data.settings.pendingHoldDays));
   }, [data?.settings]);
 
@@ -1030,13 +1028,6 @@ export const FinanceRulesPage = () => {
         return;
       }
       payload = { acceptanceDays: days };
-    } else if (field === 'settlementHoldHours') {
-      const hours = Number(settlementHoldHours);
-      if (!Number.isInteger(hours) || hours < 0 || hours > 720) {
-        alert('观察期小时数须为 0–720 的整数');
-        return;
-      }
-      payload = { settlementHoldHours: hours };
     } else {
       const hold = Number(pendingHoldDays);
       if (!Number.isInteger(hold) || hold < 0 || hold > 90) {
@@ -1098,21 +1089,6 @@ export const FinanceRulesPage = () => {
       )
     },
     {
-      field: 'settlementHoldHours',
-      title: '验收后观察期',
-      hint: '满后可结算释放（单位：小时）',
-      input: (
-        <input
-          type="number"
-          min={0}
-          max={720}
-          value={settlementHoldHours}
-          onChange={(e) => setSettlementHoldHours(e.target.value)}
-          className={inputClass}
-        />
-      )
-    },
-    {
       field: 'pendingHoldDays',
       title: '待提现冻结天数',
       hint: '待提现 → 可提现（单位：天）',
@@ -1134,18 +1110,18 @@ export const FinanceRulesPage = () => {
       <div>
         <h1 className="text-xl font-black">费率与结算规则</h1>
         <p className="text-xs text-slate-500 mt-1">
-          配置平台服务费率与验收、观察、待提现冻结规则；修改后仅影响之后新写入的截止时间。
+          配置平台服务费率、验收与待提现冻结规则；修改后仅影响之后新写入的截止时间。
         </p>
       </div>
 
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="space-y-3 max-w-md">
         {modules.map((mod) => (
           <div
             key={mod.field}
-            className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3 flex flex-col"
+            className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3"
           >
             <div>
               <div className="text-sm font-black">{mod.title}</div>

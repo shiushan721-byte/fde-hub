@@ -2288,6 +2288,14 @@ const ExpertsPage = ({
   const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
   const [phoneQuery, setPhoneQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [noteTarget, setNoteTarget] = useState<{
+    id: string;
+    name: string;
+    expertNo?: string;
+    adminNotes: string;
+  } | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
   const [detailTarget, setDetailTarget] = useState<{
     name: string;
     title: string;
@@ -2315,6 +2323,7 @@ const ExpertsPage = ({
     paused: boolean;
     status: string;
     phone?: string;
+    adminNotes?: string;
     publishedAgentsCount?: number;
     followersCount?: number;
     appliedAt?: string;
@@ -2332,6 +2341,44 @@ const ExpertsPage = ({
       freezeReason?: string;
     };
   }>>('/api/admin/experts');
+
+  const openNoteDrawer = (expert: { id: string; name: string; expertNo?: string; adminNotes?: string }) => {
+    const adminNotes = expert.adminNotes || '';
+    setNoteTarget({
+      id: expert.id,
+      name: expert.name,
+      expertNo: expert.expertNo,
+      adminNotes
+    });
+    setNoteDraft(adminNotes);
+  };
+
+  const saveAdminNote = async () => {
+    if (!noteTarget) return;
+    setSavingNote(true);
+    try {
+      await api<{ id: string; adminNotes: string }>(
+        `/api/admin/experts/${noteTarget.id}/admin-notes`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ adminNotes: noteDraft })
+        }
+      );
+      await reload();
+      setNoteTarget(null);
+      setNoteDraft('');
+    } catch (e) {
+      alert(
+        e instanceof Error
+          ? e.message.includes('API 未连接') || e.message.includes('请求失败')
+            ? `${e.message}\n\n请确认后台 API 已启动（npm run dev:api 或 npm run dev:all）`
+            : e.message
+          : '保存备注失败'
+      );
+    } finally {
+      setSavingNote(false);
+    }
+  };
 
   const rows = useMemo(() => {
     const list = data || [];
@@ -2562,6 +2609,13 @@ const ExpertsPage = ({
                     >
                       {expert.featured ? '取消推荐' : '设为推荐'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => openNoteDrawer(expert)}
+                      className="font-bold cursor-pointer text-blue-600 hover:text-blue-700"
+                    >
+                      {(expert.adminNotes || '').trim() ? '查看详情' : '备注'}
+                    </button>
                   </td>
                 </tr>
               );
@@ -2572,6 +2626,68 @@ const ExpertsPage = ({
           <p className="p-6 text-sm text-slate-400 text-center">暂无匹配的专家</p>
         )}
       </div>
+
+      {noteTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex justify-end animate-in fade-in duration-200"
+          onClick={() => setNoteTarget(null)}
+        >
+          <div
+            className="w-full max-w-lg h-full bg-white border-l border-slate-200 shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-right duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
+              <div className="min-w-0">
+                <h3 className="text-base font-black text-slate-900 truncate">
+                  {noteTarget.adminNotes.trim() ? '运营备注' : '添加备注'}
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5 truncate">
+                  {noteTarget.name}
+                  {noteTarget.expertNo ? ` · ${noteTarget.expertNo}` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNoteTarget(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <label className="block space-y-2">
+                <span className="text-[11px] text-slate-500">备注内容（仅运营可见）</span>
+                <textarea
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                  placeholder="记录跟进情况、沟通要点等…"
+                  rows={12}
+                  disabled={savingNote}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-700 bg-white resize-y disabled:opacity-60 leading-relaxed"
+                />
+              </label>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 shrink-0 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setNoteTarget(null)}
+                disabled={savingNote}
+                className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveAdminNote()}
+                disabled={savingNote}
+                className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                {savingNote ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {detailTarget && (
         <div
@@ -2879,19 +2995,34 @@ const ExpertsPage = ({
 
 const LeadsPage = () => {
   const [filter, setFilter] = useState<'open' | 'converted' | 'closed' | ''>('');
+  const [phoneQuery, setPhoneQuery] = useState('');
+  const [followUpTarget, setFollowUpTarget] = useState<{
+    id: string;
+    clientLabel: string;
+    adminContactStatus: 'uncontacted' | 'contacted';
+    adminNotes: string;
+  } | null>(null);
+  const [followUpStatus, setFollowUpStatus] = useState<'uncontacted' | 'contacted'>('uncontacted');
+  const [followUpNotes, setFollowUpNotes] = useState('');
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
   const { data, error, loading, reload } = useAdminQuery<
     Array<{
       id: string;
+      source?: 'lead' | 'order';
       createdAt: string;
       clientName: string;
       clientCompany: string;
       contactPhone: string;
-      user?: { id: string; name: string; email: string } | null;
+      clientPhone?: string;
+      user?: { id: string; name: string; email: string; phone?: string } | null;
       expertName: string | null;
       expertTitle: string | null;
+      expertPhone?: string;
       agentId: string;
       agentTitle: string;
       requirement: string;
+      adminContactStatus?: 'uncontacted' | 'contacted';
+      adminNotes?: string;
       funnelStatus: 'open' | 'converted' | 'closed';
       order?: {
         id: string;
@@ -2903,11 +3034,123 @@ const LeadsPage = () => {
     }>
   >(`/api/admin/leads${filter ? `?status=${filter}` : ''}`, filter);
 
-  const total = data?.length || 0;
   const funnelLabel: Record<string, string> = {
     open: '咨询中',
     converted: '已转化',
     closed: '已关闭'
+  };
+
+  const contactStatusLabel: Record<'uncontacted' | 'contacted', string> = {
+    uncontacted: '未联系',
+    contacted: '已联系'
+  };
+
+  const resolveClientPhone = (lead: NonNullable<typeof data>[number]) =>
+    lead.clientPhone || lead.user?.phone || lead.contactPhone || '';
+
+  const openFollowUpDrawer = (lead: NonNullable<typeof data>[number]) => {
+    const adminContactStatus = lead.adminContactStatus || 'uncontacted';
+    setFollowUpTarget({
+      id: lead.id,
+      clientLabel: lead.user?.name || lead.clientName || '—',
+      adminContactStatus,
+      adminNotes: lead.adminNotes || ''
+    });
+    setFollowUpStatus(adminContactStatus);
+    setFollowUpNotes(lead.adminNotes || '');
+  };
+
+  const saveFollowUp = async () => {
+    if (!followUpTarget) return;
+    setSavingFollowUp(true);
+    try {
+      await api<{ id: string; adminContactStatus: string; adminNotes: string }>(
+        `/api/admin/leads/${followUpTarget.id}/follow-up`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            adminContactStatus: followUpStatus,
+            adminNotes: followUpNotes
+          })
+        }
+      );
+      await reload();
+      setFollowUpTarget(null);
+      setFollowUpNotes('');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setSavingFollowUp(false);
+    }
+  };
+
+  const filtered = useMemo(() => {
+    const phoneQ = phoneQuery.trim();
+    return (data || []).filter((lead) => {
+      if (!phoneQ) return true;
+      const clientPhone = resolveClientPhone(lead);
+      const expertPhone = lead.expertPhone || '';
+      return clientPhone.includes(phoneQ) || expertPhone.includes(phoneQ);
+    });
+  }, [data, phoneQuery]);
+
+  const total = filtered.length;
+
+  const downloadLeadsCsv = () => {
+    if (filtered.length === 0) {
+      alert('暂无数据可下载');
+      return;
+    }
+    const escapeCsv = (value: string) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const headers = [
+      '咨询时间',
+      '咨询人',
+      '咨询人手机号',
+      'AI专家',
+      '专家手机号',
+      '咨询智能体',
+      '智能体ID',
+      '咨询内容',
+      '订单编号',
+      '状态',
+      '联系状态',
+      '跟进备注'
+    ];
+    const rows = filtered.map((lead) => {
+      const agentTitle = (lead.agentTitle || '').trim();
+      const agentId = (lead.agentId || '').trim();
+      const isDirectExpertConsult =
+        !agentId ||
+        !agentTitle ||
+        agentTitle === '直接向专家咨询' ||
+        agentTitle === '未指定智能体';
+      const showOrderNo =
+        lead.funnelStatus === 'converted' && Boolean(lead.order?.orderNo);
+      return [
+        lead.createdAt ? new Date(lead.createdAt).toLocaleString('zh-CN') : '',
+        lead.user?.name || lead.clientName || '',
+        resolveClientPhone(lead),
+        lead.expertName || '',
+        lead.expertPhone || '',
+        isDirectExpertConsult ? '' : agentTitle,
+        isDirectExpertConsult ? '' : agentId,
+        lead.requirement || '',
+        showOrderNo ? lead.order!.orderNo : '',
+        funnelLabel[lead.funnelStatus] || lead.funnelStatus,
+        contactStatusLabel[lead.adminContactStatus || 'uncontacted'],
+        lead.adminNotes || ''
+      ]
+        .map(escapeCsv)
+        .join(',');
+    });
+    const csv = `\ufeff${headers.map(escapeCsv).join(',')}\n${rows.join('\n')}`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `consultation-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -2919,7 +3162,13 @@ const LeadsPage = () => {
             记录谁在什么时间向哪位 AI 专家咨询了哪个智能体，以及咨询内容
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={phoneQuery}
+            onChange={(e) => setPhoneQuery(e.target.value)}
+            placeholder="按手机号搜索"
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs w-40 bg-white"
+          />
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value as typeof filter)}
@@ -2930,6 +3179,14 @@ const LeadsPage = () => {
             <option value="converted">已转化</option>
             <option value="closed">已关闭</option>
           </select>
+          <button
+            type="button"
+            onClick={() => void downloadLeadsCsv()}
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer inline-flex items-center gap-1.5"
+          >
+            <Download size={14} />
+            下载
+          </button>
           <button
             type="button"
             onClick={reload}
@@ -2953,10 +3210,12 @@ const LeadsPage = () => {
               <th className="text-left p-3 min-w-[220px]">咨询内容</th>
               <th className="text-left p-3 whitespace-nowrap">订单编号</th>
               <th className="text-left p-3">状态</th>
+              <th className="text-left p-3 whitespace-nowrap">联系状态</th>
+              <th className="text-right p-3 whitespace-nowrap">操作</th>
             </tr>
           </thead>
           <tbody>
-            {(data || []).map((lead, index) => {
+            {filtered.map((lead, index) => {
               const agentTitle = (lead.agentTitle || '').trim();
               const agentId = (lead.agentId || '').trim();
               const isDirectExpertConsult =
@@ -2976,15 +3235,15 @@ const LeadsPage = () => {
                     <div className="font-bold text-slate-900">
                       {lead.user?.name || lead.clientName || '—'}
                     </div>
-                    <div className="text-slate-400 mt-0.5">
-                      {lead.user?.email || lead.clientCompany || lead.contactPhone || '—'}
+                    <div className="text-slate-400 mt-0.5 font-mono">
+                      {resolveClientPhone(lead) || '—'}
                     </div>
                   </td>
                   <td className="p-3">
                     <div className="font-bold text-slate-900">{lead.expertName || '—'}</div>
-                    {lead.expertTitle && (
-                      <div className="text-slate-400 mt-0.5">{lead.expertTitle}</div>
-                    )}
+                    <div className="text-slate-400 mt-0.5 font-mono">
+                      {lead.expertPhone || '—'}
+                    </div>
                   </td>
                   <td className="p-3">
                     {isDirectExpertConsult ? (
@@ -3027,17 +3286,125 @@ const LeadsPage = () => {
                       {funnelLabel[lead.funnelStatus] || lead.funnelStatus}
                     </span>
                   </td>
+                  <td className="p-3 whitespace-nowrap">
+                    <span
+                      className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ring-1 ring-inset ${
+                        (lead.adminContactStatus || 'uncontacted') === 'contacted'
+                          ? 'bg-blue-50 text-blue-700 ring-blue-200'
+                          : 'bg-slate-50 text-slate-600 ring-slate-200'
+                      }`}
+                    >
+                      {contactStatusLabel[lead.adminContactStatus || 'uncontacted']}
+                    </span>
+                  </td>
+                  <td className="p-3 text-right whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => openFollowUpDrawer(lead)}
+                      className="font-bold cursor-pointer text-blue-600 hover:text-blue-700"
+                    >
+                      {(lead.adminNotes || '').trim() ||
+                      (lead.adminContactStatus || 'uncontacted') === 'contacted'
+                        ? '查看跟进'
+                        : '跟进'}
+                    </button>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {data?.length === 0 && (
+        {!loading && filtered.length === 0 && (
           <p className="p-6 text-sm text-slate-400 text-center">
-            暂无线索。前台向专家发起咨询后会出现在这里。
+            {phoneQuery.trim() ? '没有匹配该手机号的咨询线索' : '暂无线索。前台向专家发起咨询后会出现在这里。'}
           </p>
         )}
       </div>
+
+      {followUpTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex justify-end animate-in fade-in duration-200"
+          onClick={() => !savingFollowUp && setFollowUpTarget(null)}
+        >
+          <div
+            className="w-full max-w-lg h-full bg-white border-l border-slate-200 shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-right duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
+              <div className="min-w-0">
+                <h3 className="text-base font-black text-slate-900 truncate">线索跟进</h3>
+                <p className="text-xs text-slate-400 mt-0.5 truncate">{followUpTarget.clientLabel}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFollowUpTarget(null)}
+                disabled={savingFollowUp}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer disabled:opacity-60"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              <fieldset className="space-y-2">
+                <legend className="text-[11px] font-bold text-slate-700">联系状态</legend>
+                <div className="flex items-center gap-4">
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="lead-contact-status"
+                      checked={followUpStatus === 'uncontacted'}
+                      onChange={() => setFollowUpStatus('uncontacted')}
+                      disabled={savingFollowUp}
+                      className="accent-slate-900"
+                    />
+                    未联系
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="lead-contact-status"
+                      checked={followUpStatus === 'contacted'}
+                      onChange={() => setFollowUpStatus('contacted')}
+                      disabled={savingFollowUp}
+                      className="accent-slate-900"
+                    />
+                    已联系
+                  </label>
+                </div>
+              </fieldset>
+              <label className="block space-y-2">
+                <span className="text-[11px] font-bold text-slate-700">跟进备注</span>
+                <textarea
+                  value={followUpNotes}
+                  onChange={(e) => setFollowUpNotes(e.target.value)}
+                  placeholder="记录沟通情况、下一步计划等…"
+                  rows={10}
+                  disabled={savingFollowUp}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-700 bg-white resize-y disabled:opacity-60 leading-relaxed"
+                />
+              </label>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 shrink-0 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setFollowUpTarget(null)}
+                disabled={savingFollowUp}
+                className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveFollowUp()}
+                disabled={savingFollowUp}
+                className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                {savingFollowUp ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
