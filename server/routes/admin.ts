@@ -15,11 +15,7 @@ import {
 } from '../services/certification';
 import { markWithdrawalPaid, releasePendingIncomes, reviewWithdrawal } from '../services/wallet';
 import {
-  createFeeRatePeriod,
-  deleteFeeRatePeriod,
   getFinanceSettings,
-  listFeeRatePeriods,
-  updateFeeRatePeriod,
   updateFinanceSettings
 } from '../services/financeSettings';
 import {
@@ -27,6 +23,12 @@ import {
   listFinanceAccounts,
   listFinanceLedgerEntries
 } from '../services/platformFinance';
+import {
+  countPendingCommentReports,
+  dismissCommentReport,
+  listCommentReports,
+  removeCommentForReport
+} from '../services/agentCommentReports';
 import {
   countExpertsByTagName,
   createExpertTag,
@@ -1911,8 +1913,8 @@ adminRouter.post('/withdrawals/:id/paid', async (req, res) => {
 });
 
 adminRouter.get('/finance-settings', async (_req, res) => {
-  const [settings, periods] = await Promise.all([getFinanceSettings(), listFeeRatePeriods()]);
-  return ok(res, { settings, periods });
+  const settings = await getFinanceSettings();
+  return ok(res, { settings });
 });
 
 const financeSettingsSchema = z.object({
@@ -1937,78 +1939,6 @@ adminRouter.patch('/finance-settings', async (req, res) => {
     return ok(res, settings);
   } catch (error) {
     return fail(res, error instanceof Error ? error.message : '保存失败');
-  }
-});
-
-const feePeriodSchema = z.object({
-  startAt: z.string().min(1),
-  endAt: z.string().min(1),
-  rateBps: z.number().int().min(0).max(10000),
-  note: z.string().optional(),
-  enabled: z.boolean().optional()
-});
-
-adminRouter.post('/finance-settings/fee-periods', async (req, res) => {
-  const parsed = feePeriodSchema.safeParse(req.body);
-  if (!parsed.success) return fail(res, '参数不合法');
-  try {
-    const item = await createFeeRatePeriod({
-      startAt: new Date(parsed.data.startAt),
-      endAt: new Date(parsed.data.endAt),
-      rateBps: parsed.data.rateBps,
-      note: parsed.data.note,
-      enabled: parsed.data.enabled
-    });
-    await writeAudit({
-      actorId: actorId(req),
-      action: 'create_fee_rate_period',
-      targetType: 'fee_rate_period',
-      targetId: item.id,
-      diff: parsed.data
-    });
-    return ok(res, item);
-  } catch (error) {
-    return fail(res, error instanceof Error ? error.message : '创建失败');
-  }
-});
-
-adminRouter.patch('/finance-settings/fee-periods/:id', async (req, res) => {
-  const parsed = feePeriodSchema.partial().safeParse(req.body);
-  if (!parsed.success) return fail(res, '参数不合法');
-  try {
-    const item = await updateFeeRatePeriod(req.params.id, {
-      startAt: parsed.data.startAt ? new Date(parsed.data.startAt) : undefined,
-      endAt: parsed.data.endAt ? new Date(parsed.data.endAt) : undefined,
-      rateBps: parsed.data.rateBps,
-      note: parsed.data.note,
-      enabled: parsed.data.enabled
-    });
-    await writeAudit({
-      actorId: actorId(req),
-      action: 'update_fee_rate_period',
-      targetType: 'fee_rate_period',
-      targetId: item.id,
-      diff: parsed.data
-    });
-    return ok(res, item);
-  } catch (error) {
-    return fail(res, error instanceof Error ? error.message : '更新失败');
-  }
-});
-
-adminRouter.delete('/finance-settings/fee-periods/:id', async (req, res) => {
-  try {
-    const item = await deleteFeeRatePeriod(req.params.id);
-    await writeAudit({
-      actorId: actorId(req),
-      action: 'delete_fee_rate_period',
-      targetType: 'fee_rate_period',
-      targetId: item.id,
-      diff: { id: item.id }
-    });
-    return ok(res, item);
-  } catch (error) {
-    return fail(res, error instanceof Error ? error.message : '删除失败');
   }
 });
 
@@ -2155,6 +2085,51 @@ adminRouter.post('/expert-tags/:id/online', async (req, res) => {
     return ok(res, tag);
   } catch (error) {
     return fail(res, error instanceof Error ? error.message : '上架失败');
+  }
+});
+
+adminRouter.get('/comment-reports/pending-count', async (_req, res) => {
+  const count = await countPendingCommentReports();
+  return ok(res, { count });
+});
+
+adminRouter.get('/comment-reports', async (req, res) => {
+  const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+  const reports = await listCommentReports(status);
+  return ok(res, reports);
+});
+
+adminRouter.post('/comment-reports/:id/dismiss', async (req, res) => {
+  const note = z.string().optional().parse(req.body?.note);
+  try {
+    const report = await dismissCommentReport(req.params.id, actorId(req), note);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'dismiss_comment_report',
+      targetType: 'agent_comment_report',
+      targetId: report.id,
+      diff: { note: note || '' }
+    });
+    return ok(res, report);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '操作失败');
+  }
+});
+
+adminRouter.post('/comment-reports/:id/remove-comment', async (req, res) => {
+  const note = z.string().optional().parse(req.body?.note);
+  try {
+    const report = await removeCommentForReport(req.params.id, actorId(req), note);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'remove_comment_from_report',
+      targetType: 'agent_comment_report',
+      targetId: req.params.id,
+      diff: { note: note || '' }
+    });
+    return ok(res, report);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '操作失败');
   }
 });
 

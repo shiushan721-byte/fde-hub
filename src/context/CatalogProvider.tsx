@@ -10,7 +10,7 @@ import {
   mockAgentSolutions,
   HellomeAgentItem
 } from '../data/mockData';
-import { AgentSolution } from '../types';
+import { AgentSolution, FDEExpert } from '../types';
 import { sortExpertsForPublic } from '../lib/sortExperts';
 
 const defaultSettings: HomeSettings = {
@@ -50,12 +50,16 @@ export const CatalogProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const value = useMemo<CatalogState>(() => {
-    const live = source === 'api' && query.data;
+    const apiFailed = source === 'api' && !!query.error;
+    const live = source === 'api' && query.data && !apiFailed;
+    const apiError = apiFailed
+      ? (query.error as Error | undefined)?.message || '后台数据加载失败'
+      : null;
     return {
       source,
       setSource,
       loading: source === 'api' && query.isFetching,
-      error: source === 'api' ? (query.error as Error | undefined)?.message || null : null,
+      error: apiError,
       banners: live ? query.data!.home.banners : defaultHomeBanners,
       categories: live ? query.data!.home.categories : defaultHomeCategories,
       homeAgents: live ? query.data!.home.agents : mockHellomeHomeAgents,

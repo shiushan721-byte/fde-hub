@@ -1,8 +1,15 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { prisma } from '../lib/prisma';
+import { fail, ok } from '../lib/http';
 import { parseJson } from '../lib/json';
-import { ok } from '../lib/http';
+import { requireAuth } from '../middleware/auth';
 import { agentToCatalog, agentToSolution, expertToPublic } from '../lib/mappers';
+import {
+  COMMENT_REPORT_REASONS,
+  createCommentReport,
+  type CommentReportReason
+} from '../services/agentCommentReports';
 import {
   filterActiveDomainTags,
   getActiveExpertTagNameSet,
@@ -152,6 +159,81 @@ publicRouter.get('/experts/:id', async (req, res) => {
     packages: services.map((item) => parseJson(item.payload, {})),
     agents: solutions.map(agentToSolution)
   });
+});
+
+publicRouter.get('/agents/:id/comments', async (req, res) => {
+  const agent = await prisma.agent.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, title: true, status: true }
+  });
+  if (!agent || agent.status !== 'published') {
+    return fail(res, '智能体不存在或未上架', 404, 'NOT_FOUND');
+  }
+
+  const comments = await prisma.agentComment.findMany({
+    where: { agentId: agent.id },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  const roots = comments.filter((c) => !c.parentId);
+  const repliesByParent = new Map<string, typeof comments>();
+  for (const c of comments) {
+    if (!c.parentId) continue;
+    const list = repliesByParent.get(c.parentId) || [];
+    list.push(c);
+    repliesByParent.set(c.parentId, list);
+  }
+
+  return ok(res, {
+    total: comments.length,
+    comments: roots.map((root) => ({
+      id: root.id,
+      agentId: root.agentId,
+      userName: root.userName,
+      userAvatar: root.userAvatar,
+      isAuthor: root.isAuthor,
+      content: root.content,
+      createdAt: root.createdAt.toISOString(),
+      replies: (repliesByParent.get(root.id) || [])
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .map((reply) => ({
+          id: reply.id,
+          userName: reply.userName,
+          userAvatar: reply.userAvatar,
+          isAuthor: reply.isAuthor,
+          content: reply.content,
+          createdAt: reply.createdAt.toISOString()
+        }))
+    }))
+  });
+});
+
+publicRouter.get('/comment-report-reasons', (_req, res) => {
+  return ok(res, COMMENT_REPORT_REASONS);
+});
+
+const reportSchema = z.object({
+  reason: z.enum(['spam', 'abuse', 'illegal', 'false_info', 'other']),
+  detail: z.string().max(500).optional().default('')
+});
+
+publicRouter.post('/agents/:agentId/comments/:commentId/report', requireAuth, async (req, res) => {
+  const parsed = reportSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '举报原因无效');
+
+  try {
+    const report = await createCommentReport({
+      agentId: req.params.agentId,
+      commentId: req.params.commentId,
+      reason: parsed.data.reason as CommentReportReason,
+      detail: parsed.data.detail,
+      reporterUserId: req.user!.id,
+      reporterName: req.user!.name
+    });
+    return ok(res, { id: report.id }, 201);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '举报失败');
+  }
 });
 
 publicRouter.get('/categories', async (_req, res) => {

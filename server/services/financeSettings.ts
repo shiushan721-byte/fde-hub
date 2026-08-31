@@ -18,17 +18,6 @@ export type FinanceSettingsRow = {
   updatedAt: Date;
 };
 
-export type FeeRatePeriodRow = {
-  id: string;
-  startAt: Date;
-  endAt: Date;
-  rateBps: number;
-  note: string;
-  enabled: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
 export function bpsToRate(bps: number) {
   return Math.max(0, bps) / 10000;
 }
@@ -124,150 +113,13 @@ export async function getPendingHoldMs() {
   return s.pendingHoldDays * DAY_MS;
 }
 
-/** 区间是否重叠：[start, end) 左闭右开 */
-export function intervalsOverlap(
-  aStart: Date,
-  aEnd: Date,
-  bStart: Date,
-  bEnd: Date
-) {
-  return aStart.getTime() < bEnd.getTime() && bStart.getTime() < aEnd.getTime();
-}
-
-export async function assertNoFeePeriodOverlap(input: {
-  startAt: Date;
-  endAt: Date;
-  excludeId?: string;
-}) {
-  if (!(input.startAt instanceof Date) || Number.isNaN(input.startAt.getTime())) {
-    throw new Error('开始时间不合法');
-  }
-  if (!(input.endAt instanceof Date) || Number.isNaN(input.endAt.getTime())) {
-    throw new Error('结束时间不合法');
-  }
-  if (input.startAt.getTime() >= input.endAt.getTime()) {
-    throw new Error('开始时间必须早于结束时间（区间为左闭右开）');
-  }
-
-  const periods = await prisma.platformFeeRatePeriod.findMany({
-    where: {
-      enabled: true,
-      ...(input.excludeId ? { id: { not: input.excludeId } } : {})
-    }
-  });
-
-  for (const p of periods) {
-    if (intervalsOverlap(input.startAt, input.endAt, p.startAt, p.endAt)) {
-      throw new Error(
-        `与已有时段重叠：${p.startAt.toISOString()} ~ ${p.endAt.toISOString()}（${formatBpsPercent(p.rateBps)}）`
-      );
-    }
-  }
-}
-
-export async function listFeeRatePeriods() {
-  return prisma.platformFeeRatePeriod.findMany({
-    orderBy: [{ startAt: 'desc' }, { id: 'desc' }]
-  });
-}
-
-export async function createFeeRatePeriod(input: {
-  startAt: Date;
-  endAt: Date;
-  rateBps: number;
-  note?: string;
-  enabled?: boolean;
-}) {
-  if (!Number.isInteger(input.rateBps) || input.rateBps < 0 || input.rateBps > 10000) {
-    throw new Error('费率须为 0–10000 的万分比整数（1000 = 10%）');
-  }
-  const enabled = input.enabled !== false;
-  if (enabled) {
-    await assertNoFeePeriodOverlap({ startAt: input.startAt, endAt: input.endAt });
-  }
-  return prisma.platformFeeRatePeriod.create({
-    data: {
-      id: `fee_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      startAt: input.startAt,
-      endAt: input.endAt,
-      rateBps: input.rateBps,
-      note: input.note || '',
-      enabled
-    }
-  });
-}
-
-export async function updateFeeRatePeriod(
-  id: string,
-  input: {
-    startAt?: Date;
-    endAt?: Date;
-    rateBps?: number;
-    note?: string;
-    enabled?: boolean;
-  }
-) {
-  const existing = await prisma.platformFeeRatePeriod.findUnique({ where: { id } });
-  if (!existing) throw new Error('费率时段不存在');
-
-  const startAt = input.startAt ?? existing.startAt;
-  const endAt = input.endAt ?? existing.endAt;
-  const rateBps = input.rateBps ?? existing.rateBps;
-  const enabled = input.enabled ?? existing.enabled;
-
-  if (!Number.isInteger(rateBps) || rateBps < 0 || rateBps > 10000) {
-    throw new Error('费率须为 0–10000 的万分比整数（1000 = 10%）');
-  }
-  if (enabled) {
-    await assertNoFeePeriodOverlap({ startAt, endAt, excludeId: id });
-  }
-
-  return prisma.platformFeeRatePeriod.update({
-    where: { id },
-    data: {
-      startAt,
-      endAt,
-      rateBps,
-      note: input.note !== undefined ? input.note : existing.note,
-      enabled
-    }
-  });
-}
-
-export async function deleteFeeRatePeriod(id: string) {
-  const existing = await prisma.platformFeeRatePeriod.findUnique({ where: { id } });
-  if (!existing) throw new Error('费率时段不存在');
-  await prisma.platformFeeRatePeriod.delete({ where: { id } });
-  return existing;
-}
-
-/**
- * 按支付成功时间解析平台服务费率（小数，如 0.1）。
- * 匹配启用时段 [startAt, endAt)；无匹配则用托底。
- */
-export async function resolvePlatformFeeRate(at: Date = new Date()): Promise<{
+/** 按支付成功时间解析平台服务费率（小数，如 0.1）。 */
+export async function resolvePlatformFeeRate(_at: Date = new Date()): Promise<{
   rate: number;
   rateBps: number;
-  source: 'period' | 'fallback';
-  periodId?: string;
+  source: 'fallback';
 }> {
   const settings = await getFinanceSettings();
-  const period = await prisma.platformFeeRatePeriod.findFirst({
-    where: {
-      enabled: true,
-      startAt: { lte: at },
-      endAt: { gt: at }
-    },
-    orderBy: { startAt: 'desc' }
-  });
-  if (period) {
-    return {
-      rate: bpsToRate(period.rateBps),
-      rateBps: period.rateBps,
-      source: 'period',
-      periodId: period.id
-    };
-  }
   return {
     rate: bpsToRate(settings.fallbackFeeRateBps),
     rateBps: settings.fallbackFeeRateBps,
@@ -276,12 +128,11 @@ export async function resolvePlatformFeeRate(at: Date = new Date()): Promise<{
 }
 
 export async function platformFeeCentsForPrice(priceCents: number, at: Date = new Date()) {
-  const { rate, rateBps, source, periodId } = await resolvePlatformFeeRate(at);
+  const { rate, rateBps, source } = await resolvePlatformFeeRate(at);
   return {
     feeCents: Math.round(Math.max(0, priceCents) * rate),
     rate,
     rateBps,
-    source,
-    periodId
+    source
   };
 }

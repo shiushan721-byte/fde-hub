@@ -35,6 +35,7 @@ import {
   WithdrawalsPage
 } from './FinancePages';
 import { ExpertTagsPage } from './ExpertTagsPage';
+import { CommentReportsPage } from './CommentReportsPage';
 
 type AdminCaseItem = {
   id?: string;
@@ -61,6 +62,7 @@ type AdminPage =
   | 'agents'
   | 'custom-agents'
   | 'deliveries'
+  | 'comment-reports'
   | 'experts'
   | 'applications'
   | 'expert-tags'
@@ -101,6 +103,7 @@ const nav: NavEntry[] = [
       { key: 'agents', label: '通用智能体' },
       { key: 'custom-agents', label: '定制智能体' },
       { key: 'deliveries', label: '智能体审核' },
+      { key: 'comment-reports', label: '评论举报' },
       { key: 'leads', label: '咨询线索' }
     ]
   },
@@ -142,7 +145,7 @@ const nav: NavEntry[] = [
 ];
 
 const GROUP_PAGE_KEYS: Record<string, AdminPage[]> = {
-  'agent-mgmt': ['agents', 'custom-agents', 'deliveries', 'leads'],
+  'agent-mgmt': ['agents', 'custom-agents', 'deliveries', 'comment-reports', 'leads'],
   'expert-mgmt': ['experts', 'expert-tags', 'applications'],
   'fund-mgmt': ['expert-accounts', 'settlements', 'finance-rules'],
   'finance-mgmt': ['finance-balances', 'finance-ledger', 'withdrawals', 'escrows']
@@ -190,7 +193,6 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     'fund-mgmt': true,
     'finance-mgmt': true
   });
-
   const loadMe = async () => {
     try {
       const user = await api<AdminUser>('/api/auth/me');
@@ -298,7 +300,7 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
                               : 'text-slate-400 hover:bg-white/10 hover:text-slate-200'
                           }`}
                         >
-                          {child.label}
+                          <span className="flex-1 text-left">{child.label}</span>
                         </button>
                       );
                     })}
@@ -354,6 +356,7 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         )}
         {page === 'custom-agents' && <CustomAgentsPage />}
         {page === 'deliveries' && <AgentReviewPage />}
+        {page === 'comment-reports' && <CommentReportsPage />}
         {page === 'experts' && (
           <ExpertsPage
             onOpenPublishedAgents={(authorId, label) => {
@@ -1098,19 +1101,19 @@ const AgentsPage = ({
 
       {commentsTarget && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/40 flex justify-end animate-in fade-in duration-200"
           onClick={() => setCommentsTarget(null)}
         >
           <div
-            className="bg-white w-full max-w-2xl max-h-[80vh] rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col"
+            className="w-full max-w-lg h-full bg-white border-l border-slate-200 shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-right duration-300"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
               <div className="min-w-0">
-                <h3 className="text-sm font-black text-slate-900 truncate">
+                <h3 className="text-base font-black text-slate-900 truncate">
                   评论 · {commentsTarget.title}
                 </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-400 mt-0.5">
                   共 {commentsPayload?.total ?? '—'} 条
                 </p>
               </div>
@@ -1119,10 +1122,10 @@ const AgentsPage = ({
                 onClick={() => setCommentsTarget(null)}
                 className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
               >
-                <X size={16} />
+                <X size={18} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
               {commentsLoading && <p className="text-sm text-slate-500">加载中…</p>}
               {commentsError && <p className="text-sm text-rose-600">{commentsError}</p>}
               {!commentsLoading && !commentsError && commentsPayload?.comments.length === 0 && (

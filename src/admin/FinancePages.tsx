@@ -979,14 +979,7 @@ type FinanceSettingsDto = {
   updatedAt?: string;
 };
 
-type FeePeriodDto = {
-  id: string;
-  startAt: string;
-  endAt: string;
-  rateBps: number;
-  note: string;
-  enabled: boolean;
-};
+type FinanceRuleField = 'fallbackFeeRateBps' | 'acceptanceDays' | 'settlementHoldHours' | 'pendingHoldDays';
 
 function bpsToPercentInput(bps: number) {
   return (bps / 100).toFixed(2);
@@ -998,30 +991,16 @@ function percentInputToBps(value: string) {
   return Math.round(n * 100);
 }
 
-function fromLocalInput(value: string) {
-  if (!value) return '';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString();
-}
-
 export const FinanceRulesPage = () => {
   const { data, error, loading, reload } = useAdminQuery<{
     settings: FinanceSettingsDto;
-    periods: FeePeriodDto[];
   }>('/api/admin/finance-settings');
 
   const [fallbackPercent, setFallbackPercent] = useState('');
   const [acceptanceDays, setAcceptanceDays] = useState('');
   const [settlementHoldHours, setSettlementHoldHours] = useState('');
   const [pendingHoldDays, setPendingHoldDays] = useState('');
-  const [savingSettings, setSavingSettings] = useState(false);
-
-  const [draftStart, setDraftStart] = useState('');
-  const [draftEnd, setDraftEnd] = useState('');
-  const [draftRate, setDraftRate] = useState('10');
-  const [draftNote, setDraftNote] = useState('');
-  const [busyPeriod, setBusyPeriod] = useState('');
+  const [savingField, setSavingField] = useState<FinanceRuleField | ''>('');
 
   useEffect(() => {
     if (!data?.settings) return;
@@ -1032,293 +1011,157 @@ export const FinanceRulesPage = () => {
   }, [data?.settings]);
 
   const inputClass =
-    'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
+    'w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
 
-  const saveSettings = async () => {
-    const fallbackFeeRateBps = percentInputToBps(fallbackPercent);
-    if (fallbackFeeRateBps == null) {
-      alert('托底费率请输入 0–100 的数字，如 10 表示 10%');
-      return;
+  const saveField = async (field: FinanceRuleField) => {
+    let payload: Partial<Record<FinanceRuleField, number>> = {};
+
+    if (field === 'fallbackFeeRateBps') {
+      const fallbackFeeRateBps = percentInputToBps(fallbackPercent);
+      if (fallbackFeeRateBps == null) {
+        alert('服务费率请输入 0–100 的数字，如 10 表示 10%');
+        return;
+      }
+      payload = { fallbackFeeRateBps };
+    } else if (field === 'acceptanceDays') {
+      const days = Number(acceptanceDays);
+      if (!Number.isInteger(days) || days < 1 || days > 90) {
+        alert('用户验收天数须为 1–90 的整数');
+        return;
+      }
+      payload = { acceptanceDays: days };
+    } else if (field === 'settlementHoldHours') {
+      const hours = Number(settlementHoldHours);
+      if (!Number.isInteger(hours) || hours < 0 || hours > 720) {
+        alert('观察期小时数须为 0–720 的整数');
+        return;
+      }
+      payload = { settlementHoldHours: hours };
+    } else {
+      const hold = Number(pendingHoldDays);
+      if (!Number.isInteger(hold) || hold < 0 || hold > 90) {
+        alert('待提现冻结天数须为 0–90 的整数');
+        return;
+      }
+      payload = { pendingHoldDays: hold };
     }
-    const days = Number(acceptanceDays);
-    const hours = Number(settlementHoldHours);
-    const hold = Number(pendingHoldDays);
-    if (!Number.isInteger(days) || days < 1 || days > 90) {
-      alert('用户验收天数须为 1–90 的整数');
-      return;
-    }
-    if (!Number.isInteger(hours) || hours < 0 || hours > 720) {
-      alert('观察期小时数须为 0–720 的整数');
-      return;
-    }
-    if (!Number.isInteger(hold) || hold < 0 || hold > 90) {
-      alert('待提现冻结天数须为 0–90 的整数');
-      return;
-    }
-    setSavingSettings(true);
+
+    setSavingField(field);
     try {
       await api('/api/admin/finance-settings', {
         method: 'PATCH',
-        body: JSON.stringify({
-          fallbackFeeRateBps,
-          acceptanceDays: days,
-          settlementHoldHours: hours,
-          pendingHoldDays: hold
-        })
+        body: JSON.stringify(payload)
       });
       await reload();
     } catch (err) {
       alert(err instanceof Error ? err.message : '保存失败');
     } finally {
-      setSavingSettings(false);
+      setSavingField('');
     }
   };
 
-  const createPeriod = async () => {
-    const rateBps = percentInputToBps(draftRate);
-    if (rateBps == null) {
-      alert('时段费率请输入 0–100 的数字');
-      return;
+  const modules: {
+    field: FinanceRuleField;
+    title: string;
+    hint: string;
+    input: React.ReactNode;
+  }[] = [
+    {
+      field: 'fallbackFeeRateBps',
+      title: '托底服务费率',
+      hint: '订单支付成功后按此比例收取平台服务费',
+      input: (
+        <input
+          type="number"
+          step="0.01"
+          min={0}
+          max={100}
+          value={fallbackPercent}
+          onChange={(e) => setFallbackPercent(e.target.value)}
+          className={inputClass}
+        />
+      )
+    },
+    {
+      field: 'acceptanceDays',
+      title: '用户验收天数',
+      hint: '推送后未确认则自动验收',
+      input: (
+        <input
+          type="number"
+          min={1}
+          max={90}
+          value={acceptanceDays}
+          onChange={(e) => setAcceptanceDays(e.target.value)}
+          className={inputClass}
+        />
+      )
+    },
+    {
+      field: 'settlementHoldHours',
+      title: '验收后观察期',
+      hint: '满后可结算释放（单位：小时）',
+      input: (
+        <input
+          type="number"
+          min={0}
+          max={720}
+          value={settlementHoldHours}
+          onChange={(e) => setSettlementHoldHours(e.target.value)}
+          className={inputClass}
+        />
+      )
+    },
+    {
+      field: 'pendingHoldDays',
+      title: '待提现冻结天数',
+      hint: '待提现 → 可提现（单位：天）',
+      input: (
+        <input
+          type="number"
+          min={0}
+          max={90}
+          value={pendingHoldDays}
+          onChange={(e) => setPendingHoldDays(e.target.value)}
+          className={inputClass}
+        />
+      )
     }
-    if (!draftStart || !draftEnd) {
-      alert('请填写开始与结束时间');
-      return;
-    }
-    setBusyPeriod('create');
-    try {
-      await api('/api/admin/finance-settings/fee-periods', {
-        method: 'POST',
-        body: JSON.stringify({
-          startAt: fromLocalInput(draftStart),
-          endAt: fromLocalInput(draftEnd),
-          rateBps,
-          note: draftNote,
-          enabled: true
-        })
-      });
-      setDraftStart('');
-      setDraftEnd('');
-      setDraftRate('10');
-      setDraftNote('');
-      await reload();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '创建失败');
-    } finally {
-      setBusyPeriod('');
-    }
-  };
-
-  const togglePeriod = async (period: FeePeriodDto) => {
-    setBusyPeriod(period.id);
-    try {
-      await api(`/api/admin/finance-settings/fee-periods/${period.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ enabled: !period.enabled })
-      });
-      await reload();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '更新失败');
-    } finally {
-      setBusyPeriod('');
-    }
-  };
-
-  const removePeriod = async (period: FeePeriodDto) => {
-    if (!confirm(`确认删除时段 ${formatTime(period.startAt)} ~ ${formatTime(period.endAt)}？`)) {
-      return;
-    }
-    setBusyPeriod(period.id);
-    try {
-      await api(`/api/admin/finance-settings/fee-periods/${period.id}`, {
-        method: 'DELETE'
-      });
-      await reload();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败');
-    } finally {
-      setBusyPeriod('');
-    }
-  };
+  ];
 
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-black">费率与结算规则</h1>
         <p className="text-xs text-slate-500 mt-1">
-          服务费按支付成功时间匹配分时段费率（左闭右开、不可重叠），无匹配则用托底；验收/观察/待提现天数仅影响之后新写入的截止时间。
+          配置平台服务费率与验收、观察、待提现冻结规则；修改后仅影响之后新写入的截止时间。
         </p>
       </div>
 
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
-        <div className="text-sm font-black">全局规则</div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <label className="space-y-1">
-            <span className="block text-[11px] text-slate-500">托底服务费率 (%)</span>
-            <input
-              type="number"
-              step="0.01"
-              min={0}
-              max={100}
-              value={fallbackPercent}
-              onChange={(e) => setFallbackPercent(e.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-[11px] text-slate-500">用户验收天数</span>
-            <input
-              type="number"
-              min={1}
-              max={90}
-              value={acceptanceDays}
-              onChange={(e) => setAcceptanceDays(e.target.value)}
-              className={inputClass}
-            />
-            <span className="block text-[10px] text-slate-400">推送后未确认则自动验收</span>
-          </label>
-          <label className="space-y-1">
-            <span className="block text-[11px] text-slate-500">验收后观察期 (小时)</span>
-            <input
-              type="number"
-              min={0}
-              max={720}
-              value={settlementHoldHours}
-              onChange={(e) => setSettlementHoldHours(e.target.value)}
-              className={inputClass}
-            />
-            <span className="block text-[10px] text-slate-400">满后可结算释放</span>
-          </label>
-          <label className="space-y-1">
-            <span className="block text-[11px] text-slate-500">待提现冻结天数</span>
-            <input
-              type="number"
-              min={0}
-              max={90}
-              value={pendingHoldDays}
-              onChange={(e) => setPendingHoldDays(e.target.value)}
-              className={inputClass}
-            />
-            <span className="block text-[10px] text-slate-400">待提现 → 可提现</span>
-          </label>
-        </div>
-        <button
-          type="button"
-          disabled={savingSettings}
-          onClick={() => void saveSettings()}
-          className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
-        >
-          {savingSettings ? '保存中…' : '保存全局规则'}
-        </button>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
-        <div className="text-sm font-black">分时段服务费率</div>
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="space-y-1">
-            <span className="block text-[11px] text-slate-500">开始时间</span>
-            <input
-              type="datetime-local"
-              value={draftStart}
-              onChange={(e) => setDraftStart(e.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-[11px] text-slate-500">结束时间（不含）</span>
-            <input
-              type="datetime-local"
-              value={draftEnd}
-              onChange={(e) => setDraftEnd(e.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-[11px] text-slate-500">费率 (%)</span>
-            <input
-              type="number"
-              step="0.01"
-              min={0}
-              max={100}
-              value={draftRate}
-              onChange={(e) => setDraftRate(e.target.value)}
-              className={`${inputClass} w-24`}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-[11px] text-slate-500">备注</span>
-            <input
-              type="text"
-              value={draftNote}
-              onChange={(e) => setDraftNote(e.target.value)}
-              placeholder="可选"
-              className={`${inputClass} w-40`}
-            />
-          </label>
-          <button
-            type="button"
-            disabled={busyPeriod === 'create'}
-            onClick={() => void createPeriod()}
-            className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {modules.map((mod) => (
+          <div
+            key={mod.field}
+            className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3 flex flex-col"
           >
-            {busyPeriod === 'create' ? '创建中…' : '添加时段'}
-          </button>
-        </div>
-
-        <div className="rounded-xl border border-slate-100 overflow-hidden">
-          <table className="w-full text-xs">
-            <thead className="bg-slate-50 text-slate-500">
-              <tr>
-                <th className="text-left p-3">开始</th>
-                <th className="text-left p-3">结束（不含）</th>
-                <th className="text-right p-3">费率</th>
-                <th className="text-left p-3">备注</th>
-                <th className="text-left p-3">状态</th>
-                <th className="text-right p-3">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.periods || []).map((p) => (
-                <tr key={p.id} className="border-t border-slate-100">
-                  <td className="p-3 whitespace-nowrap">{formatTime(p.startAt)}</td>
-                  <td className="p-3 whitespace-nowrap">{formatTime(p.endAt)}</td>
-                  <td className="p-3 text-right font-bold">{bpsToPercentInput(p.rateBps)}%</td>
-                  <td className="p-3 text-slate-500">{p.note || '—'}</td>
-                  <td className="p-3">
-                    {p.enabled ? (
-                      <span className="text-emerald-700 font-bold">启用</span>
-                    ) : (
-                      <span className="text-slate-400">停用</span>
-                    )}
-                  </td>
-                  <td className="p-3 text-right space-x-2 whitespace-nowrap">
-                    <button
-                      type="button"
-                      disabled={busyPeriod === p.id}
-                      onClick={() => void togglePeriod(p)}
-                      className="font-bold text-slate-700 cursor-pointer disabled:opacity-60"
-                    >
-                      {p.enabled ? '停用' : '启用'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyPeriod === p.id}
-                      onClick={() => void removePeriod(p)}
-                      className="font-bold text-rose-600 cursor-pointer disabled:opacity-60"
-                    >
-                      删除
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!loading && (data?.periods || []).length === 0 && (
-            <p className="p-6 text-sm text-slate-400 text-center">暂无时段费率，将全程使用托底费率</p>
-          )}
-        </div>
+            <div>
+              <div className="text-sm font-black">{mod.title}</div>
+              <p className="text-[11px] text-slate-500 mt-1">{mod.hint}</p>
+            </div>
+            {mod.input}
+            <button
+              type="button"
+              disabled={savingField === mod.field}
+              onClick={() => void saveField(mod.field)}
+              className="self-start px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+            >
+              {savingField === mod.field ? '保存中…' : '保存'}
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );

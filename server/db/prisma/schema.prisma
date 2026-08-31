@@ -115,6 +115,30 @@ model AgentComment {
   content    String
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  reports    AgentCommentReport[]
+}
+
+/** 用户对智能体评论的举报工单 */
+model AgentCommentReport {
+  id             String       @id
+  commentId      String
+  comment        AgentComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  agentId        String
+  reporterUserId String?
+  reporterName   String       @default("")
+  reason         String
+  detail         String       @default("")
+  /** pending | dismissed | removed */
+  status         String       @default("pending")
+  reviewerId     String?
+  reviewNote     String       @default("")
+  reviewedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([status, createdAt])
+  @@index([commentId])
+  @@index([agentId])
 }
 
 model Expert {

@@ -494,6 +494,7 @@ export default function App() {
               onToggleFavorite={handleToggleFavoriteAgent}
               isLiked={likedAgentIds.includes(activeDetailAgent.id)}
               onToggleLike={handleToggleLikeAgent}
+              onToast={showToast}
             />
           )}
 

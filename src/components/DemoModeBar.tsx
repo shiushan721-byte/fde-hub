@@ -43,7 +43,10 @@ export const DemoModeBar: React.FC<DemoModeBarProps> = ({ onOpenAdmin }) => {
         </button>
       )}
       {error && source === 'api' && (
-        <span className="text-[10px] text-amber-300 max-w-[180px] truncate" title={error}>
+        <span
+          className="text-[10px] text-amber-300 max-w-[220px] truncate"
+          title={error}
+        >
           {error}
         </span>
       )}

@@ -26,11 +26,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     | null;
 
   if (!res.ok || !json?.ok) {
-    throw new ApiError(
-      json?.error?.message || `请求失败 (${res.status})`,
-      res.status,
-      json?.error?.code || 'REQUEST_FAILED'
-    );
+    let message = json?.error?.message || `请求失败 (${res.status})`;
+    if (!json?.error?.message && (res.status === 500 || res.status === 502 || res.status === 503)) {
+      message = '后台 API 未连接，请先运行 npm run dev:api 或 npm run dev:all';
+    }
+    throw new ApiError(message, res.status, json?.error?.code || 'REQUEST_FAILED');
   }
 
   return json.data as T;

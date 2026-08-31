@@ -1,15 +1,19 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ChevronLeft,
   Zap,
   ArrowRight,
   CheckCircle2,
   XCircle,
-  Send
+  Send,
+  Flag,
+  X
 } from 'lucide-react';
 import { HellomeAgentItem } from '../data/mockData';
 import { mockExperts } from '../data/mockData';
 import { getStandardVersionForAgent } from '../data/agentInstanceMockData';
+import { api } from '../lib/api';
+import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
 
 interface AgentDetailViewProps {
   agent: HellomeAgentItem;
@@ -22,6 +26,38 @@ interface AgentDetailViewProps {
   onToggleFavorite?: (agentId: string) => void;
   isLiked?: boolean;
   onToggleLike?: (agentId: string) => void;
+  onToast?: (message: string) => void;
+}
+
+type PublicComment = {
+  id: string;
+  userName: string;
+  userAvatar: string;
+  isAuthor: boolean;
+  content: string;
+  createdAt: string;
+  replies?: Array<{
+    id: string;
+    userName: string;
+    userAvatar: string;
+    isAuthor: boolean;
+    content: string;
+    createdAt: string;
+  }>;
+};
+
+const REPORT_REASONS = [
+  { value: 'spam', label: '垃圾广告' },
+  { value: 'abuse', label: '辱骂骚扰' },
+  { value: 'illegal', label: '违法违规' },
+  { value: 'false_info', label: '虚假信息' },
+  { value: 'other', label: '其他' }
+] as const;
+
+function formatCommentTime(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
@@ -30,13 +66,58 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   onOpenAuthorProfile,
   onConsultAuthor,
   onCustomizeFromAgent,
-  onUseAgent
+  onUseAgent,
+  onToast
 }) => {
   const [followed, setFollowed] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
+  const [comments, setComments] = useState<PublicComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(true);
+  const [reportTarget, setReportTarget] = useState<PublicComment | null>(null);
+  const [reportReason, setReportReason] = useState<(typeof REPORT_REASONS)[number]['value']>('spam');
+  const [reportDetail, setReportDetail] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
 
   const authorExpert = mockExperts.find((e) => e.id === agent.authorId) || mockExperts[0];
   const standardVersion = getStandardVersionForAgent(agent.id);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCommentsLoading(true);
+    void api<{ comments: PublicComment[] }>(`/api/public/agents/${agent.id}/comments`)
+      .then((res) => {
+        if (!cancelled) setComments(res.comments || []);
+      })
+      .catch(() => {
+        if (!cancelled) setComments([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCommentsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agent.id]);
+
+  const submitReport = async () => {
+    if (!reportTarget) return;
+    setReportBusy(true);
+    try {
+      await ensureMarketplaceSession();
+      await api(`/api/public/agents/${agent.id}/comments/${reportTarget.id}/report`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reportReason, detail: reportDetail.trim() })
+      });
+      onToast?.('举报已提交，处理进展将发送至站内信');
+      setReportTarget(null);
+      setReportDetail('');
+      setReportReason('spam');
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : '举报失败，请先登录后重试');
+    } finally {
+      setReportBusy(false);
+    }
+  };
 
   const permissionRows: Array<{ label: string; allowed: boolean }> = [
     { label: '生成内容可用权', allowed: true },
@@ -45,6 +126,43 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
     { label: '平台内分享与收藏', allowed: true },
     { label: '二次分发源码', allowed: false }
   ];
+
+  const renderComment = (cmt: PublicComment, nested = false) => (
+    <div
+      key={cmt.id}
+      className={`rounded-xl border border-slate-200 bg-white p-3 space-y-2 ${nested ? 'ml-8 mt-2' : ''}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <img
+            src={cmt.userAvatar || authorExpert.avatar}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0"
+          />
+          <div className="min-w-0">
+            <div className="text-[12px] font-semibold text-slate-900 truncate">{cmt.userName}</div>
+            <div className="text-[10px] text-slate-400">{formatCommentTime(cmt.createdAt)}</div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setReportTarget(cmt);
+            setReportReason('spam');
+            setReportDetail('');
+          }}
+          className="shrink-0 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-600 cursor-pointer px-2 py-1 rounded-lg hover:bg-rose-50"
+          title="举报评论"
+        >
+          <Flag size={11} />
+          举报
+        </button>
+      </div>
+      <p className="text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap">{cmt.content}</p>
+      {cmt.replies?.map((reply) => renderComment(reply, true))}
+    </div>
+  );
 
   return (
     <div id="agent-detail-view" className="min-h-full bg-white">
@@ -59,7 +177,6 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
         </button>
 
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_268px] gap-8 lg:gap-10 items-start">
-          {/* 左栏 */}
           <div className="min-w-0 space-y-5">
             <header className="space-y-1.5">
               <h1 className="text-[26px] sm:text-[30px] font-bold text-slate-900 tracking-tight leading-snug">
@@ -83,11 +200,20 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               {agent.desc}
             </p>
 
-            <section className="pt-2 border-t border-slate-100">
-              <h3 className="text-[14px] font-semibold text-slate-900 mb-3">
-                共 {agent.commentsCount} 条评论
+            <section className="pt-2 border-t border-slate-100 space-y-4">
+              <h3 className="text-[14px] font-semibold text-slate-900">
+                共 {comments.length || agent.commentsCount} 条评论
               </h3>
-              <div className="flex items-center gap-3">
+
+              {commentsLoading && <p className="text-xs text-slate-400">评论加载中…</p>}
+              {!commentsLoading && comments.length === 0 && (
+                <p className="text-xs text-slate-400">暂无评论，欢迎率先发表看法。</p>
+              )}
+              <div className="space-y-3">
+                {comments.map((cmt) => renderComment(cmt))}
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
                 <img
                   src={authorExpert.avatar}
                   alt=""
@@ -120,9 +246,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
             </section>
           </div>
 
-          {/* 右栏 */}
           <aside className="lg:sticky lg:top-20 space-y-0 text-[13px]">
-            {/* 作者 */}
             <div className="flex items-start gap-3 pb-4">
               <button
                 type="button"
@@ -166,11 +290,10 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               </button>
             </div>
 
-            {/* 互动数 */}
             <div className="grid grid-cols-4 gap-1 py-3 border-y border-slate-100 text-center">
               {[
                 { label: '投喂', value: agent.usageCount || '0' },
-                { label: '评论', value: agent.commentsCount },
+                { label: '评论', value: comments.length || agent.commentsCount },
                 { label: '收藏', value: agent.favoritesCount },
                 { label: '分享', value: '0' }
               ].map((item) => (
@@ -183,7 +306,6 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               ))}
             </div>
 
-            {/* 操作 */}
             <div className="flex items-center gap-2 py-4">
               {onUseAgent && (
                 <button
@@ -211,7 +333,6 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               )}
             </div>
 
-            {/* 时间 */}
             <dl className="space-y-2.5 py-3 border-t border-slate-100">
               <div className="flex justify-between gap-3">
                 <dt className="text-slate-400">最近更新</dt>
@@ -223,7 +344,6 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               </div>
             </dl>
 
-            {/* 基本信息 */}
             <div className="py-3 border-t border-slate-100 space-y-2.5">
               <h4 className="text-[12px] font-semibold text-slate-900 mb-1">基本信息</h4>
               <dl className="space-y-2.5">
@@ -244,7 +364,6 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               </dl>
             </div>
 
-            {/* 许可 */}
             <div className="py-3 border-t border-slate-100 space-y-2.5">
               <h4 className="text-[12px] font-semibold text-slate-900 mb-1">许可范围</h4>
               <ul className="space-y-2">
@@ -263,6 +382,77 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
           </aside>
         </div>
       </div>
+
+      {reportTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => !reportBusy && setReportTarget(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-sm font-black text-slate-900">举报评论</h3>
+              <button
+                type="button"
+                onClick={() => setReportTarget(null)}
+                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 line-clamp-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
+              {reportTarget.content}
+            </p>
+            <label className="block space-y-1">
+              <span className="text-[11px] text-slate-500">举报原因</span>
+              <select
+                value={reportReason}
+                onChange={(e) =>
+                  setReportReason(e.target.value as (typeof REPORT_REASONS)[number]['value'])
+                }
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+              >
+                {REPORT_REASONS.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-[11px] text-slate-500">补充说明（选填）</span>
+              <textarea
+                value={reportDetail}
+                onChange={(e) => setReportDetail(e.target.value)}
+                rows={3}
+                maxLength={500}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white resize-none"
+                placeholder="请简要说明举报理由"
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={reportBusy}
+                onClick={() => setReportTarget(null)}
+                className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={reportBusy}
+                onClick={() => void submitReport()}
+                className="px-3 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                {reportBusy ? '提交中…' : '提交举报'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

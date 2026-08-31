@@ -72,6 +72,7 @@ function formatRelativeTime(iso: string) {
 }
 
 function mapApiTypeToKind(type: string): UserNotificationItem['kind'] {
+  if (type.includes('comment_report')) return 'submitted';
   if (
     type.includes('review') ||
     type.includes('delivery_ready') ||
