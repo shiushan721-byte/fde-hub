@@ -193,13 +193,24 @@ adminRouter.patch('/settings/:key', async (req, res) => {
   return ok(res, setting);
 });
 
+function adminAgentStatusWhere(status?: string) {
+  if (!status) return {};
+  if (status === 'deleted') {
+    return { creatorDeletedAt: { not: null } };
+  }
+  return {
+    status,
+    creatorDeletedAt: null
+  };
+}
+
 adminRouter.get('/agents', async (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const authorId = typeof req.query.authorId === 'string' ? req.query.authorId.trim() : '';
   const agents = await prisma.agent.findMany({
     where: {
-      ...(status ? { status } : {}),
+      ...adminAgentStatusWhere(status),
       ...(authorId ? { authorId } : {}),
       ...(q
         ? {
@@ -461,6 +472,9 @@ adminRouter.post('/agents/:id/publish', async (req, res) => {
 
   const current = await prisma.agent.findUnique({ where: { id: req.params.id } });
   if (!current) return fail(res, '智能体不存在', 404, 'NOT_FOUND');
+  if (current.creatorDeletedAt) {
+    return fail(res, '该智能体已被创作者删除，无法重新上架');
+  }
   const agent = await prisma.agent.update({
     where: { id: req.params.id },
     data: {
@@ -541,6 +555,11 @@ adminRouter.post('/agents/:id/reject', async (req, res) => {
 });
 
 adminRouter.post('/agents/:id/offline', async (req, res) => {
+  const current = await prisma.agent.findUnique({ where: { id: req.params.id } });
+  if (!current) return fail(res, '智能体不存在', 404, 'NOT_FOUND');
+  if (current.creatorDeletedAt) {
+    return ok(res, current);
+  }
   const agent = await prisma.agent.update({
     where: { id: req.params.id },
     data: { status: 'offline', showOnHome: false }
@@ -565,7 +584,7 @@ adminRouter.get('/experts', async (_req, res) => {
     expertIds.length
       ? prisma.agent.groupBy({
           by: ['authorId'],
-          where: { authorId: { in: expertIds }, status: 'published' },
+          where: { authorId: { in: expertIds }, status: 'published', creatorDeletedAt: null },
           _count: { _all: true }
         })
       : Promise.resolve([]),

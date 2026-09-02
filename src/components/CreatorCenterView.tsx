@@ -39,7 +39,8 @@ import {
   Crown,
   ArrowLeft,
   Plus,
-  Wallet
+  Wallet,
+  X
 } from 'lucide-react';
 import {
   CreatorTierLevel,
@@ -65,7 +66,7 @@ import { mockCustomerAgentInstances } from '../data/agentInstanceMockData';
 import { CustomerAgentInstance } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
 import { AccountView } from './AccountView';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 
 function platformSupportLabel(support: CreatorAgentItem['platformSupport']) {
   switch (support) {
@@ -77,6 +78,20 @@ function platformSupportLabel(support: CreatorAgentItem['platformSupport']) {
     default:
       return '适配macOS和Windows';
   }
+}
+
+function agentDeletePrompt(agent: CreatorAgentItem) {
+  const reviewing = agent.status === 'under_review';
+  if (agent.status === 'published') {
+    return '删除后，该智能体将不再展示在智能体市场且无法恢复。曾经使用过该智能体的用户，仍可继续使用。';
+  }
+  if (reviewing) {
+    return '当前智能体正在审核中，删除后智能体及内容将无法恢复，请谨慎操作。';
+  }
+  if (agent.status === 'offline') {
+    return '该智能体曾经在智能体市场公开展示，删除后无法恢复。曾经使用过该智能体的用户，仍可继续使用。';
+  }
+  return '删除后，该智能体及内容将无法恢复，请谨慎操作。';
 }
 
 function platformSupportBadgeClass(support: CreatorAgentItem['platformSupport']) {
@@ -214,6 +229,8 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
   const [agentsList, setAgentsList] = useState<CreatorAgentItem[]>(() => mockCreatorAgentsList);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [agentForSkillReplacement, setAgentForSkillReplacement] = useState<CreatorAgentItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CreatorAgentItem | null>(null);
+  const [deletingAgent, setDeletingAgent] = useState(false);
   const [instanceForSkillReplacement, setInstanceForSkillReplacement] =
     useState<CustomerAgentInstance | null>(null);
 
@@ -359,6 +376,26 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     setAgentsList((prev) =>
       prev.map((a) => (a.id === agentId ? { ...a, status: targetStatus, updatedAt: '刚刚' } : a))
     );
+  };
+
+  const confirmDeleteAgent = async () => {
+    if (!deleteTarget) return;
+    setDeletingAgent(true);
+    try {
+      await api(`/api/me/agents/${deleteTarget.id}/delete`, { method: 'POST' });
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : undefined;
+      const code = err instanceof ApiError ? err.code : '';
+      if (status !== 401 && status !== 403 && status !== 404 && code !== 'NETWORK_ERROR') {
+        alert(err instanceof Error ? err.message : '删除失败');
+        setDeletingAgent(false);
+        return;
+      }
+    }
+    const deletedId = deleteTarget.id;
+    setAgentsList((prev) => prev.filter((a) => a.id !== deletedId));
+    setDeleteTarget(null);
+    setDeletingAgent(false);
   };
 
   return (
@@ -890,6 +927,13 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                     </button>
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(agent)}
+                  className="w-full py-1.5 text-[11px] font-bold text-rose-600 hover:text-rose-700 cursor-pointer"
+                >
+                  删除智能体
+                </button>
               </div>
             ))}
           </div>
@@ -1717,6 +1761,50 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
         }}
       />
 
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+          onClick={() => !deletingAgent && setDeleteTarget(null)}
+        >
+          <div
+            className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 pt-5 pb-2 flex items-start justify-between gap-3">
+              <h3 className="text-base font-bold text-slate-900">确认删除？</h3>
+              <button
+                type="button"
+                disabled={deletingAgent}
+                onClick={() => setDeleteTarget(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer disabled:opacity-50"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="px-6 pb-6 text-sm text-slate-600 leading-relaxed">
+              {agentDeletePrompt(deleteTarget)}
+            </p>
+            <div className="px-6 pb-5 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={deletingAgent}
+                onClick={() => setDeleteTarget(null)}
+                className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={deletingAgent}
+                onClick={() => void confirmDeleteAgent()}
+                className="px-4 py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium cursor-pointer disabled:opacity-50"
+              >
+                {deletingAgent ? '删除中…' : '确定删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

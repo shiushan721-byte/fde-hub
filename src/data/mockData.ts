@@ -19,6 +19,7 @@ export interface HellomeAgentItem {
   likesCount: string | number;
   favoritesCount: string | number;
   commentsCount: string | number;
+  sharesCount?: string | number;
   usageCount?: string;
   rating?: number;
 }

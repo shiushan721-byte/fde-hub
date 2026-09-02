@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { ensureSampleCustomOrders } from './seedCustomOrders';
 import { ensureFinanceSynced } from './seedFinance';
-import { ensureSampleInReviewAgents } from './seedInReviewAgents';
+import { ensureSampleInReviewAgents, ensureSampleCreatorDeletedAgents } from './seedInReviewAgents';
 import { ensureExpertDomainTagsAligned } from './seedExpertTagUsage';
 import { ensureSampleCommentReports } from './seedCommentReports';
 import { ensureExpertTags } from '../services/expertTags';
@@ -35,6 +35,7 @@ export async function seedDatabase(force = false) {
     await ensureFinanceSynced();
     await ensureExpertTags();
     await ensureSampleInReviewAgents();
+    await ensureSampleCreatorDeletedAgents();
     await ensureExpertDomainTagsAligned();
     await ensureSampleCommentReports();
     return { seeded: false, agents: existing };
@@ -326,6 +327,7 @@ export async function seedDatabase(force = false) {
   await ensureFinanceSynced();
   await ensureExpertTags();
   await ensureSampleInReviewAgents();
+  await ensureSampleCreatorDeletedAgents();
   await ensureExpertDomainTagsAligned();
   await ensureSampleCommentReports();
 
@@ -596,6 +598,7 @@ export async function ensureExpertApplicationSeed() {
     await ensureExpertCasesSynced();
     await ensureFinanceSynced();
     await ensureSampleInReviewAgents();
+    await ensureSampleCreatorDeletedAgents();
     await ensureExpertDomainTagsAligned();
     await ensureSampleCommentReports();
   } catch (error) {

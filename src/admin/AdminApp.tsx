@@ -156,6 +156,7 @@ const statusLabel: Record<string, string> = {
   in_review: '审核中',
   published: '已发布',
   offline: '已下架',
+  deleted: '创作者已删除',
   new: '新线索',
   contacted: '已联系',
   quoted: '已报价',
@@ -177,6 +178,11 @@ const statusLabel: Record<string, string> = {
   published_to_customer: '已推送客户',
   validation_failed: '校验失败'
 };
+
+function agentAdminStatusLabel(agent: { status: string; creatorDeletedAt?: string | null }) {
+  if (agent.creatorDeletedAt) return '创作者已删除';
+  return statusLabel[agent.status] || agent.status;
+}
 
 export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const [me, setMe] = useState<AdminUser | null>(null);
@@ -774,6 +780,7 @@ const AgentsPage = ({
   onClearAuthorFilter?: () => void;
 }) => {
   const [q, setQ] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [commentsTarget, setCommentsTarget] = useState<{ id: string; title: string } | null>(null);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState('');
@@ -814,7 +821,8 @@ const AgentsPage = ({
 
   const query = new URLSearchParams({
     ...(q.trim() ? { q: q.trim() } : {}),
-    ...(authorFilter?.authorId ? { authorId: authorFilter.authorId } : {})
+    ...(authorFilter?.authorId ? { authorId: authorFilter.authorId } : {}),
+    ...(statusFilter ? { status: statusFilter } : {})
   }).toString();
   const { data, error, loading, reload } = useAdminQuery<Array<{
     id: string;
@@ -825,6 +833,7 @@ const AgentsPage = ({
     authorName: string | null;
     authorExpertNo?: string | null;
     status: string;
+    creatorDeletedAt?: string | null;
     version?: string;
     coverImage?: string | null;
     commentsCount?: number | string;
@@ -840,7 +849,7 @@ const AgentsPage = ({
     showOnHome: boolean;
     featured: boolean;
     createdAt: string;
-  }>>(`/api/admin/agents${query ? `?${query}` : ''}`, `${q}|${authorFilter?.authorId || ''}`);
+  }>>(`/api/admin/agents${query ? `?${query}` : ''}`, `${q}|${authorFilter?.authorId || ''}|${statusFilter}`);
 
   const total = data?.length || 0;
 
@@ -951,12 +960,25 @@ const AgentsPage = ({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-black">通用智能体</h1>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="搜索 ID / 标题 / 作者 / 分类"
-          className="px-3 py-2 rounded-xl border border-slate-200 text-xs w-64 bg-white"
-        />
+        <div className="flex items-center gap-2">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+          >
+            <option value="">全部状态</option>
+            <option value="published">已发布</option>
+            <option value="in_review">审核中</option>
+            <option value="offline">已下架</option>
+            <option value="deleted">创作者已删除</option>
+          </select>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="搜索 ID / 标题 / 作者 / 分类"
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs w-64 bg-white"
+          />
+        </div>
       </div>
       {authorFilter && (
         <div className="flex items-center gap-2 text-xs">
@@ -1021,7 +1043,9 @@ const AgentsPage = ({
                   </button>
                 </td>
                 <td className="p-3 whitespace-nowrap">{agent.category || '—'}</td>
-                <td className="p-3 whitespace-nowrap">{statusLabel[agent.status] || agent.status}</td>
+                <td className="p-3 whitespace-nowrap">
+                  {agentAdminStatusLabel(agent)}
+                </td>
                 <td className="p-3 whitespace-nowrap">
                   <div className="space-y-1 text-[11px] text-slate-600">
                     <button
@@ -1066,7 +1090,9 @@ const AgentsPage = ({
                   {agent.createdAt ? new Date(agent.createdAt).toLocaleString('zh-CN') : '—'}
                 </td>
                 <td className="p-3 text-right space-x-2 whitespace-nowrap">
-                  {agent.status === 'offline' ? (
+                  {agent.creatorDeletedAt ? (
+                    <span className="text-slate-400">已删除</span>
+                  ) : agent.status === 'offline' ? (
                     <span className="text-slate-400">已下架</span>
                   ) : agent.status === 'in_review' ? (
                     <button
@@ -1728,6 +1754,7 @@ const UniversalAgentsReviewPanel = () => {
     authorId: string | null;
     authorExpertNo?: string | null;
     status: string;
+    creatorDeletedAt?: string | null;
     solutionPayload?: string;
   }>>(`/api/admin/agents?status=${filter}`, filter);
   const { data: homeData } = useAdminQuery<{
@@ -1803,6 +1830,7 @@ const UniversalAgentsReviewPanel = () => {
           <option value="in_review">待审核</option>
           <option value="published">已通过</option>
           <option value="offline">已下架/驳回</option>
+          <option value="deleted">创作者已删除</option>
           <option value="">全部</option>
         </select>
       </div>
@@ -1834,7 +1862,7 @@ const UniversalAgentsReviewPanel = () => {
                 </div>
               </div>
               <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                {statusLabel[agent.status] || agent.status}
+                {agentAdminStatusLabel(agent)}
               </span>
             </div>
             <p className="text-xs text-slate-600 whitespace-pre-wrap">

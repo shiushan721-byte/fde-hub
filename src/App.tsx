@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Sidebar, MainNavRoute } from './components/Sidebar';
 import { TopHeader } from './components/TopHeader';
 import { HellomeHomeView } from './components/HellomeHomeView';
@@ -24,6 +24,12 @@ import { AdminApp } from './admin/AdminApp';
 import { useCatalog } from './lib/catalog';
 import { api } from './lib/api';
 import { ensureMarketplaceSession } from './lib/marketplaceAuth';
+import {
+  agentShareHash,
+  clearAgentShareHash,
+  parseAgentShareHash,
+  toHellomeAgentItem
+} from './lib/agentShare';
 
 import {
   mockCaseStudies,
@@ -82,6 +88,8 @@ export default function App() {
   // Agent detail page（页内打开，非弹窗）
   const [activeDetailAgent, setActiveDetailAgent] = useState<HellomeAgentItem | null>(null);
   const [agentDetailBackRoute, setAgentDetailBackRoute] = useState<MainNavRoute>('hellome-home');
+  const detailAgentIdRef = useRef<string | null>(null);
+  const ignoreAgentHashRef = useRef(false);
 
   // Modals for becoming expert, recharge, onboarding, and identity debug panel
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
@@ -110,30 +118,95 @@ export default function App() {
   // Active Author object
   const activeAuthor = catalog.experts.find((e) => e.id === activeAuthorId) || catalog.experts[0];
 
+  const leaveAgentDetailRoute = () => {
+    detailAgentIdRef.current = null;
+    setActiveDetailAgent(null);
+    clearAgentShareHash();
+  };
+
   // Navigate to Author Profile Page (triggered when clicking author name)
   const handleOpenAuthorProfile = (authorId: string) => {
+    leaveAgentDetailRoute();
     setActiveAuthorId(authorId);
     setCurrentRoute('author-profile');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Open Agent Detail page in main content
-  const handleOpenAgentDetail = (agent: HellomeAgentItem) => {
+  const handleOpenAgentDetail = (agent: HellomeAgentItem, shareToken = '') => {
     const from =
       currentRoute === 'agent-detail' || currentRoute === 'author-profile'
         ? agentDetailBackRoute
         : (currentRoute as MainNavRoute);
     setAgentDetailBackRoute(from);
+    detailAgentIdRef.current = agent.id;
     setActiveDetailAgent(agent);
     setCurrentRoute('agent-detail');
+    const existing = parseAgentShareHash(window.location.hash);
+    const share = shareToken || (existing?.id === agent.id ? existing.share : '');
+    const nextHash = agentShareHash(agent.id, share);
+    if (window.location.hash.replace(/^#/, '') !== nextHash) {
+      ignoreAgentHashRef.current = true;
+      window.location.hash = nextHash;
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleBackFromAgentDetail = () => {
     setCurrentRoute(agentDetailBackRoute);
-    setActiveDetailAgent(null);
+    leaveAgentDetailRoute();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const openFromHash = async () => {
+      if (ignoreAgentHashRef.current) {
+        ignoreAgentHashRef.current = false;
+        return;
+      }
+      const parsed = parseAgentShareHash(window.location.hash);
+      if (!parsed) {
+        if (detailAgentIdRef.current) {
+          detailAgentIdRef.current = null;
+          setActiveDetailAgent(null);
+          setCurrentRoute(agentDetailBackRoute);
+        }
+        return;
+      }
+      if (detailAgentIdRef.current === parsed.id) return;
+
+      const qs = parsed.share ? `?share=${encodeURIComponent(parsed.share)}` : '';
+      try {
+        const data = await api<Record<string, unknown>>(
+          `/api/public/agents/${encodeURIComponent(parsed.id)}${qs}`
+        );
+        if (cancelled) return;
+        handleOpenAgentDetail(toHellomeAgentItem(data), parsed.share);
+      } catch {
+        const local = catalog.homeAgents.find((item) => item.id === parsed.id);
+        if (cancelled) return;
+        if (local) {
+          handleOpenAgentDetail(local, parsed.share);
+        } else {
+          showToast('分享链接无效或智能体已下架');
+        }
+      }
+    };
+
+    const onHashChange = () => {
+      void openFromHash();
+    };
+    void openFromHash();
+    window.addEventListener('hashchange', onHashChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('hashchange', onHashChange);
+    };
+    // catalog.homeAgents: retry local fallback after catalog loads
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalog.homeAgents]);
 
   // Toggle Like state on Agent
   const handleToggleLikeAgent = (agentId: string) => {
@@ -145,6 +218,7 @@ export default function App() {
   const handleBackToHome = () => {
     setCurrentRoute('hellome-home');
     setActiveAuthorId(null);
+    leaveAgentDetailRoute();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -321,13 +395,13 @@ export default function App() {
             setCreatorCenterTab('account');
             setCurrentRoute('creator-center');
             setActiveAuthorId(null);
-            setActiveDetailAgent(null);
+            leaveAgentDetailRoute();
             window.scrollTo({ top: 0, behavior: 'smooth' });
             return;
           }
           setCurrentRoute(route);
           setActiveAuthorId(null);
-          setActiveDetailAgent(null);
+          leaveAgentDetailRoute();
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         collapsed={sidebarCollapsed}
@@ -357,12 +431,12 @@ export default function App() {
               setCreatorCenterTab('account');
               setCurrentRoute('creator-center');
               setActiveAuthorId(null);
-              setActiveDetailAgent(null);
+              leaveAgentDetailRoute();
               return;
             }
             setCurrentRoute(route);
             setActiveAuthorId(null);
-            setActiveDetailAgent(null);
+            leaveAgentDetailRoute();
             if (route !== 'creator-center') setCreatorCenterBackRoute(null);
           }}
           activeAuthorName={activeAuthor?.name}
@@ -382,7 +456,7 @@ export default function App() {
             setFavoritesInitialTab(tab);
             setCurrentRoute('favorites');
             setActiveAuthorId(null);
-            setActiveDetailAgent(null);
+            leaveAgentDetailRoute();
           }}
           onOpenBecomeCreator={() => setIsCreatorOnboardingOpen(true)}
           userRole={userRole}

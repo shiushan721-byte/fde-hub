@@ -14,6 +14,13 @@ import { mockExperts } from '../data/mockData';
 import { getStandardVersionForAgent } from '../data/agentInstanceMockData';
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
+import { useCatalog } from '../lib/catalog';
+import {
+  AgentShareLinkPayload,
+  buildAgentShareUrl,
+  parseAgentShareHash
+} from '../lib/agentShare';
+import { AgentShareModal } from './AgentShareModal';
 
 interface AgentDetailViewProps {
   agent: HellomeAgentItem;
@@ -77,14 +84,60 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const [reportReason, setReportReason] = useState<(typeof REPORT_REASONS)[number]['value']>('spam');
   const [reportDetail, setReportDetail] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
+  const [sharePosterOpen, setSharePosterOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
+  const [shareBusy, setShareBusy] = useState(false);
+  const catalog = useCatalog();
 
-  const authorExpert = mockExperts.find((e) => e.id === agent.authorId) || mockExperts[0];
+  const authorExpert =
+    catalog.experts.find((e) => e.id === agent.authorId) ||
+    mockExperts.find((e) => e.id === agent.authorId) ||
+    catalog.experts[0] ||
+    mockExperts[0];
   const standardVersion = getStandardVersionForAgent(agent.id);
+  const shareQuery = parseAgentShareHash(typeof window === 'undefined' ? '' : window.location.hash);
+  const currentShareToken = shareQuery?.id === agent.id ? shareQuery.share : '';
+
+  useEffect(() => {
+    setShareUrl('');
+  }, [agent.id]);
+
+  const resolveShareUrl = async () => {
+    if (shareUrl) return shareUrl;
+    try {
+      const res = await api<AgentShareLinkPayload>(`/api/public/agents/${agent.id}/share-link`, {
+        method: 'POST',
+        body: currentShareToken ? JSON.stringify({ share: currentShareToken }) : JSON.stringify({})
+      });
+      const url = buildAgentShareUrl(res.path);
+      setShareUrl(url);
+      return url;
+    } catch {
+      const fallback = buildAgentShareUrl(
+        currentShareToken
+          ? `/#/agent/${encodeURIComponent(agent.id)}?share=${encodeURIComponent(currentShareToken)}`
+          : `/#/agent/${encodeURIComponent(agent.id)}`
+      );
+      setShareUrl(fallback);
+      return fallback;
+    }
+  };
+
+  const openSharePoster = async () => {
+    setShareBusy(true);
+    try {
+      await resolveShareUrl();
+      setSharePosterOpen(true);
+    } finally {
+      setShareBusy(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
     setCommentsLoading(true);
-    void api<{ comments: PublicComment[] }>(`/api/public/agents/${agent.id}/comments`)
+    const qs = currentShareToken ? `?share=${encodeURIComponent(currentShareToken)}` : '';
+    void api<{ comments: PublicComment[] }>(`/api/public/agents/${agent.id}/comments${qs}`)
       .then((res) => {
         if (!cancelled) setComments(res.comments || []);
       })
@@ -97,7 +150,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [agent.id]);
+  }, [agent.id, currentShareToken]);
 
   const submitReport = async () => {
     if (!reportTarget) return;
@@ -294,8 +347,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               {[
                 { label: '投喂', value: agent.usageCount || '0' },
                 { label: '评论', value: comments.length || agent.commentsCount },
-                { label: '收藏', value: agent.favoritesCount },
-                { label: '分享', value: '0' }
+                { label: '收藏', value: agent.favoritesCount }
               ].map((item) => (
                 <div key={item.label}>
                   <div className="text-[15px] font-semibold text-slate-900 tabular-nums leading-none">
@@ -304,6 +356,17 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                   <div className="text-[11px] text-slate-400 mt-1.5">{item.label}</div>
                 </div>
               ))}
+              <button
+                type="button"
+                disabled={shareBusy}
+                onClick={() => void openSharePoster()}
+                className="w-full cursor-pointer rounded-lg py-0.5 hover:bg-slate-50 disabled:opacity-60"
+              >
+                <div className="text-[15px] font-semibold text-slate-900 tabular-nums leading-none">
+                  {agent.sharesCount || '0'}
+                </div>
+                <div className="text-[11px] text-blue-600 mt-1.5 font-medium">分享</div>
+              </button>
             </div>
 
             <div className="flex items-center gap-2 py-4">
@@ -452,6 +515,17 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {sharePosterOpen && shareUrl && (
+        <AgentShareModal
+          agent={agent}
+          shareUrl={shareUrl}
+          creatorName={agent.authorName || authorExpert.name}
+          creatorAvatar={authorExpert.avatar}
+          onClose={() => setSharePosterOpen(false)}
+          onCopied={() => onToast?.('链接已复制，发给别人即可打开')}
+          onToast={onToast}
+        />
       )}
     </div>
   );

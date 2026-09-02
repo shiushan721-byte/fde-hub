@@ -181,3 +181,141 @@ export async function ensureSampleInReviewAgents() {
   if (rows.length === 0) return;
   await prisma.agent.createMany({ data: rows });
 }
+
+type DeletedAgentSeed = Omit<ReviewAgentSeed, 'status'> & { deletedDaysAgo: number };
+
+const SAMPLE_DELETED_AGENTS: DeletedAgentSeed[] = [
+  {
+    id: 'agent_deleted_travel_itinerary',
+    title: '周末短途行程规划师',
+    desc: '根据预算、同行人数与偏好生成 1–3 日行程，含交通、餐饮与避坑提示。创作者已从市场撤回并不再维护。',
+    category: '生活服务',
+    coverImage:
+      'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=600&auto=format&fit=crop&q=80',
+    gradient: 'from-sky-950 via-cyan-900 to-slate-900',
+    tagColor: 'sky',
+    authorId: 'fde-linran',
+    authorName: '林然',
+    price: 19,
+    skillFileName: 'weekend-trip-planner-skill.json',
+    version: 'v1.2.0',
+    sortOrder: 911,
+    deletedDaysAgo: 5
+  },
+  {
+    id: 'agent_deleted_resume_polish',
+    title: '简历亮点改写助手',
+    desc: '针对目标岗位改写经历描述与项目成果表述。创作者选择删除后已从市场下架。',
+    category: '办公协同',
+    coverImage:
+      'https://images.unsplash.com/photo-1586281380349-632531db7ed4?w=600&auto=format&fit=crop&q=80',
+    gradient: 'from-amber-950 via-orange-900 to-slate-900',
+    tagColor: 'amber',
+    badge: '已下架',
+    authorId: 'fde-maya',
+    authorName: '苏晴 (Maya)',
+    price: 9,
+    skillFileName: 'resume-polish-skill.json',
+    version: 'v1.0.3',
+    sortOrder: 912,
+    deletedDaysAgo: 12
+  },
+  {
+    id: 'agent_deleted_shop_script',
+    title: '直播话术节奏教练',
+    desc: '按品类生成开场、促单与答疑话术节奏表。创作者删除后市场不可见，后台仍保留记录。',
+    category: '电商零售',
+    coverImage:
+      'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=600&auto=format&fit=crop&q=80',
+    gradient: 'from-rose-950 via-red-900 to-slate-900',
+    tagColor: 'rose',
+    authorId: 'fde-zhouchen',
+    authorName: '周晨',
+    price: 39,
+    skillFileName: 'live-script-coach-skill.json',
+    version: 'v0.8.0',
+    sortOrder: 913,
+    deletedDaysAgo: 2
+  }
+];
+
+/** 为后台「创作者已删除」筛选补齐样例（幂等） */
+export async function ensureSampleCreatorDeletedAgents() {
+  const ids = SAMPLE_DELETED_AGENTS.map((a) => a.id);
+  const existing = await prisma.agent.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, creatorDeletedAt: true }
+  });
+  const existingById = new Map(existing.map((a) => [a.id, a]));
+
+  const expertIds = new Set(
+    (
+      await prisma.expert.findMany({
+        where: { id: { in: SAMPLE_DELETED_AGENTS.map((a) => a.authorId) } },
+        select: { id: true }
+      })
+    ).map((e) => e.id)
+  );
+
+  const toCreate = SAMPLE_DELETED_AGENTS.filter(
+    (seed) => expertIds.has(seed.authorId) && !existingById.has(seed.id)
+  );
+  const toMark = SAMPLE_DELETED_AGENTS.filter((seed) => {
+    const row = existingById.get(seed.id);
+    return Boolean(row && !row.creatorDeletedAt);
+  });
+
+  if (toCreate.length > 0) {
+    await prisma.agent.createMany({
+      data: toCreate.map((seed) => {
+        const deletedAt = new Date(Date.now() - seed.deletedDaysAgo * 24 * 60 * 60 * 1000);
+        return {
+          id: seed.id,
+          kind: 'catalog',
+          title: seed.title,
+          desc: seed.desc,
+          category: seed.category,
+          coverImage: seed.coverImage,
+          gradient: seed.gradient,
+          tagColor: seed.tagColor,
+          badge: seed.badge ?? null,
+          canFDECustom: true,
+          authorId: seed.authorId,
+          authorName: seed.authorName,
+          price: seed.price,
+          pricingPlans: toJson({
+            monthlyPrice: seed.price,
+            annualPrice: Math.max(seed.price * 10, 0),
+            buyoutPrice: Math.max(seed.price * 20, 0),
+            preferredPlan: 'monthly'
+          }),
+          likesCount: '36',
+          favoritesCount: '18',
+          commentsCount: '2',
+          sharesCount: '4',
+          usageCount: '120',
+          rating: 4.6,
+          status: 'offline',
+          showOnHome: false,
+          featured: false,
+          sortOrder: seed.sortOrder,
+          creatorDeletedAt: deletedAt,
+          createdAt: new Date(deletedAt.getTime() - 14 * 24 * 60 * 60 * 1000),
+          solutionPayload: buildSolutionPayload({ ...seed, status: 'offline' })
+        };
+      })
+    });
+  }
+
+  for (const seed of toMark) {
+    const deletedAt = new Date(Date.now() - seed.deletedDaysAgo * 24 * 60 * 60 * 1000);
+    await prisma.agent.update({
+      where: { id: seed.id },
+      data: {
+        status: 'offline',
+        showOnHome: false,
+        creatorDeletedAt: deletedAt
+      }
+    });
+  }
+}

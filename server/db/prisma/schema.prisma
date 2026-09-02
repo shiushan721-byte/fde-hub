@@ -92,6 +92,8 @@ model Agent {
   usageCount      String?
   rating          Float?
   status          String   @default("published")
+  /** 创作者删除时间：软删，市场立即不可见，后台仍保留 */
+  creatorDeletedAt DateTime?
   showOnHome      Boolean  @default(true)
   featured        Boolean  @default(false)
   sortOrder       Int      @default(0)
@@ -99,6 +101,18 @@ model Agent {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   comments        AgentComment[]
+  shareLinks      AgentShareLink[]
+}
+
+/** 分享链接：私有/已下架智能体凭 token 仍可访问 */
+model AgentShareLink {
+  id        String   @id
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([agentId])
 }
 
 /** 智能体评论（含作者回复：parentId 指向父评论） */

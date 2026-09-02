@@ -13,6 +13,7 @@ import {
   writeCertEventStandalone
 } from '../services/certification';
 import { validateActiveDomainTags } from '../services/expertTags';
+import { creatorDeleteAgent, listMyAgents } from '../services/creatorAgents';
 
 export const meRouter = Router();
 meRouter.use(requireAuth);
@@ -366,6 +367,29 @@ meRouter.get('/notifications', async (req, res) => {
       createdAt: n.createdAt
     }))
   );
+});
+
+meRouter.get('/agents', async (req, res) => {
+  const items = await listMyAgents(req.user!.id);
+  return ok(res, items);
+});
+
+meRouter.post('/agents/:id/delete', async (req, res) => {
+  try {
+    const agent = await creatorDeleteAgent(req.user!.id, req.params.id);
+    return ok(res, {
+      id: agent.id,
+      status: agent.status,
+      creatorDeletedAt: agent.creatorDeletedAt
+    });
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '删除失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
 });
 
 meRouter.post('/notifications/read-all', async (req, res) => {

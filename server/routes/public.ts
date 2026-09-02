@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma';
 import { fail, ok } from '../lib/http';
 import { parseJson } from '../lib/json';
 import { requireAuth } from '../middleware/auth';
 import { agentToCatalog, agentToSolution, expertToPublic } from '../lib/mappers';
+import { findExpertForUser } from '../services/creatorAgents';
 import {
   COMMENT_REPORT_REASONS,
   createCommentReport,
@@ -18,6 +20,43 @@ import {
 
 export const publicRouter = Router();
 
+function isMarketplacePublic(agent: { status: string; creatorDeletedAt: Date | null }) {
+  return agent.status === 'published' && !agent.creatorDeletedAt;
+}
+
+async function ensureAgentShareToken(agentId: string) {
+  const existing = await prisma.agentShareLink.findFirst({
+    where: { agentId },
+    orderBy: { createdAt: 'desc' }
+  });
+  if (existing) return existing.token;
+  const created = await prisma.agentShareLink.create({
+    data: {
+      id: `shr_${Date.now()}_${randomBytes(4).toString('hex')}`,
+      agentId,
+      token: randomBytes(16).toString('hex')
+    }
+  });
+  return created.token;
+}
+
+async function hasValidShareToken(agentId: string, token: string) {
+  if (!token) return false;
+  const link = await prisma.agentShareLink.findFirst({
+    where: { agentId, token }
+  });
+  return Boolean(link);
+}
+
+async function canViewAgent(
+  agent: { id: string; status: string; creatorDeletedAt: Date | null },
+  share: string
+) {
+  if (agent.creatorDeletedAt) return false;
+  if (isMarketplacePublic(agent)) return true;
+  return hasValidShareToken(agent.id, share);
+}
+
 publicRouter.get('/home', async (_req, res) => {
   const [banners, categories, agents, settings] = await Promise.all([
     prisma.homeBanner.findMany({
@@ -29,7 +68,7 @@ publicRouter.get('/home', async (_req, res) => {
       orderBy: { sortOrder: 'asc' }
     }),
     prisma.agent.findMany({
-      where: { kind: 'catalog', status: 'published', showOnHome: true },
+      where: { kind: 'catalog', status: 'published', showOnHome: true, creatorDeletedAt: null },
       orderBy: [{ featured: 'desc' }, { sortOrder: 'asc' }]
     }),
     prisma.siteSetting.findMany()
@@ -54,6 +93,7 @@ publicRouter.get('/agents', async (req, res) => {
   const agents = await prisma.agent.findMany({
     where: {
       status: 'published',
+      creatorDeletedAt: null,
       ...(kind ? { kind } : {})
     },
     orderBy: { sortOrder: 'asc' }
@@ -65,11 +105,61 @@ publicRouter.get('/agents', async (req, res) => {
 });
 
 publicRouter.get('/agents/:id', async (req, res) => {
+  const share = typeof req.query.share === 'string' ? req.query.share.trim() : '';
   const agent = await prisma.agent.findUnique({ where: { id: req.params.id } });
-  if (!agent || agent.status !== 'published') {
+  if (!agent) {
     return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: '智能体不存在或已下架' } });
   }
-  return ok(res, agent.kind === 'solution' ? agentToSolution(agent) : agentToCatalog(agent));
+  if (!(await canViewAgent(agent, share))) {
+    return res.status(404).json({
+      ok: false,
+      error: { code: 'NOT_FOUND', message: share ? '分享链接无效或已失效' : '智能体不存在或已下架' }
+    });
+  }
+  return ok(res, {
+    ...agentToCatalog(agent),
+    sharedAccess: !isMarketplacePublic(agent)
+  });
+});
+
+publicRouter.post('/agents/:id/share-link', async (req, res) => {
+  const agent = await prisma.agent.findUnique({ where: { id: req.params.id } });
+  if (!agent) {
+    return fail(res, '智能体不存在', 404, 'NOT_FOUND');
+  }
+  if (agent.creatorDeletedAt) {
+    return fail(res, '智能体已删除，无法分享', 404, 'NOT_FOUND');
+  }
+  const isPublic = isMarketplacePublic(agent);
+  const bodyShare =
+    req.body && typeof req.body === 'object' && typeof req.body.share === 'string'
+      ? req.body.share.trim()
+      : '';
+
+  if (!isPublic) {
+    let allowed = false;
+    if (req.user) {
+      if (req.user.role === 'super_admin' || req.user.role === 'operator') {
+        allowed = true;
+      } else {
+        const expert = await findExpertForUser(req.user.id);
+        if (expert && expert.id === agent.authorId) allowed = true;
+      }
+    }
+    if (!allowed && bodyShare) {
+      allowed = await hasValidShareToken(agent.id, bodyShare);
+    }
+    if (!allowed) {
+      return fail(res, '仅创作者可分享未公开的智能体', 403, 'FORBIDDEN');
+    }
+  }
+
+  const token = await ensureAgentShareToken(agent.id);
+  return ok(res, {
+    public: isPublic,
+    token,
+    path: `/#/agent/${encodeURIComponent(agent.id)}?share=${token}`
+  });
 });
 
 publicRouter.get('/expert-tags', async (_req, res) => {
@@ -88,7 +178,7 @@ publicRouter.get('/experts', async (_req, res) => {
       ? []
       : await prisma.agent.groupBy({
           by: ['authorId'],
-          where: { authorId: { in: expertIds }, status: 'published' },
+          where: { authorId: { in: expertIds }, status: 'published', creatorDeletedAt: null },
           _count: { _all: true }
         });
   const countByAuthor = new Map(
@@ -140,7 +230,7 @@ publicRouter.get('/experts/:id', async (req, res) => {
     prisma.expertReview.findMany({ where: { expertId: expert.id } }),
     prisma.expertService.findMany({ where: { expertId: expert.id } }),
     prisma.agent.findMany({
-      where: { authorId: expert.id, kind: 'solution', status: 'published' },
+      where: { authorId: expert.id, kind: 'solution', status: 'published', creatorDeletedAt: null },
       orderBy: { sortOrder: 'asc' }
     }),
     getActiveExpertTagNameSet()
@@ -162,11 +252,12 @@ publicRouter.get('/experts/:id', async (req, res) => {
 });
 
 publicRouter.get('/agents/:id/comments', async (req, res) => {
+  const share = typeof req.query.share === 'string' ? req.query.share.trim() : '';
   const agent = await prisma.agent.findUnique({
     where: { id: req.params.id },
-    select: { id: true, title: true, status: true }
+    select: { id: true, title: true, status: true, creatorDeletedAt: true }
   });
-  if (!agent || agent.status !== 'published') {
+  if (!agent || !(await canViewAgent(agent, share))) {
     return fail(res, '智能体不存在或未上架', 404, 'NOT_FOUND');
   }
 
