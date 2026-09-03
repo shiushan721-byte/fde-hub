@@ -113,6 +113,8 @@ export async function approveApplication(
 
     const meta = EXPERT_VERIFY_META;
     const snapshot = JSON.parse(application.submittedProfileSnapshot || '{}') as Record<string, any>;
+    const displayName = String(snapshot.nickname || snapshot.applicantName || snapshot.name || 'AI 专家');
+    const avatarUrl = String(snapshot.avatar || snapshot.avatarUrl || '');
     const snapshotDomains: string[] = Array.isArray(snapshot.domainTags)
       ? snapshot.domainTags.map(String)
       : [];
@@ -134,7 +136,8 @@ export async function approveApplication(
         where: { id: expertId },
         data: {
           userId: application.userId,
-          name: String(snapshot.applicantName || snapshot.name || 'AI 专家'),
+          name: displayName,
+          avatar: avatarUrl || existingExpert.avatar,
           title: String(snapshot.expertTitle || existingExpert.title),
           bio: String(snapshot.bio || existingExpert.bio),
           domainTags: domains.length ? toJson(domains) : existingExpert.domainTags,
@@ -153,9 +156,9 @@ export async function approveApplication(
           id: expertId,
           userId: application.userId,
           expertNo,
-          name: String(snapshot.applicantName || snapshot.name || 'AI 专家'),
+          name: displayName,
           avatar:
-            String(snapshot.avatar || '') ||
+            avatarUrl ||
             'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=300&auto=format&fit=crop&q=80',
           title: String(snapshot.expertTitle || 'AI 专家'),
           verifyType: meta.verifyType,

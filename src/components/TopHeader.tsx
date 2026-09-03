@@ -7,7 +7,7 @@ import {
   Home,
   User,
   Bookmark,
-  ShieldCheck,
+  Wallet,
   Award,
   ChevronDown,
   UserPlus,
@@ -183,8 +183,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           <div className="text-xs font-bold text-slate-700">
             {currentRoute === 'workspace' && '我的智能体'}
             {currentRoute === 'orders' && '我的定制'}
-            {currentRoute === 'order-center' && '订单中心 · 定制消费账单'}
-            {currentRoute === 'account' && '账户 · 待提现 / 可提现 / 已提现'}
+            {currentRoute === 'order-center' && '订单中心'}
+            {currentRoute === 'account' && '我的收益'}
             {currentRoute === 'apikey' && 'API Key 管理中心'}
           </div>
         )}
@@ -295,8 +295,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   }}
                   className="w-full px-3 py-2 rounded-xl text-left font-bold text-slate-800 hover:bg-slate-50 flex items-center gap-2 transition-colors cursor-pointer"
                 >
-                  <ShieldCheck size={15} className="text-slate-500" />
-                  <span>账户管理</span>
+                  <Wallet size={15} className="text-slate-500" />
+                  <span>我的收益</span>
                 </button>
                 )}
                 <button

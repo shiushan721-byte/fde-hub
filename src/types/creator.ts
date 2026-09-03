@@ -1,4 +1,5 @@
 import { VerifyType } from './index';
+import type { AgentAdapterPackage } from '../../shared/adapterPackages';
 
 // 平台两类核心用户主体：普通用户 / AI 专家
 // creator / fde 为历史兼容别名，UI 一律按 expert 展示
@@ -126,6 +127,7 @@ export interface CreatorAgentItem {
   favoritesCount: number;
   commentsCount?: number;
   trialsCount?: number;
+  usageCount?: string | number;
   paidOrdersCount: number;
   tokensConsumed: number;
   totalRevenue: number;
@@ -149,6 +151,8 @@ export interface CreatorAgentItem {
   agentKind?: 'universal';
   /** 客户端平台适配：Mac / Windows / 双端 */
   platformSupport?: 'mac' | 'windows' | 'both';
+  /** 外部工具适配分发包 */
+  adapterPackages?: AgentAdapterPackage[];
   /** 当前线上标准版本号，普通用户始终使用最新可用标准版 */
   currentStandardVersion?: string;
   /** 标准版历史版本列表 */

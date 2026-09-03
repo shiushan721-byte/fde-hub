@@ -1,4 +1,7 @@
 import { FDEExpert, AgentSolution, FDEServicePackage, CaseStudy, ClientReview, AgentPricingPlans } from '../types';
+import type { AgentAdapterPackage } from '../../shared/adapterPackages';
+
+export type { AgentAdapterPackage };
 
 export interface HellomeAgentItem {
   id: string;
@@ -9,7 +12,7 @@ export interface HellomeAgentItem {
   gradient: string;
   tagColor: string;
   badge?: string;
-  /** 平台适配：三选一展示 */
+  /** 客户端 OS 适配：三选一展示 */
   platformSupport?: 'mac' | 'windows' | 'both';
   canFDECustom?: boolean;
   authorName?: string;
@@ -22,6 +25,8 @@ export interface HellomeAgentItem {
   sharesCount?: string | number;
   usageCount?: string;
   rating?: number;
+  /** 外部工具适配分发包，平台名由创作者自定义 */
+  adapterPackages?: AgentAdapterPackage[];
 }
 
 export const mockHellomeHomeAgents: HellomeAgentItem[] = [
@@ -49,6 +54,29 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     favoritesCount: '1.8k',
     commentsCount: 326,
     usageCount: '12.8k',
+    adapterPackages: [
+      {
+        id: 'adp_hz_workbuddy',
+        platformName: 'WorkBuddy',
+        fileName: 'hz-canvas-workbuddy.zip',
+        size: '1 KB',
+        url: '/uploads/hz-canvas-workbuddy.zip'
+      },
+      {
+        id: 'adp_hz_codex',
+        platformName: 'Codex',
+        fileName: 'hz-canvas-codex.zip',
+        size: '1 KB',
+        url: '/uploads/hz-canvas-codex.zip'
+      },
+      {
+        id: 'adp_hz_enterprise',
+        platformName: '企业内部工具',
+        fileName: 'hz-canvas-enterprise.zip',
+        size: '1 KB',
+        url: '/uploads/hz-canvas-enterprise.zip'
+      }
+    ],
     rating: 4.9
   },
   {

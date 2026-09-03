@@ -61,6 +61,9 @@ export function toHellomeAgentItem(raw: Record<string, unknown>): HellomeAgentIt
     commentsCount: (raw.commentsCount as string | number) ?? '0',
     sharesCount: (raw.sharesCount as string | number) ?? '0',
     usageCount: raw.usageCount ? String(raw.usageCount) : undefined,
-    rating: typeof raw.rating === 'number' ? raw.rating : undefined
+    rating: typeof raw.rating === 'number' ? raw.rating : undefined,
+    adapterPackages: Array.isArray(raw.adapterPackages)
+      ? (raw.adapterPackages as HellomeAgentItem['adapterPackages'])
+      : undefined
   };
 }

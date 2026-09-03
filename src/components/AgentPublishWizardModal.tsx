@@ -33,7 +33,9 @@ import {
   ExternalLink,
   Gift,
   CheckCheck,
-  Download
+  Download,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import {
   SkillPackageManifest,
@@ -45,11 +47,16 @@ import {
   AgentPublishConfig,
   CreatorAgentItem
 } from '../types/creator';
+import type { AgentAdapterPackage } from '../../shared/adapterPackages';
+import { adapterDisplayName } from '../../shared/adapterPackages';
 import {
   mockSkillPresets,
   SkillPackagePreset,
   initialValidationHistory
 } from '../data/skillValidationPresets';
+import { AGENT_LIFECYCLE_NOTICE, AGENT_PRICE_CHANGE_NOTICE } from '../lib/agentLifecycle';
+import { AgentPricingFields } from './AgentPricingFields';
+import { normalizePricingPlans, validatePaidPlans } from '../../shared/pricingPlans';
 
 interface AgentPublishWizardModalProps {
   isOpen: boolean;
@@ -286,6 +293,14 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
   const [platformSupport, setPlatformSupport] = useState<'mac' | 'windows' | 'both'>(
     agentToUpdate?.platformSupport || 'both'
   );
+  const [adapterPackages, setAdapterPackages] = useState<AgentAdapterPackage[]>(
+    agentToUpdate?.adapterPackages || []
+  );
+  const [adapterModalOpen, setAdapterModalOpen] = useState(false);
+  const [adapterPlatformName, setAdapterPlatformName] = useState('');
+  const [adapterZipFile, setAdapterZipFile] = useState<File | null>(null);
+  const [adapterSaving, setAdapterSaving] = useState(false);
+  const adapterZipInputRef = useRef<HTMLInputElement>(null);
 
   const platformSupportOptions: Array<{ value: 'mac' | 'windows' | 'both'; label: string }> = [
     { value: 'mac', label: '适配 macOS' },
@@ -333,6 +348,7 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
   );
   const [isSubmittingAudit, setIsSubmittingAudit] = useState(false);
   const [isAuditPassed, setIsAuditPassed] = useState(false);
+  const [lifecycleAck, setLifecycleAck] = useState(false);
   const [showSkillDocModal, setShowSkillDocModal] = useState(false);
   const [hostPrecheck, setHostPrecheck] = useState<HostPrecheckStatus>('idle');
   const [hostDebugOutcome, setHostDebugOutcome] = useState<'passed' | 'failed'>('passed');
@@ -345,6 +361,8 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       setScaffoldDownloaded(false);
       setHostPrecheck('idle');
       setHostDebugOutcome('passed');
+      setLifecycleAck(false);
+      setIsAuditPassed(false);
     }
   }, [isOpen]);
 
@@ -359,6 +377,18 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
         setUploadedFileName(agentToUpdate.skillPackage.fileName);
         setUploadedFileSize(agentToUpdate.skillPackage.size);
       }
+      setAdapterPackages(agentToUpdate.adapterPackages || []);
+      setPricingModel(
+        agentToUpdate.pricingType === 'free' || agentToUpdate.pricingPlans?.isFree ? 'free' : 'paid'
+      );
+      setMonthlyPrice(agentToUpdate.pricingPlans?.monthlyPrice || agentToUpdate.price || 39);
+      setAnnualPrice(
+        agentToUpdate.pricingPlans?.annualPrice || (agentToUpdate.price ? agentToUpdate.price * 9 : 368)
+      );
+      setBuyoutPrice(
+        agentToUpdate.pricingPlans?.buyoutPrice || (agentToUpdate.price ? agentToUpdate.price * 15 : 599)
+      );
+      setPreferredPlan(agentToUpdate.pricingPlans?.preferredPlan || 'annual');
     }
     const preset = mockSkillPresets.find((p) => p.id === selectedPresetId) || mockSkillPresets[0];
     if (!agentToUpdate && !agentTitle) {
@@ -395,6 +425,77 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFileUpload(e.dataTransfer.files[0]);
+    }
+  };
+
+  const persistAdapterPackages = async (next: AgentAdapterPackage[]) => {
+    setAdapterPackages(next);
+    if (!agentToUpdate?.id) return;
+    try {
+      await fetch(`/api/me/agents/${encodeURIComponent(agentToUpdate.id)}/adapter-packages`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packages: next })
+      });
+    } catch {
+      /* keep local list */
+    }
+  };
+
+  const handleAddAdapterPackage = async () => {
+    const name = adapterPlatformName.trim();
+    if (!name) {
+      alert('请填写适配平台名称');
+      return;
+    }
+    if (!adapterZipFile) {
+      alert('请上传 ZIP 安装包');
+      return;
+    }
+    if (!/\.(zip|tar\.gz|tgz)$/i.test(adapterZipFile.name)) {
+      alert('仅支持 .zip / .tar.gz');
+      return;
+    }
+    setAdapterSaving(true);
+    try {
+      const buf = await adapterZipFile.arrayBuffer();
+      const res = await fetch('/api/me/uploads', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-File-Name': encodeURIComponent(adapterZipFile.name)
+        },
+        body: buf
+      });
+      const json = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        data?: { fileKey: string; url: string; fileName: string; size: string };
+      } | null;
+      const pack: AgentAdapterPackage =
+        res.ok && json?.ok && json.data
+          ? {
+              id: `adp_${Date.now()}`,
+              platformName: name,
+              fileName: json.data.fileName,
+              size: json.data.size,
+              url: json.data.url,
+              fileKey: json.data.fileKey
+            }
+          : {
+              id: `adp_${Date.now()}`,
+              platformName: name,
+              fileName: adapterZipFile.name,
+              size: `${Math.max(1, adapterZipFile.size / 1024).toFixed(1)} KB`,
+              url: URL.createObjectURL(adapterZipFile)
+            };
+      await persistAdapterPackages([...adapterPackages, pack]);
+      setAdapterModalOpen(false);
+      setAdapterPlatformName('');
+      setAdapterZipFile(null);
+    } finally {
+      setAdapterSaving(false);
     }
   };
 
@@ -545,6 +646,7 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       agentToUpdate?.coverImage ||
       'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80',
     pricingType: pricingModel === 'free' ? 'free' : 'paid',
+    price: pricingModel === 'free' ? 0 : Number(monthlyPrice),
     pricingPlans: {
       monthlyPrice: Number(monthlyPrice),
       annualPrice: Number(annualPrice),
@@ -552,6 +654,8 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       isFree: pricingModel === 'free',
       preferredPlan
     },
+    tokenRebateEnabled: true,
+    fdeCustomEnabled: enableEnterpriseCustomization,
     metrics: currentMetrics,
     version: agentVersion,
     rating: agentToUpdate?.rating || 5.0,
@@ -564,6 +668,7 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
     },
     status,
     platformSupport,
+    adapterPackages,
     updatedAt: '刚刚'
   });
 
@@ -578,6 +683,24 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
 
   // Handler: Submit Audit & Launch
   const handleSubmitAudit = async () => {
+    if (mode === 'create' && !lifecycleAck) {
+      alert('请先确认智能体使用后不可删除的说明');
+      return;
+    }
+    if (mode !== 'custom_delivery') {
+      const plans = normalizePricingPlans({
+        isFree: pricingModel === 'free',
+        monthlyPrice,
+        annualPrice,
+        buyoutPrice,
+        preferredPlan
+      });
+      const invalid = validatePaidPlans(plans);
+      if (invalid) {
+        alert(invalid);
+        return;
+      }
+    }
     setIsSubmittingAudit(true);
     if (mode === 'custom_delivery') {
       try {
@@ -664,9 +787,6 @@ your-skill-v1.0.0/
   // Cost calculation based on sandbox metrics
   const unitTokens = currentMetrics?.avgExecutionTokens || 1850;
   const unitCostYuan = currentMetrics?.avgExecutionCostYuan || 0.038;
-  const authorMonthlyIncome = (monthlyPrice * 0.7).toFixed(1);
-  const authorAnnualIncome = (annualPrice * 0.7).toFixed(1);
-  const authorBuyoutIncome = (buyoutPrice * 0.7).toFixed(1);
 
   return (
     <div
@@ -1051,6 +1171,59 @@ your-skill-v1.0.0/
                 )}
               </div>
               )}
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    外部工具适配版本
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    站内仍用 Hermes 运行。这里上传的 ZIP 面向 WorkBuddy、Codex 等外部工具，平台名可自定义。
+                  </p>
+                </div>
+                {adapterPackages.length > 0 && (
+                  <div className="space-y-2">
+                    {adapterPackages.map((pack) => (
+                      <div
+                        key={pack.id}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-800 truncate">
+                            {adapterDisplayName(pack.platformName)}
+                          </div>
+                          <div className="text-[11px] text-slate-500 truncate">
+                            {pack.fileName}
+                            {pack.size ? ` · ${pack.size}` : ''}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void persistAdapterPackages(adapterPackages.filter((item) => item.id !== pack.id))
+                          }
+                          className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                          title="移除"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdapterPlatformName('');
+                    setAdapterZipFile(null);
+                    setAdapterModalOpen(true);
+                  }}
+                  className="w-full h-10 rounded-xl border border-dashed border-slate-300 text-slate-700 text-xs font-bold hover:border-blue-400 hover:text-blue-700 hover:bg-blue-50/50 cursor-pointer inline-flex items-center justify-center gap-1.5"
+                >
+                  <Plus size={14} />
+                  添加适配版本
+                </button>
+              </div>
 
               {/* Action Bar */}
               <div className="flex items-center gap-2.5 pt-4 border-t border-slate-100">
@@ -1588,33 +1761,31 @@ your-skill-v1.0.0/
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
                     <Sparkles size={15} className="text-blue-600" />
-                    <span>上架分发与收益政策确认</span>
+                    <span>上架定价与收益政策</span>
                   </span>
                   <span className="px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[11px]">
-                    全网免费分发 · 极速拓客
+                    {pricingModel === 'free' ? '全网免费开放' : '商业收费 · 可随时改价'}
                   </span>
                 </div>
 
-                <div className="p-3.5 bg-white rounded-xl border border-slate-200 text-xs text-slate-600 space-y-2">
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-5 h-5 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[10px]">
-                      1
-                    </div>
-                    <div>
-                      <span className="font-bold text-slate-800">全网免费开放：</span>
-                      智能体将直接发布到主页探索市场与集合页供全网用户体验，极速积累用户使用口碑与点赞评分。
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-5 h-5 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[10px]">
-                      2
-                    </div>
-                    <div>
-                      <span className="font-bold text-slate-800">算力词元返点：</span>
-                      用户调用该智能体消耗的所有底座算力，您享有全自动 <strong>{tokenRebateRate}% 词元消耗分成返点</strong>。
-                    </div>
-                  </div>
-                </div>
+                <AgentPricingFields
+                  pricingModel={pricingModel}
+                  monthlyPrice={monthlyPrice}
+                  annualPrice={annualPrice}
+                  buyoutPrice={buyoutPrice}
+                  preferredPlan={preferredPlan}
+                  onPricingModelChange={setPricingModel}
+                  onMonthlyPriceChange={setMonthlyPrice}
+                  onAnnualPriceChange={setAnnualPrice}
+                  onBuyoutPriceChange={setBuyoutPrice}
+                  onPreferredPlanChange={setPreferredPlan}
+                  tokenRebateRate={tokenRebateRate}
+                />
+
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  用户调用消耗底座算力时，您享有全自动 <strong>{tokenRebateRate}% 词元分成返点</strong>。{' '}
+                  {AGENT_PRICE_CHANGE_NOTICE}
+                </p>
 
                 {/* Enterprise FDE Customization Toggle */}
                 <div className="p-3.5 bg-indigo-50/70 rounded-xl border border-indigo-200 flex items-center justify-between">
@@ -1640,6 +1811,20 @@ your-skill-v1.0.0/
               </div>
               )}
 
+              {mode === 'create' && (
+                <label className="flex items-start gap-2.5 p-3.5 rounded-xl border border-amber-200 bg-amber-50/80 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={lifecycleAck}
+                    onChange={(e) => setLifecycleAck(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span className="text-xs text-slate-700 leading-relaxed">
+                    {AGENT_LIFECYCLE_NOTICE}
+                  </span>
+                </label>
+              )}
+
               {/* Action Bar */}
               <div className="flex items-center justify-between pt-4 border-t border-slate-100">
                 <button
@@ -1654,8 +1839,8 @@ your-skill-v1.0.0/
                 <button
                   type="button"
                   onClick={handleSubmitAudit}
-                  disabled={isSubmittingAudit}
-                  className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/20 flex items-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
+                  disabled={isSubmittingAudit || (mode === 'create' && !lifecycleAck)}
+                  className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/20 flex items-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmittingAudit ? (
                     <>
@@ -1759,6 +1944,75 @@ your-skill-v1.0.0/
               >
                 <Download size={13} />
                 <span>下载文档</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {adapterModalOpen && (
+        <div
+          className="fixed inset-0 z-[70] bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => !adapterSaving && setAdapterModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="text-sm font-black text-slate-900">添加适配版本</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                填写外部工具名称并上传对应 ZIP。以后新增平台无需改前端。
+              </p>
+            </div>
+            <label className="block space-y-1">
+              <span className="text-[11px] font-bold text-slate-700">适配平台名称</span>
+              <input
+                type="text"
+                value={adapterPlatformName}
+                onChange={(e) => setAdapterPlatformName(e.target.value)}
+                placeholder="如 WorkBuddy、Codex"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                autoFocus
+              />
+            </label>
+            <div className="space-y-1">
+              <span className="text-[11px] font-bold text-slate-700">ZIP 安装包</span>
+              <input
+                ref={adapterZipInputRef}
+                type="file"
+                accept=".zip,.tar.gz,.tgz"
+                className="hidden"
+                onChange={(e) => setAdapterZipFile(e.target.files?.[0] || null)}
+              />
+              <button
+                type="button"
+                onClick={() => adapterZipInputRef.current?.click()}
+                className="w-full rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center cursor-pointer hover:border-blue-400"
+              >
+                {adapterZipFile ? (
+                  <span className="text-xs font-bold text-slate-800">{adapterZipFile.name}</span>
+                ) : (
+                  <span className="text-xs text-slate-500">点击选择 .zip / .tar.gz</span>
+                )}
+              </button>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={adapterSaving}
+                onClick={() => setAdapterModalOpen(false)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={adapterSaving}
+                onClick={() => void handleAddAdapterPackage()}
+                className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                {adapterSaving ? '上传中…' : '确认添加'}
               </button>
             </div>
           </div>

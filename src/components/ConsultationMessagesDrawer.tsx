@@ -78,7 +78,8 @@ function mapApiTypeToKind(type: string): UserNotificationItem['kind'] {
     type.includes('delivery_ready') ||
     type.includes('agent_review') ||
     type.includes('rejected') ||
-    type.includes('approved')
+    type.includes('approved') ||
+    type.includes('offline')
   ) {
     return 'ops_review';
   }
@@ -186,7 +187,7 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900">消息提醒</h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">含平台智能体审核通过 / 驳回通知</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">含平台智能体审核、下架与驳回通知</p>
             </div>
           </div>
           <button
@@ -232,7 +233,7 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
                         </p>
                       )}
                       <p
-                        className={`text-[11px] text-slate-600 mt-1 leading-relaxed ${
+                        className={`text-[11px] text-slate-600 mt-1 leading-relaxed whitespace-pre-line ${
                           expanded ? '' : 'line-clamp-2'
                         }`}
                       >

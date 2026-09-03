@@ -17,6 +17,7 @@ import {
   getActiveExpertTagNameSet,
   listExpertTags
 } from '../services/expertTags';
+import { listExpertTitles } from '../services/expertTitles';
 
 export const publicRouter = Router();
 
@@ -165,6 +166,11 @@ publicRouter.post('/agents/:id/share-link', async (req, res) => {
 publicRouter.get('/expert-tags', async (_req, res) => {
   const tags = await listExpertTags({ status: 'active' });
   return ok(res, tags.map((t) => ({ id: t.id, name: t.name, sortOrder: t.sortOrder })));
+});
+
+publicRouter.get('/expert-titles', async (_req, res) => {
+  const titles = await listExpertTitles({ status: 'active' });
+  return ok(res, titles.map((t) => ({ id: t.id, name: t.name, sortOrder: t.sortOrder })));
 });
 
 publicRouter.get('/experts', async (_req, res) => {

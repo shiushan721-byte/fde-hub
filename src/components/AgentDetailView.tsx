@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ChevronLeft,
   Zap,
@@ -7,7 +7,9 @@ import {
   XCircle,
   Send,
   Flag,
-  X
+  X,
+  MoreHorizontal,
+  Download
 } from 'lucide-react';
 import { HellomeAgentItem } from '../data/mockData';
 import { mockExperts } from '../data/mockData';
@@ -21,6 +23,10 @@ import {
   parseAgentShareHash
 } from '../lib/agentShare';
 import { AgentShareModal } from './AgentShareModal';
+import { adapterDisplayName } from '../../shared/adapterPackages';
+import { pricingFromAgent, pricingLabel, type PreferredPlan } from '../../shared/pricingPlans';
+import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
+import { yuanAmount } from '../lib/customOrderLabels';
 
 interface AgentDetailViewProps {
   agent: HellomeAgentItem;
@@ -35,6 +41,22 @@ interface AgentDetailViewProps {
   onToggleLike?: (agentId: string) => void;
   onToast?: (message: string) => void;
 }
+
+type CatalogLicense = {
+  id: string;
+  plan: string;
+  priceCents: number;
+  status: string;
+  paidAt?: string | null;
+  expiresAt?: string | null;
+  active: boolean;
+};
+
+type CheckoutOrder = {
+  id: string;
+  plan: PreferredPlan;
+  priceCents: number;
+};
 
 type PublicComment = {
   id: string;
@@ -87,6 +109,14 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const [sharePosterOpen, setSharePosterOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
   const [shareBusy, setShareBusy] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const [selectedPlan, setSelectedPlan] = useState<PreferredPlan>(
+    pricingFromAgent(agent).preferredPlan
+  );
+  const [license, setLicense] = useState<CatalogLicense | null>(null);
+  const [checkout, setCheckout] = useState<CheckoutOrder | null>(null);
+  const [buyBusy, setBuyBusy] = useState(false);
   const catalog = useCatalog();
 
   const authorExpert =
@@ -97,9 +127,68 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const standardVersion = getStandardVersionForAgent(agent.id);
   const shareQuery = parseAgentShareHash(typeof window === 'undefined' ? '' : window.location.hash);
   const currentShareToken = shareQuery?.id === agent.id ? shareQuery.share : '';
+  const adapterPackages = agent.adapterPackages || [];
+  const pricing = pricingFromAgent(agent);
+  const priceText = pricingLabel(pricing);
+  const selectedYuan =
+    selectedPlan === 'annual'
+      ? pricing.annualPrice
+      : selectedPlan === 'buyout'
+        ? pricing.buyoutPrice
+        : pricing.monthlyPrice;
+  const selectedUnit = selectedPlan === 'annual' ? '/年' : selectedPlan === 'buyout' ? ' 买断' : '/月';
+  const owned = Boolean(license?.active);
+
+  const startCheckout = async () => {
+    if (pricing.isFree || owned) {
+      onUseAgent?.(agent);
+      return;
+    }
+    setBuyBusy(true);
+    try {
+      await ensureMarketplaceSession();
+      const order = await api<{ id: string; plan: PreferredPlan; priceCents: number }>(
+        `/api/me/agents/${agent.id}/checkout`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ plan: selectedPlan, channel: 'wechat' })
+        }
+      );
+      setCheckout({ id: order.id, plan: selectedPlan, priceCents: order.priceCents });
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : '无法发起支付');
+    } finally {
+      setBuyBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    const onPointer = (event: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointer);
+    return () => document.removeEventListener('mousedown', onPointer);
+  }, []);
 
   useEffect(() => {
     setShareUrl('');
+    setCheckout(null);
+    setSelectedPlan(pricingFromAgent(agent).preferredPlan);
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureMarketplaceSession();
+        const item = await api<CatalogLicense | null>(`/api/me/agents/${agent.id}/license`);
+        if (!cancelled) setLicense(item);
+      } catch {
+        if (!cancelled) setLicense(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [agent.id]);
 
   const resolveShareUrl = async () => {
@@ -235,7 +324,13 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               <h1 className="text-[26px] sm:text-[30px] font-bold text-slate-900 tracking-tight leading-snug">
                 {agent.title}
               </h1>
-              <p className="text-[13px] text-slate-400">{agent.category}</p>
+              <p className="text-[13px] text-slate-400 flex items-center gap-2 flex-wrap">
+                <span>{agent.category}</span>
+                <span className="text-slate-300">·</span>
+                <span className={pricing.isFree ? 'text-emerald-600 font-semibold' : 'text-slate-800 font-semibold'}>
+                  {priceText}
+                </span>
+              </p>
             </header>
 
             <div className="rounded-2xl overflow-hidden bg-slate-100 ring-1 ring-slate-200/80">
@@ -369,8 +464,65 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               </button>
             </div>
 
+            <div className="py-4 border-b border-slate-100">
+              {pricing.isFree ? (
+                <div>
+                  <div className="text-[22px] font-bold text-emerald-600 leading-none">免费</div>
+                  <p className="text-[12px] text-slate-400 mt-2">可直接体验，调用消耗按词元计费</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="text-[22px] font-bold text-slate-900 leading-none">
+                    ￥{selectedYuan}
+                    <span className="text-[13px] font-medium text-slate-400">{selectedUnit}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(
+                      [
+                        { plan: 'monthly' as const, label: '月付', price: pricing.monthlyPrice },
+                        { plan: 'annual' as const, label: '年付', price: pricing.annualPrice },
+                        { plan: 'buyout' as const, label: '买断', price: pricing.buyoutPrice }
+                      ] as const
+                    )
+                      .filter((item) => item.price > 0)
+                      .map((item) => (
+                        <button
+                          key={item.plan}
+                          type="button"
+                          onClick={() => setSelectedPlan(item.plan)}
+                          className={`px-2 py-1 rounded-md text-[11px] font-semibold cursor-pointer border ${
+                            selectedPlan === item.plan
+                              ? 'bg-slate-900 text-white border-slate-900'
+                              : 'bg-slate-50 border-slate-100 text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {item.label} ￥{item.price}
+                        </button>
+                      ))}
+                  </div>
+                  {owned ? (
+                    <p className="text-[11px] text-emerald-700">
+                      已购买{license?.plan === 'buyout' ? '买断' : license?.plan === 'annual' ? '年付' : '月付'}
+                      {license?.expiresAt
+                        ? `，有效至 ${new Date(license.expiresAt).toLocaleDateString('zh-CN')}`
+                        : '，可长期使用'}
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={buyBusy || selectedYuan < 1}
+                      onClick={() => void startCheckout()}
+                      className="w-full h-10 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[13px] font-semibold cursor-pointer disabled:opacity-60"
+                    >
+                      {buyBusy ? '正在创建订单…' : `立即购买 ${yuanAmount(selectedYuan * 100)}`}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center gap-2 py-4">
-              {onUseAgent && (
+              {onUseAgent && (pricing.isFree || owned) && (
                 <button
                   type="button"
                   onClick={() => onUseAgent(agent)}
@@ -393,6 +545,46 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                   <span className="leading-tight text-center">基于此智能体定制</span>
                   <ArrowRight size={13} className="shrink-0 text-slate-400" />
                 </button>
+              )}
+            </div>
+
+            <div className="relative pb-2" ref={moreMenuRef}>
+              <button
+                type="button"
+                onClick={() => setMoreOpen((open) => !open)}
+                className="w-full h-9 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[12px] font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5"
+              >
+                <MoreHorizontal size={14} />
+                更多操作
+              </button>
+              {moreOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1.5 z-20 rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden">
+                  <div className="px-3 py-2 text-[11px] font-bold text-slate-500 bg-slate-50 border-b border-slate-100">
+                    下载适配版本
+                  </div>
+                  {adapterPackages.length === 0 ? (
+                    <p className="px-3 py-3 text-[12px] text-slate-400">暂无外部工具分发包</p>
+                  ) : (
+                    adapterPackages.map((pack) => (
+                      <div
+                        key={pack.id}
+                        className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-slate-100 first:border-t-0"
+                      >
+                        <span className="text-[12px] text-slate-800 truncate">
+                          {adapterDisplayName(pack.platformName)}
+                        </span>
+                        <a
+                          href={pack.url}
+                          download={pack.fileName}
+                          className="shrink-0 h-7 px-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-bold inline-flex items-center gap-1 no-underline"
+                        >
+                          <Download size={12} />
+                          下载 ZIP
+                        </a>
+                      </div>
+                    ))
+                  )}
+                </div>
               )}
             </div>
 
@@ -515,6 +707,32 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {checkout && (
+        <PaymentCheckoutDrawer
+          orderId={checkout.id}
+          title={agent.title}
+          amountCents={checkout.priceCents}
+          heading="购买智能体"
+          amountLabel="应付金额"
+          successTitle="购买成功"
+          successHint="已按当前套餐开通，后续改价不影响你已购的使用权。"
+          escrowNote="演示环境：扫码不会真实扣款。支付成功后按购买时价格开通，已购用户不受后续改价影响。"
+          payUrl={`/api/me/purchases/${checkout.id}/pay`}
+          confirmUrl={`/api/me/purchases/${checkout.id}/confirm`}
+          onClose={() => setCheckout(null)}
+          onPaid={() => {
+            setLicense({
+              id: checkout.id,
+              plan: checkout.plan,
+              priceCents: checkout.priceCents,
+              status: 'paid',
+              active: true
+            });
+            setCheckout(null);
+            onToast?.('支付成功，已开通使用权');
+          }}
+        />
       )}
       {sharePosterOpen && shareUrl && (
         <AgentShareModal

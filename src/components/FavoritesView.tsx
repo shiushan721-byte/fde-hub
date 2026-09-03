@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { HellomeAgentItem } from '../data/mockData';
 import { FDEExpert } from '../types';
+import { pricingFromAgent, pricingLabel } from '../../shared/pricingPlans';
 
 interface FavoritesViewProps {
   favoriteAgentIds: string[];
@@ -199,6 +200,8 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
               {filteredAgents.map((agent) => {
                 const authorId = agent.authorId || 'fde-linran';
                 const isLiked = likedAgentIds.includes(agent.id);
+                const pricing = pricingFromAgent(agent);
+                const priceText = pricingLabel(pricing);
 
                 return (
                   <div
@@ -225,6 +228,17 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
                           {agent.badge}
                         </div>
                       )}
+                      <div className="absolute bottom-2.5 left-2.5 z-20">
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold border shadow-sm ${
+                            pricing.isFree
+                              ? 'bg-emerald-500/95 text-white border-emerald-300/40'
+                              : 'bg-white/95 text-slate-900 border-white/60'
+                          }`}
+                        >
+                          {priceText}
+                        </span>
+                      </div>
 
                       {/* Remove Favorite Button */}
                       <div className="absolute top-2 right-2 z-30">
@@ -255,9 +269,18 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
                     {/* Card Body */}
                     <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
                       <div className="space-y-1.5">
-                        <h3 className="font-bold text-slate-900 text-sm group-hover:text-blue-600 transition-colors line-clamp-1">
-                          {agent.title}
-                        </h3>
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="font-bold text-slate-900 text-sm group-hover:text-blue-600 transition-colors line-clamp-1">
+                            {agent.title}
+                          </h3>
+                          <span
+                            className={`shrink-0 text-[11px] font-bold ${
+                              pricing.isFree ? 'text-emerald-600' : 'text-slate-900'
+                            }`}
+                          >
+                            {priceText}
+                          </span>
+                        </div>
                         <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
                           {agent.desc}
                         </p>

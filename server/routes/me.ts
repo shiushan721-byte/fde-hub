@@ -1,8 +1,8 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { fail, ok } from '../lib/http';
-import { toJson } from '../lib/json';
+import { toJson, parseJson } from '../lib/json';
 import { requireAuth } from '../middleware/auth';
 import { mockRealNameAdapter } from '../adapters/realName';
 import {
@@ -13,7 +13,20 @@ import {
   writeCertEventStandalone
 } from '../services/certification';
 import { validateActiveDomainTags } from '../services/expertTags';
-import { creatorDeleteAgent, listMyAgents } from '../services/creatorAgents';
+import { validateActiveExpertTitle } from '../services/expertTitles';
+import { creatorDeleteAgent, creatorUpdatePricing, findExpertForUser, listMyAgents } from '../services/creatorAgents';
+import {
+  confirmCatalogPurchase,
+  createCatalogCheckout,
+  getActiveLicense,
+  isCatalogPlan,
+  listMyPurchases,
+  mapPurchase,
+  payCatalogPurchase
+} from '../services/catalogPurchase';
+import { localStorageAdapter } from '../adapters/storage';
+import { normalizeAdapterPackages } from '../../shared/adapterPackages';
+import { normalizePricingPlans, validatePaidPlans } from '../../shared/pricingPlans';
 
 export const meRouter = Router();
 meRouter.use(requireAuth);
@@ -40,6 +53,8 @@ function publicApplication(app: {
   // 前台不返回身份证号、手机号、后台备注类敏感字段
   const safeSnapshot = {
     applicantName: snapshot.applicantName,
+    nickname: snapshot.nickname,
+    avatarUrl: snapshot.avatarUrl || snapshot.avatar,
     expertTitle: snapshot.expertTitle,
     bio: snapshot.bio,
     domainTags: snapshot.domainTags,
@@ -195,7 +210,9 @@ meRouter.get('/expert-applications/:id', async (req, res) => {
 const createAppSchema = z.object({
   type: z.enum(['onboarding']).default('onboarding'),
   applicantName: z.string().min(1),
-  expertTitle: z.string().optional().default(''),
+  nickname: z.string().max(15).optional(),
+  avatarUrl: z.string().optional().default(''),
+  expertTitle: z.string().min(1, '请选择专家头衔'),
   bio: z.string().optional().default(''),
   domainTags: z.array(z.string()).optional().default([]),
   location: z.string().optional(),
@@ -239,9 +256,19 @@ meRouter.post('/expert-applications', async (req, res) => {
     }
   }
 
+  let validatedTitle = '';
+  try {
+    validatedTitle = await validateActiveExpertTitle(data.expertTitle);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '专家头衔无效');
+  }
+
   const snapshot = {
     applicantName: data.applicantName,
-    expertTitle: data.expertTitle || '',
+    nickname: (data.nickname || data.applicantName).trim(),
+    avatar: data.avatarUrl || '',
+    avatarUrl: data.avatarUrl || '',
+    expertTitle: validatedTitle,
     bio: data.bio || '',
     domainTags: validatedDomainTags,
     location: data.location || '',
@@ -374,6 +401,144 @@ meRouter.get('/agents', async (req, res) => {
   return ok(res, items);
 });
 
+function formatUploadSize(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+meRouter.post(
+  '/uploads',
+  express.raw({ type: '*/*', limit: '40mb' }),
+  async (req, res) => {
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+    if (!buf.length) return fail(res, '未收到文件');
+    const fileName = decodeURIComponent(String(req.headers['x-file-name'] || 'package.zip'));
+    if (!/\.(zip|tar\.gz|tgz)$/i.test(fileName)) {
+      return fail(res, '仅支持 .zip / .tar.gz');
+    }
+    const stored = await localStorageAdapter.upload({
+      fileName,
+      buffer: buf,
+      mimeType: 'application/zip'
+    });
+    return ok(res, {
+      fileKey: stored.fileKey,
+      url: stored.url,
+      fileName,
+      size: formatUploadSize(buf.length)
+    });
+  }
+);
+
+meRouter.put('/agents/:id/pricing', async (req, res) => {
+  try {
+    const plans = normalizePricingPlans(req.body);
+    const invalid = validatePaidPlans(plans);
+    if (invalid) return fail(res, invalid, 400);
+    const agent = await creatorUpdatePricing(req.user!.id, req.params.id, plans);
+    return ok(res, {
+      id: agent.id,
+      price: agent.price,
+      pricingPlans: normalizePricingPlans(parseJson(agent.pricingPlans, {}))
+    });
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '定价更新失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
+meRouter.get('/purchases', async (req, res) => {
+  const items = await listMyPurchases(req.user!.id);
+  return ok(res, items);
+});
+
+meRouter.get('/agents/:id/license', async (req, res) => {
+  const license = await getActiveLicense(req.user!.id, req.params.id);
+  return ok(res, license ? mapPurchase(license) : null);
+});
+
+meRouter.post('/agents/:id/checkout', async (req, res) => {
+  try {
+    const plan = req.body?.plan;
+    const channel = req.body?.channel === 'alipay' ? 'alipay' : 'wechat';
+    if (!isCatalogPlan(plan)) return fail(res, '请选择月付、年付或买断');
+    const { purchase } = await createCatalogCheckout({
+      userId: req.user!.id,
+      agentId: req.params.id,
+      plan,
+      channel
+    });
+    return ok(res, mapPurchase(purchase));
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '无法创建支付单',
+      status === 403 || status === 404 || status === 409 ? status : 400
+    );
+  }
+});
+
+meRouter.post('/purchases/:id/pay', async (req, res) => {
+  try {
+    const channel = req.body?.channel === 'alipay' ? 'alipay' : 'wechat';
+    const result = await payCatalogPurchase({
+      userId: req.user!.id,
+      purchaseId: req.params.id,
+      channel
+    });
+    return ok(res, mapPurchase(result.purchase));
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '支付失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
+meRouter.post('/purchases/:id/confirm', async (req, res) => {
+  try {
+    const channel = req.body?.channel === 'alipay' ? 'alipay' : 'wechat';
+    const purchase = await confirmCatalogPurchase({
+      userId: req.user!.id,
+      purchaseId: req.params.id,
+      channel
+    });
+    return ok(res, mapPurchase(purchase));
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '支付确认失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
+meRouter.put('/agents/:id/adapter-packages', async (req, res) => {
+  const expert = await findExpertForUser(req.user!.id);
+  if (!expert) return fail(res, '仅认证专家可更新适配版本', 403, 'FORBIDDEN');
+  const agent = await prisma.agent.findFirst({
+    where: { id: req.params.id, authorId: expert.id, creatorDeletedAt: null }
+  });
+  if (!agent) return fail(res, '智能体不存在或无权操作', 404, 'NOT_FOUND');
+  const packages = normalizeAdapterPackages(req.body?.packages);
+  const updated = await prisma.agent.update({
+    where: { id: agent.id },
+    data: { adapterPackages: toJson(packages) }
+  });
+  return ok(res, {
+    adapterPackages: normalizeAdapterPackages(parseJson(updated.adapterPackages, []))
+  });
+});
+
 meRouter.post('/agents/:id/delete', async (req, res) => {
   try {
     const agent = await creatorDeleteAgent(req.user!.id, req.params.id);
@@ -384,11 +549,9 @@ meRouter.post('/agents/:id/delete', async (req, res) => {
     });
   } catch (error) {
     const status = (error as Error & { status?: number }).status;
-    return fail(
-      res,
-      error instanceof Error ? error.message : '删除失败',
-      status === 403 || status === 404 ? status : 400
-    );
+    const message = error instanceof Error ? error.message : '删除失败';
+    if (status === 409) return fail(res, message, 409, 'AGENT_IN_USE');
+    return fail(res, message, status === 403 || status === 404 ? status : 400);
   }
 });
 

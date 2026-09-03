@@ -35,6 +35,7 @@ import {
   WithdrawalsPage
 } from './FinancePages';
 import { ExpertTagsPage } from './ExpertTagsPage';
+import { ExpertTitlesPage } from './ExpertTitlesPage';
 import { CommentReportsPage } from './CommentReportsPage';
 
 type AdminCaseItem = {
@@ -66,6 +67,7 @@ type AdminPage =
   | 'experts'
   | 'applications'
   | 'expert-tags'
+  | 'expert-titles'
   | 'leads'
   | 'users'
   | 'expert-accounts'
@@ -114,7 +116,8 @@ const nav: NavEntry[] = [
     icon: Users,
     children: [
       { key: 'experts', label: '专家管理' },
-      { key: 'expert-tags', label: '专家标签管理' },
+      { key: 'expert-tags', label: '分类标签管理' },
+      { key: 'expert-titles', label: '专家头衔管理' },
       { key: 'applications', label: '专家审核' }
     ]
   },
@@ -146,7 +149,7 @@ const nav: NavEntry[] = [
 
 const GROUP_PAGE_KEYS: Record<string, AdminPage[]> = {
   'agent-mgmt': ['agents', 'custom-agents', 'deliveries', 'comment-reports', 'leads'],
-  'expert-mgmt': ['experts', 'expert-tags', 'applications'],
+  'expert-mgmt': ['experts', 'expert-tags', 'expert-titles', 'applications'],
   'fund-mgmt': ['expert-accounts', 'settlements', 'finance-rules'],
   'finance-mgmt': ['finance-balances', 'finance-ledger', 'withdrawals', 'escrows']
 };
@@ -372,6 +375,7 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
           />
         )}
         {page === 'expert-tags' && <ExpertTagsPage />}
+        {page === 'expert-titles' && <ExpertTitlesPage />}
         {page === 'applications' && <ApplicationsPage />}
         {page === 'leads' && <LeadsPage />}
         {page === 'expert-accounts' && <ExpertAccountsPage />}
@@ -818,6 +822,9 @@ const AgentsPage = ({
     desc: string;
     coverImage?: string | null;
   } | null>(null);
+  const [offlineTarget, setOfflineTarget] = useState<{ id: string; title: string } | null>(null);
+  const [offlineReason, setOfflineReason] = useState('');
+  const [offlining, setOfflining] = useState(false);
 
   const query = new URLSearchParams({
     ...(q.trim() ? { q: q.trim() } : {}),
@@ -953,6 +960,28 @@ const AgentsPage = ({
       alert(err instanceof Error ? err.message : '保存失败');
     } finally {
       setEngagementSaving(false);
+    }
+  };
+
+  const confirmOffline = async () => {
+    if (!offlineTarget) return;
+    if (!offlineReason.trim()) {
+      alert('请填写下架原因');
+      return;
+    }
+    setOfflining(true);
+    try {
+      await api(`/api/admin/agents/${offlineTarget.id}/offline`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: offlineReason.trim() })
+      });
+      setOfflineTarget(null);
+      setOfflineReason('');
+      reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '下架失败');
+    } finally {
+      setOfflining(false);
     }
   };
 
@@ -1107,9 +1136,9 @@ const AgentsPage = ({
                     <button
                       type="button"
                       className="font-bold text-rose-600 cursor-pointer"
-                      onClick={async () => {
-                        await api(`/api/admin/agents/${agent.id}/offline`, { method: 'POST' });
-                        reload();
+                      onClick={() => {
+                        setOfflineTarget({ id: agent.id, title: agent.title });
+                        setOfflineReason('');
                       }}
                     >
                       下架
@@ -1361,6 +1390,54 @@ const AgentsPage = ({
           </div>
         </div>
       )}
+
+      {offlineTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => !offlining && setOfflineTarget(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h2 className="text-sm font-black text-slate-900">下架智能体</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                「{offlineTarget.title}」将从智能体市场下架，创作者侧变为仅自己可用。下架原因会通过站内信通知创作者。
+              </p>
+            </div>
+            <textarea
+              rows={4}
+              value={offlineReason}
+              onChange={(e) => setOfflineReason(e.target.value)}
+              placeholder="请填写下架原因（必填）"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={offlining}
+                onClick={() => {
+                  setOfflineTarget(null);
+                  setOfflineReason('');
+                }}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={offlining}
+                onClick={() => void confirmOffline()}
+                className="px-3 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                {offlining ? '提交中…' : '确认下架'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1386,6 +1463,8 @@ const ApplicationsPage = () => {
     targetLevel: number;
     status: string;
     applicantName: string;
+    nickname?: string;
+    avatarUrl?: string;
     contactPhone: string;
     expertTitle: string;
     expertNo?: string | null;
@@ -1412,12 +1491,13 @@ const ApplicationsPage = () => {
     reload();
   };
 
-  const openApproveModal = (app: { id: string; applicantName: string }) => {
+  const openApproveModal = (app: { id: string; applicantName: string; domainTags?: string[] }) => {
     setApproveModal({
       id: app.id,
       name: app.applicantName
     });
-    setApproveTags([]);
+    const allowed = new Set(activeTagOptions.map((t) => t.name));
+    setApproveTags((app.domainTags || []).filter((t) => allowed.has(t)));
   };
 
   const confirmApprove = async () => {
@@ -1470,9 +1550,21 @@ const ApplicationsPage = () => {
         {(data || []).map((app) => (
           <div key={app.id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <div className="flex items-start gap-3 min-w-0">
+                {app.avatarUrl ? (
+                  <img
+                    src={app.avatarUrl}
+                    alt=""
+                    className="w-11 h-11 rounded-full object-cover border border-slate-200 shrink-0"
+                  />
+                ) : (
+                  <div className="w-11 h-11 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-sm font-bold shrink-0">
+                    {(app.nickname || app.applicantName || '?').slice(0, 1)}
+                  </div>
+                )}
+                <div className="min-w-0">
                 <div className="text-sm font-bold">
-                  {app.applicantName}
+                  {app.nickname || app.applicantName}
                   <span className="ml-2 text-xs font-semibold text-slate-500">
                     {statusLabel[app.type] || app.type}
                   </span>
@@ -1485,6 +1577,7 @@ const ApplicationsPage = () => {
                     专家编号 {app.expertNo}
                   </div>
                 )}
+                </div>
               </div>
               <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
                 {statusLabel[app.status] || app.status}
@@ -1495,6 +1588,18 @@ const ApplicationsPage = () => {
                 <span className="text-slate-400">申请头衔 · </span>
                 {app.expertTitle}
               </p>
+            )}
+            {app.domainTags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {app.domainTags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="px-2 py-0.5 rounded-full bg-slate-100 text-[11px] font-medium text-slate-600"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
             )}
             {(app.realName || app.idCardMasked) && (
               <div className="text-xs text-slate-600 space-y-0.5">
@@ -1577,7 +1682,8 @@ const ApplicationsPage = () => {
                   onClick={() =>
                     openApproveModal({
                       id: app.id,
-                      applicantName: app.applicantName
+                      applicantName: app.nickname || app.applicantName,
+                      domainTags: app.domainTags
                     })
                   }
                 >
@@ -1661,7 +1767,7 @@ const ApplicationsPage = () => {
               })}
             </div>
             {activeTagOptions.length === 0 && (
-              <p className="text-xs text-rose-600">暂无已上架标签，请先在专家标签管理中创建。</p>
+              <p className="text-xs text-rose-600">暂无已上架标签，请先在分类标签管理中创建。</p>
             )}
             <div className="flex gap-2 justify-end">
               <button

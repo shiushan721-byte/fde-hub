@@ -37,6 +37,7 @@ import {
   Bookmark,
   ThumbsUp,
   Crown,
+  DollarSign,
   ArrowLeft,
   Plus,
   Wallet,
@@ -60,6 +61,7 @@ import {
 import { mockCaseStudies } from '../data/mockData';
 import { CaseStudy, getCaseStudyImages } from '../types';
 import { AgentPublishWizardModal } from './AgentPublishWizardModal';
+import { AgentPricingModal } from './AgentPricingModal';
 import { CustomerInstancesPanel } from './CustomerInstancesPanel';
 import { CreatorCustomOrdersPanel } from './CustomOrderPanels';
 import { mockCustomerAgentInstances } from '../data/agentInstanceMockData';
@@ -67,6 +69,8 @@ import { CustomerAgentInstance } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
 import { AccountView } from './AccountView';
 import { api, ApiError } from '../lib/api';
+import { creatorAgentHasBeenUsed } from '../lib/agentLifecycle';
+import { pricingLabel } from '../../shared/pricingPlans';
 
 function platformSupportLabel(support: CreatorAgentItem['platformSupport']) {
   switch (support) {
@@ -81,15 +85,11 @@ function platformSupportLabel(support: CreatorAgentItem['platformSupport']) {
 }
 
 function agentDeletePrompt(agent: CreatorAgentItem) {
-  const reviewing = agent.status === 'under_review';
-  if (agent.status === 'published') {
-    return '删除后，该智能体将不再展示在智能体市场且无法恢复。曾经使用过该智能体的用户，仍可继续使用。';
-  }
-  if (reviewing) {
+  if (agent.status === 'under_review') {
     return '当前智能体正在审核中，删除后智能体及内容将无法恢复，请谨慎操作。';
   }
-  if (agent.status === 'offline') {
-    return '该智能体曾经在智能体市场公开展示，删除后无法恢复。曾经使用过该智能体的用户，仍可继续使用。';
+  if (agent.status === 'published') {
+    return '删除后，该智能体将从市场消失且无法恢复。当前尚无用户使用，可以删除。';
   }
   return '删除后，该智能体及内容将无法恢复，请谨慎操作。';
 }
@@ -110,7 +110,7 @@ export type CreatorCenterTab =
   | 'profile-editor'   // 1. 主页编辑
   | 'my-agents'        // 2. 智能体管理（含通用 / 专属子 Tab）
   | 'custom-services'  // 3. 定制服务（咨询 + 订单同一流程）
-  | 'account'          // 4. 账户（待提现 / 可提现 / 已提现）
+  | 'account'          // 4. 我的收益（可提现 / 总收入 / 待入账 / 提现中）
   | 'customer-leads'   // 兼容旧入口：映射到定制服务
   | 'orders'           // 兼容旧入口：映射到定制服务
   | 'customer-instances' // 兼容旧入口：映射到智能体管理 · 专属
@@ -201,11 +201,21 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     domainTags: ['跨境电商', '爆款文案', '广告投放', '多语种本地化', '私有化部署']
   });
   const [tagCatalog, setTagCatalog] = useState<string[]>([]);
+  const [titleCatalog, setTitleCatalog] = useState<string[]>([]);
   const [profileSavedToast, setProfileSavedToast] = useState(false);
 
   useEffect(() => {
     void api<Array<{ name: string }>>('/api/public/expert-tags')
       .then((tags) => setTagCatalog(tags.map((t) => t.name).filter(Boolean)))
+      .catch(() => undefined);
+    void api<Array<{ name: string }>>('/api/public/expert-titles')
+      .then((titles) => {
+        const names = titles.map((t) => t.name).filter(Boolean);
+        setTitleCatalog(names);
+        setProfileData((prev) =>
+          prev.title || !names[0] ? prev : { ...prev, title: names[0] }
+        );
+      })
       .catch(() => undefined);
   }, []);
 
@@ -230,6 +240,8 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [agentForSkillReplacement, setAgentForSkillReplacement] = useState<CreatorAgentItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CreatorAgentItem | null>(null);
+  const [blockedDeleteTarget, setBlockedDeleteTarget] = useState<CreatorAgentItem | null>(null);
+  const [pricingTarget, setPricingTarget] = useState<CreatorAgentItem | null>(null);
   const [deletingAgent, setDeletingAgent] = useState(false);
   const [instanceForSkillReplacement, setInstanceForSkillReplacement] =
     useState<CustomerAgentInstance | null>(null);
@@ -380,12 +392,23 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
 
   const confirmDeleteAgent = async () => {
     if (!deleteTarget) return;
+    if (creatorAgentHasBeenUsed(deleteTarget)) {
+      setBlockedDeleteTarget(deleteTarget);
+      setDeleteTarget(null);
+      return;
+    }
     setDeletingAgent(true);
     try {
       await api(`/api/me/agents/${deleteTarget.id}/delete`, { method: 'POST' });
     } catch (err) {
       const status = err instanceof ApiError ? err.status : undefined;
       const code = err instanceof ApiError ? err.code : '';
+      if (status === 409 || code === 'AGENT_IN_USE') {
+        setBlockedDeleteTarget(deleteTarget);
+        setDeleteTarget(null);
+        setDeletingAgent(false);
+        return;
+      }
       if (status !== 401 && status !== 403 && status !== 404 && code !== 'NETWORK_ERROR') {
         alert(err instanceof Error ? err.message : '删除失败');
         setDeletingAgent(false);
@@ -513,7 +536,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
           { key: 'profile-editor', label: '1. 主页编辑', icon: Edit3, count: null },
           { key: 'my-agents', label: '2. 智能体管理', icon: Bot, count: agentsList.length + instancesList.length },
           { key: 'custom-services', label: '3. 定制服务', icon: Package, count: leadsList.filter((l) => l.status === 'new').length, badgeColor: 'bg-rose-500 text-white' },
-          { key: 'account', label: '4. 账户', icon: Wallet, count: null }
+          { key: 'account', label: '4. 我的收益', icon: Wallet, count: null }
         ].map((tab) => {
           const Icon = tab.icon;
           const isCurrent = activeTab === tab.key;
@@ -579,14 +602,28 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
               </div>
 
               <div className="space-y-1.5 text-xs">
-                <label className="font-bold text-slate-700">专家头衔</label>
-                <input
-                  type="text"
+                <label className="font-bold text-slate-700">专家头衔（仅可选平台上架头衔）</label>
+                <select
                   value={profileData.title}
                   onChange={(e) => setProfileData({ ...profileData, title: e.target.value })}
-                  placeholder="如：电商 AI 解决方案架构师"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none"
-                />
+                  disabled={titleCatalog.length === 0}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 outline-none cursor-pointer disabled:text-slate-400"
+                >
+                  {titleCatalog.length === 0 ? (
+                    <option value="">暂无上架头衔</option>
+                  ) : (
+                    <>
+                      {!titleCatalog.includes(profileData.title) && profileData.title && (
+                        <option value={profileData.title}>{profileData.title}（当前，未上架）</option>
+                      )}
+                      {titleCatalog.map((title) => (
+                        <option key={title} value={title}>
+                          {title}
+                        </option>
+                      ))}
+                    </>
+                  )}
+                </select>
               </div>
 
               <div className="space-y-1.5 text-xs">
@@ -854,6 +891,13 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                           <span className="text-[10px] text-slate-500 font-mono">
                             v{agent.version || '1.0.0'}
                           </span>
+                          <span className="text-[10px] font-bold text-blue-700">
+                            · {pricingLabel({
+                              isFree: agent.pricingType === 'free' || agent.pricingPlans?.isFree,
+                              monthlyPrice: agent.pricingPlans?.monthlyPrice,
+                              price: agent.price
+                            })}
+                          </span>
                           {agent.status !== 'published' && (
                             <span className="text-[10px] text-slate-400">· 已下架 / 草稿</span>
                           )}
@@ -901,7 +945,16 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                       重新发布上架
                     </button>
                   )}
-
+                  <button
+                    type="button"
+                    onClick={() => setPricingTarget(agent)}
+                    className="flex-1 py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1"
+                  >
+                    <DollarSign size={12} />
+                    <span>定价</span>
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
                   {agent.status === 'published' ? (
                     <button
                       type="button"
@@ -920,20 +973,31 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                         setAgentForSkillReplacement(agent);
                         setShowPublishModal(true);
                       }}
-                      className="flex-1 py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1"
+                      className="flex-1 py-2 px-3 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1"
                     >
                       <RefreshCw size={12} />
                       <span>更新 Skill 包</span>
                     </button>
                   )}
+                  {creatorAgentHasBeenUsed(agent) ? (
+                    <button
+                      type="button"
+                      onClick={() => setBlockedDeleteTarget(agent)}
+                      className="flex-1 py-2 px-3 text-[11px] font-bold text-slate-400 hover:text-slate-600 cursor-pointer"
+                      title="已有用户使用，无法删除"
+                    >
+                      无法删除
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget(agent)}
+                      className="flex-1 py-2 px-3 text-[11px] font-bold text-rose-600 hover:text-rose-700 cursor-pointer"
+                    >
+                      删除智能体
+                    </button>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setDeleteTarget(agent)}
-                  className="w-full py-1.5 text-[11px] font-bold text-rose-600 hover:text-rose-700 cursor-pointer"
-                >
-                  删除智能体
-                </button>
               </div>
             ))}
           </div>
@@ -1804,6 +1868,64 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {blockedDeleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+          onClick={() => setBlockedDeleteTarget(null)}
+        >
+          <div
+            className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 pt-5 pb-2 flex items-start justify-between gap-3">
+              <h3 className="text-base font-bold text-slate-900">无法删除</h3>
+              <button
+                type="button"
+                onClick={() => setBlockedDeleteTarget(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="px-6 pb-6 text-sm text-slate-600 leading-relaxed">
+              已有用户使用过该智能体，无法删除。可从市场撤回为「仅自己可用」，之后仅你自己能使用。定价仍可后续调整，但已购用户不受影响。
+            </p>
+            <div className="px-6 pb-5 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setBlockedDeleteTarget(null)}
+                className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 cursor-pointer"
+              >
+                我知道了
+              </button>
+              {blockedDeleteTarget.status === 'published' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleToggleAgentStatus(blockedDeleteTarget.id, 'offline');
+                    setBlockedDeleteTarget(null);
+                  }}
+                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium cursor-pointer"
+                >
+                  设为仅自己可用
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pricingTarget && (
+        <AgentPricingModal
+          agent={pricingTarget}
+          onClose={() => setPricingTarget(null)}
+          onSaved={(updated) => {
+            setAgentsList((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
+            setPricingTarget(null);
+          }}
+        />
       )}
 
     </div>

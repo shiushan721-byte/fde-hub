@@ -25,7 +25,7 @@ function useAdminQuery<T>(path: string, extraKey = '') {
   return { data, error, loading, reload: load };
 }
 
-type ExpertTagRow = {
+type ExpertTitleRow = {
   id: string;
   name: string;
   sortOrder: number;
@@ -33,41 +33,39 @@ type ExpertTagRow = {
   expertCount?: number;
 };
 
-type TagExpertRow = {
+type TitleExpertRow = {
   id: string;
   name: string;
   expertNo: string;
-  domainTags: string[];
+  title: string;
 };
 
-export const ExpertTagsPage = () => {
-  const { data, error, loading, reload } = useAdminQuery<ExpertTagRow[]>('/api/admin/expert-tags');
+export const ExpertTitlesPage = () => {
+  const { data, error, loading, reload } = useAdminQuery<ExpertTitleRow[]>('/api/admin/expert-titles');
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState('');
-  const [offlineTarget, setOfflineTarget] = useState<ExpertTagRow | null>(null);
-  const [editTarget, setEditTarget] = useState<ExpertTagRow | null>(null);
+  const [offlineTarget, setOfflineTarget] = useState<ExpertTitleRow | null>(null);
+  const [editTarget, setEditTarget] = useState<ExpertTitleRow | null>(null);
   const [editName, setEditName] = useState('');
-  const [linkedExperts, setLinkedExperts] = useState<TagExpertRow[]>([]);
+  const [linkedExperts, setLinkedExperts] = useState<TitleExpertRow[]>([]);
   const [linkedLoading, setLinkedLoading] = useState(false);
-  const [draftTagsByExpert, setDraftTagsByExpert] = useState<Record<string, string[]>>({});
+  const [draftTitleByExpert, setDraftTitleByExpert] = useState<Record<string, string>>({});
 
-  const activeTags = useMemo(
+  const activeTitles = useMemo(
     () => (data || []).filter((t) => t.status === 'active'),
     [data]
   );
 
-  const loadLinkedExperts = async (tagId: string) => {
+  const loadLinkedExperts = async (titleId: string) => {
     setLinkedLoading(true);
     try {
-      const experts = await api<TagExpertRow[]>(`/api/admin/expert-tags/${tagId}/experts`);
+      const experts = await api<TitleExpertRow[]>(`/api/admin/expert-titles/${titleId}/experts`);
       setLinkedExperts(experts);
-      setDraftTagsByExpert(
-        Object.fromEntries(experts.map((expert) => [expert.id, [...expert.domainTags]]))
-      );
+      setDraftTitleByExpert(Object.fromEntries(experts.map((expert) => [expert.id, expert.title])));
     } catch (err) {
       alert(err instanceof Error ? err.message : '加载关联专家失败');
       setLinkedExperts([]);
-      setDraftTagsByExpert({});
+      setDraftTitleByExpert({});
     } finally {
       setLinkedLoading(false);
     }
@@ -76,21 +74,21 @@ export const ExpertTagsPage = () => {
   useEffect(() => {
     if (!offlineTarget || (offlineTarget.expertCount ?? 0) === 0) {
       setLinkedExperts([]);
-      setDraftTagsByExpert({});
+      setDraftTitleByExpert({});
       return;
     }
     void loadLinkedExperts(offlineTarget.id);
   }, [offlineTarget?.id, offlineTarget?.expertCount]);
 
-  const createTag = async () => {
+  const createTitle = async () => {
     const name = newName.trim();
     if (!name) {
-      alert('请输入标签名称');
+      alert('请输入头衔名称');
       return;
     }
     setBusy('create');
     try {
-      await api('/api/admin/expert-tags', {
+      await api('/api/admin/expert-titles', {
         method: 'POST',
         body: JSON.stringify({ name })
       });
@@ -107,7 +105,7 @@ export const ExpertTagsPage = () => {
     if (!offlineTarget) return;
     setBusy(offlineTarget.id);
     try {
-      await api(`/api/admin/expert-tags/${offlineTarget.id}/offline`, { method: 'POST' });
+      await api(`/api/admin/expert-titles/${offlineTarget.id}/offline`, { method: 'POST' });
       setOfflineTarget(null);
       await reload();
     } catch (err) {
@@ -117,10 +115,10 @@ export const ExpertTagsPage = () => {
     }
   };
 
-  const runOnline = async (tag: ExpertTagRow) => {
-    setBusy(tag.id);
+  const runOnline = async (title: ExpertTitleRow) => {
+    setBusy(title.id);
     try {
-      await api(`/api/admin/expert-tags/${tag.id}/online`, { method: 'POST' });
+      await api(`/api/admin/expert-titles/${title.id}/online`, { method: 'POST' });
       await reload();
     } catch (err) {
       alert(err instanceof Error ? err.message : '上架失败');
@@ -129,54 +127,37 @@ export const ExpertTagsPage = () => {
     }
   };
 
-  const toggleExpertTag = (expertId: string, tagName: string, offlineName?: string) => {
-    setDraftTagsByExpert((prev) => {
-      const current = prev[expertId] || [];
-      if (current.includes(tagName)) {
-        const next = current.filter((t) => t !== tagName);
-        return { ...prev, [expertId]: next };
-      }
-      const next = [...current, tagName];
-      if (offlineName && tagName !== offlineName) {
-        return { ...prev, [expertId]: next.filter((t) => t !== offlineName) };
-      }
-      return { ...prev, [expertId]: next };
-    });
-  };
-
-  const saveExpertTags = async (expert: TagExpertRow) => {
-    const draft = draftTagsByExpert[expert.id] || [];
-    if (draft.length === 0) {
-      alert('每位专家至少保留一个上架标签');
+  const saveExpertTitle = async (expert: TitleExpertRow) => {
+    const next = (draftTitleByExpert[expert.id] || '').trim();
+    if (!next) {
+      alert('请选择一个上架头衔');
       return;
     }
-    if (offlineTarget && draft.includes(offlineTarget.name)) {
-      alert(`请取消「${offlineTarget.name}」或改选其他上架标签后再保存`);
+    if (offlineTarget && next === offlineTarget.name) {
+      alert(`请改选其他上架头衔后再保存`);
       return;
     }
     setBusy(expert.id);
     try {
       await api(`/api/admin/experts/${expert.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ domainTags: draft })
+        body: JSON.stringify({ title: next })
       });
-      const freshTags = await api<ExpertTagRow[]>('/api/admin/expert-tags');
+      const fresh = await api<ExpertTitleRow[]>('/api/admin/expert-titles');
       await reload();
       if (offlineTarget) {
-        const updatedTag = freshTags.find((t) => t.id === offlineTarget.id);
-        if (!updatedTag || (updatedTag.expertCount ?? 0) === 0) {
-          setOfflineTarget(updatedTag || null);
+        const updated = fresh.find((t) => t.id === offlineTarget.id);
+        if (!updated || (updated.expertCount ?? 0) === 0) {
+          setOfflineTarget(updated || null);
           setLinkedExperts([]);
           return;
         }
-        setOfflineTarget(updatedTag);
-        const refreshed = await api<TagExpertRow[]>(
-          `/api/admin/expert-tags/${offlineTarget.id}/experts`
+        setOfflineTarget(updated);
+        const refreshed = await api<TitleExpertRow[]>(
+          `/api/admin/expert-titles/${offlineTarget.id}/experts`
         );
         setLinkedExperts(refreshed);
-        setDraftTagsByExpert(
-          Object.fromEntries(refreshed.map((row) => [row.id, [...row.domainTags]]))
-        );
+        setDraftTitleByExpert(Object.fromEntries(refreshed.map((row) => [row.id, row.title])));
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : '保存失败');
@@ -185,20 +166,20 @@ export const ExpertTagsPage = () => {
     }
   };
 
-  const openOffline = (tag: ExpertTagRow) => {
-    setOfflineTarget(tag);
+  const openOffline = (title: ExpertTitleRow) => {
+    setOfflineTarget(title);
   };
 
-  const openEdit = (tag: ExpertTagRow) => {
-    setEditTarget(tag);
-    setEditName(tag.name);
+  const openEdit = (title: ExpertTitleRow) => {
+    setEditTarget(title);
+    setEditName(title.name);
   };
 
   const saveEdit = async () => {
     if (!editTarget) return;
     const name = editName.trim();
     if (!name) {
-      alert('请输入标签名称');
+      alert('请输入头衔名称');
       return;
     }
     if (name === editTarget.name) {
@@ -207,7 +188,7 @@ export const ExpertTagsPage = () => {
     }
     setBusy(`edit-${editTarget.id}`);
     try {
-      await api(`/api/admin/expert-tags/${editTarget.id}`, {
+      await api(`/api/admin/expert-titles/${editTarget.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ name })
       });
@@ -221,38 +202,37 @@ export const ExpertTagsPage = () => {
     }
   };
 
-  const inputClass =
-    'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
-
+  const inputClass = 'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
   const linkedCount = offlineTarget?.expertCount ?? linkedExperts.length;
+  const migrateOptions = activeTitles.filter((t) => t.id !== offlineTarget?.id);
 
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-black">分类标签管理</h1>
+        <h1 className="text-xl font-black">专家头衔管理</h1>
         <p className="text-xs text-slate-500 mt-1">
-          上架标签用于前台展示与审核打标。无关联专家可直接下架；若仍有关联专家，需逐位调整其标签后再下架。
+          上架头衔会出现在专家卡片，并作为入驻审核时的下拉选项。无关联专家可直接下架；若仍有关联专家，需逐位改选其他上架头衔后再下架。
         </p>
       </div>
 
       <div className="flex flex-wrap items-end gap-2">
         <label className="space-y-1">
-          <span className="block text-[11px] text-slate-500">新标签</span>
+          <span className="block text-[11px] text-slate-500">新头衔</span>
           <input
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="如：电商零售"
-            className={`${inputClass} w-48`}
+            placeholder="如：电商 AI 解决方案架构师"
+            className={`${inputClass} w-72`}
           />
         </label>
         <button
           type="button"
           disabled={busy === 'create'}
-          onClick={() => void createTag()}
+          onClick={() => void createTitle()}
           className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
         >
-          {busy === 'create' ? '创建中…' : '添加标签'}
+          {busy === 'create' ? '创建中…' : '添加头衔'}
         </button>
       </div>
 
@@ -264,41 +244,41 @@ export const ExpertTagsPage = () => {
           <thead className="bg-slate-50 text-slate-500">
             <tr>
               <th className="text-left p-3 w-14">序号</th>
-              <th className="text-left p-3">标签名称</th>
+              <th className="text-left p-3">头衔名称</th>
               <th className="text-left p-3">状态</th>
               <th className="text-right p-3">关联专家</th>
               <th className="text-right p-3">操作</th>
             </tr>
           </thead>
           <tbody>
-            {(data || []).map((tag, index) => (
-              <tr key={tag.id} className="border-t border-slate-100">
+            {(data || []).map((title, index) => (
+              <tr key={title.id} className="border-t border-slate-100">
                 <td className="p-3 text-slate-500 tabular-nums">{(data?.length || 0) - index}</td>
-                <td className="p-3 font-bold">{tag.name}</td>
+                <td className="p-3 font-bold">{title.name}</td>
                 <td className="p-3">
-                  {tag.status === 'active' ? (
+                  {title.status === 'active' ? (
                     <span className="text-emerald-700 font-bold">已上架</span>
                   ) : (
                     <span className="text-slate-400 font-bold">已下架</span>
                   )}
                 </td>
                 <td className="p-3 text-right tabular-nums font-semibold text-slate-700">
-                  {tag.expertCount ?? 0}
+                  {title.expertCount ?? 0}
                 </td>
                 <td className="p-3 text-right space-x-2 whitespace-nowrap">
                   <button
                     type="button"
                     disabled={!!busy}
-                    onClick={() => openEdit(tag)}
+                    onClick={() => openEdit(title)}
                     className="font-bold text-blue-600 cursor-pointer disabled:opacity-60"
                   >
                     编辑
                   </button>
-                  {tag.status === 'active' ? (
+                  {title.status === 'active' ? (
                     <button
                       type="button"
                       disabled={!!busy}
-                      onClick={() => openOffline(tag)}
+                      onClick={() => openOffline(title)}
                       className="font-bold text-amber-700 cursor-pointer disabled:opacity-60"
                     >
                       下架
@@ -306,8 +286,8 @@ export const ExpertTagsPage = () => {
                   ) : (
                     <button
                       type="button"
-                      disabled={busy === tag.id}
-                      onClick={() => void runOnline(tag)}
+                      disabled={busy === title.id}
+                      onClick={() => void runOnline(title)}
                       className="font-bold text-emerald-700 cursor-pointer disabled:opacity-60"
                     >
                       上架
@@ -319,7 +299,7 @@ export const ExpertTagsPage = () => {
           </tbody>
         </table>
         {!loading && (data || []).length === 0 && (
-          <p className="p-6 text-sm text-slate-400 text-center">暂无标签</p>
+          <p className="p-6 text-sm text-slate-400 text-center">暂无头衔</p>
         )}
       </div>
 
@@ -332,12 +312,12 @@ export const ExpertTagsPage = () => {
             className="bg-white rounded-2xl border border-slate-200 p-5 w-full max-w-md space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-black">编辑标签名称</h3>
+            <h3 className="text-sm font-black">编辑头衔名称</h3>
             <p className="text-xs text-slate-500">
-              修改后将同步更新所有关联专家、申请记录中的该标签名称。
+              修改后将同步更新所有关联专家、申请记录中的该头衔名称。
             </p>
             <label className="block space-y-1">
-              <span className="text-[11px] text-slate-500">标签名称</span>
+              <span className="text-[11px] text-slate-500">头衔名称</span>
               <input
                 type="text"
                 value={editName}
@@ -377,9 +357,9 @@ export const ExpertTagsPage = () => {
             className="bg-white rounded-2xl border border-slate-200 p-5 w-full max-w-md space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-black">下架标签：{offlineTarget.name}</h3>
+            <h3 className="text-sm font-black">下架头衔：{offlineTarget.name}</h3>
             <p className="text-xs text-slate-500">
-              当前无专家使用该标签，确认后将从前台隐藏，且不可再用于审核打标。
+              当前无专家使用该头衔，确认后将从前台隐藏，且不可再用于入驻审核选择。
             </p>
             <div className="flex gap-2 justify-end">
               <button
@@ -415,17 +395,19 @@ export const ExpertTagsPage = () => {
               <h3 className="text-sm font-black">暂无法下架：{offlineTarget.name}</h3>
               <p className="text-xs text-slate-500 mt-1">
                 仍有 <span className="font-bold text-slate-800">{linkedCount}</span>{' '}
-                位专家使用该标签。请逐位调整下方专家的标签（取消勾选「{offlineTarget.name}」并选择其他上架标签），全部迁出后再下架。
+                位专家使用该头衔。请逐位改选其他上架头衔，全部迁出后再下架。
               </p>
+              {migrateOptions.length === 0 && (
+                <p className="text-xs text-rose-600 mt-2">请先添加并上架其他头衔，才能迁出当前头衔。</p>
+              )}
             </div>
 
             {linkedLoading && <p className="text-xs text-slate-500">加载关联专家…</p>}
 
             <div className="space-y-3">
               {linkedExperts.map((expert) => {
-                const draft = draftTagsByExpert[expert.id] || expert.domainTags;
-                const stillUsesTarget = draft.includes(offlineTarget.name);
-                const selectableTags = activeTags.filter((t) => t.id !== offlineTarget.id);
+                const draft = draftTitleByExpert[expert.id] || expert.title;
+                const stillUsesTarget = draft === offlineTarget.name;
                 return (
                   <div
                     key={expert.id}
@@ -442,48 +424,28 @@ export const ExpertTagsPage = () => {
                         <span className="text-[11px] font-bold text-emerald-700">已迁出</span>
                       )}
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[...selectableTags, { id: offlineTarget.id, name: offlineTarget.name }].map(
-                        (tag) => {
-                          const selected = draft.includes(tag.name);
-                          const isTarget = tag.id === offlineTarget.id;
-                          return (
-                            <button
-                              key={tag.id}
-                              type="button"
-                              onClick={() =>
-                                toggleExpertTag(
-                                  expert.id,
-                                  tag.name,
-                                  isTarget ? undefined : offlineTarget.name
-                                )
-                              }
-                              className={`px-2 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
-                                isTarget
-                                  ? selected
-                                    ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                    : 'bg-white text-slate-400 border-slate-200 line-through'
-                                  : selected
-                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                    : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                              }`}
-                            >
-                              {selected && !isTarget ? '✓ ' : ''}
-                              {tag.name}
-                              {isTarget && selected ? '（待移除）' : ''}
-                            </button>
-                          );
-                        }
-                      )}
-                    </div>
+                    <select
+                      value={draft}
+                      onChange={(e) =>
+                        setDraftTitleByExpert((prev) => ({ ...prev, [expert.id]: e.target.value }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+                    >
+                      <option value={offlineTarget.name}>{offlineTarget.name}（当前，待移除）</option>
+                      {migrateOptions.map((title) => (
+                        <option key={title.id} value={title.name}>
+                          {title.name}
+                        </option>
+                      ))}
+                    </select>
                     <div className="flex justify-end">
                       <button
                         type="button"
-                        disabled={busy === expert.id || draft.length === 0}
-                        onClick={() => void saveExpertTags(expert)}
+                        disabled={busy === expert.id || stillUsesTarget || migrateOptions.length === 0}
+                        onClick={() => void saveExpertTitle(expert)}
                         className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-[11px] font-bold cursor-pointer disabled:opacity-60"
                       >
-                        {busy === expert.id ? '保存中…' : '保存该专家标签'}
+                        {busy === expert.id ? '保存中…' : '保存该专家头衔'}
                       </button>
                     </div>
                   </div>

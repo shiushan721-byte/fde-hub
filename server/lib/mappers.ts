@@ -1,6 +1,7 @@
 import type { Agent, Expert } from '@prisma/client';
 import { parseJson } from './json';
 import { engagementTotals, formatEngagementCount } from './engagement';
+import { normalizeAdapterPackages } from '../../shared/adapterPackages';
 
 export function agentToCatalog(agent: Agent) {
   const eng = engagementTotals(agent);
@@ -23,7 +24,8 @@ export function agentToCatalog(agent: Agent) {
     commentsCount: agent.commentsCount,
     sharesCount: formatEngagementCount(eng.sharesTotal),
     usageCount: agent.usageCount || undefined,
-    rating: agent.rating ?? undefined
+    rating: agent.rating ?? undefined,
+    adapterPackages: normalizeAdapterPackages(parseJson(agent.adapterPackages, []))
   };
 }
 

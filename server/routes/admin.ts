@@ -39,6 +39,16 @@ import {
   updateExpertTag,
   validateActiveDomainTags
 } from '../services/expertTags';
+import {
+  countExpertsByTitleName,
+  createExpertTitle,
+  listExpertTitles,
+  listExpertsUsingTitle,
+  offlineExpertTitle,
+  onlineExpertTitle,
+  updateExpertTitle,
+  validateActiveExpertTitle
+} from '../services/expertTitles';
 
 export const adminRouter = Router();
 
@@ -555,6 +565,8 @@ adminRouter.post('/agents/:id/reject', async (req, res) => {
 });
 
 adminRouter.post('/agents/:id/offline', async (req, res) => {
+  const reason = z.string().trim().min(1).safeParse(req.body?.reason);
+  if (!reason.success) return fail(res, '下架必须填写原因');
   const current = await prisma.agent.findUnique({ where: { id: req.params.id } });
   if (!current) return fail(res, '智能体不存在', 404, 'NOT_FOUND');
   if (current.creatorDeletedAt) {
@@ -568,8 +580,33 @@ adminRouter.post('/agents/:id/offline', async (req, res) => {
     actorId: actorId(req),
     action: 'offline_agent',
     targetType: 'agent',
-    targetId: agent.id
+    targetId: agent.id,
+    diff: { reason: reason.data }
   });
+  if (current.authorId) {
+    const expert = await prisma.expert.findUnique({ where: { id: current.authorId } });
+    if (expert?.userId) {
+      await prisma.userNotification.create({
+        data: {
+          id: `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          userId: expert.userId,
+          type: 'agent_offline',
+          title: '您的智能体已被平台下架',
+          body: [
+            `您的智能体「${agent.title}」已从智能体市场下架，当前仅自己可用。`,
+            `下架原因：${reason.data}`,
+            '请根据原因完成修改并更新 Skill，重新提交平台审核。审核通过后，才可再次公开到智能体市场。'
+          ].join('\n'),
+          link: '/creator-center?tab=my-agents',
+          payload: JSON.stringify({
+            agentId: agent.id,
+            reason: reason.data,
+            agentTitle: agent.title
+          })
+        }
+      });
+    }
+  }
   return ok(res, agent);
 });
 
@@ -766,6 +803,14 @@ adminRouter.patch('/experts/:id', async (req, res) => {
       data.domainTags = toJson(validated);
     } catch (error) {
       return fail(res, error instanceof Error ? error.message : '专家标签无效');
+    }
+  }
+
+  if (rest.title) {
+    try {
+      data.title = await validateActiveExpertTitle(rest.title);
+    } catch (error) {
+      return fail(res, error instanceof Error ? error.message : '专家头衔无效');
     }
   }
 
@@ -1069,6 +1114,8 @@ function mapAdminApplication(
   return {
     ...item,
     applicantName: String(snapshot.applicantName || item.user?.name || ''),
+    nickname: String(snapshot.nickname || snapshot.applicantName || ''),
+    avatarUrl: String(snapshot.avatarUrl || snapshot.avatar || ''),
     expertTitle: String(snapshot.expertTitle || ''),
     bio: String(snapshot.bio || ''),
     domainTags: Array.isArray(snapshot.domainTags) ? snapshot.domainTags : [],
@@ -2198,6 +2245,103 @@ adminRouter.post('/expert-tags/:id/online', async (req, res) => {
       diff: {}
     });
     return ok(res, tag);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '上架失败');
+  }
+});
+
+adminRouter.get('/expert-titles', async (_req, res) => {
+  const [titles, countByName] = await Promise.all([
+    listExpertTitles({ status: 'all' }),
+    countExpertsByTitleName()
+  ]);
+  const withUsage = titles.map((title) => ({
+    ...title,
+    expertCount: countByName.get(title.name) || 0
+  }));
+  return ok(res, withUsage);
+});
+
+adminRouter.get('/expert-titles/:id/experts', async (req, res) => {
+  const title = await prisma.expertTitle.findUnique({ where: { id: req.params.id } });
+  if (!title) return fail(res, '头衔不存在', 404, 'NOT_FOUND');
+  const experts = await listExpertsUsingTitle(title.name);
+  return ok(res, experts);
+});
+
+const expertTitleCreateSchema = z.object({
+  name: z.string().min(1),
+  sortOrder: z.number().int().optional()
+});
+
+adminRouter.post('/expert-titles', async (req, res) => {
+  const parsed = expertTitleCreateSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const title = await createExpertTitle(parsed.data);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'create_expert_title',
+      targetType: 'expert_title',
+      targetId: title.id,
+      diff: parsed.data
+    });
+    return ok(res, title);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '创建失败');
+  }
+});
+
+adminRouter.patch('/expert-titles/:id', async (req, res) => {
+  const parsed = z
+    .object({
+      name: z.string().min(1).optional(),
+      sortOrder: z.number().int().optional()
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const title = await updateExpertTitle(req.params.id, parsed.data);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'update_expert_title',
+      targetType: 'expert_title',
+      targetId: title.id,
+      diff: parsed.data
+    });
+    return ok(res, title);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '更新失败');
+  }
+});
+
+adminRouter.post('/expert-titles/:id/offline', async (req, res) => {
+  try {
+    const title = await offlineExpertTitle(req.params.id);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'offline_expert_title',
+      targetType: 'expert_title',
+      targetId: title.id,
+      diff: {}
+    });
+    return ok(res, title);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '下架失败');
+  }
+});
+
+adminRouter.post('/expert-titles/:id/online', async (req, res) => {
+  try {
+    const title = await onlineExpertTitle(req.params.id);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'online_expert_title',
+      targetType: 'expert_title',
+      targetId: title.id,
+      diff: {}
+    });
+    return ok(res, title);
   } catch (error) {
     return fail(res, error instanceof Error ? error.message : '上架失败');
   }

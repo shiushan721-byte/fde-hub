@@ -11,25 +11,49 @@ export const PaymentCheckoutDrawer: React.FC<{
   title?: string;
   amountCents: number;
   deadlineAt?: string;
+  heading?: string;
+  successTitle?: string;
+  successHint?: string;
+  escrowNote?: string;
+  amountLabel?: string;
+  payUrl?: string;
+  confirmUrl?: string;
   onClose: () => void;
   onPaid: () => void;
-}> = ({ orderId, orderNo, title, amountCents, deadlineAt, onClose, onPaid }) => {
+}> = ({
+  orderId,
+  orderNo,
+  title,
+  amountCents,
+  deadlineAt,
+  heading = '支付并托管',
+  successTitle = '支付成功',
+  successHint = '款项已进入平台托管，专家可以开始交付。',
+  escrowNote = '资金由平台托管至验收完成。验收通过并过观察期后，扣除平台服务费，结算至专家可提现余额。',
+  amountLabel = '应付金额（平台托管）',
+  payUrl,
+  confirmUrl,
+  onClose,
+  onPaid
+}) => {
   const [channel, setChannel] = useState<PayChannel>('wechat');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
   const isWechat = channel === 'wechat';
+  const startPayUrl = payUrl || `/api/custom-orders/${orderId}/pay`;
+  const finishPayUrl = confirmUrl || `/api/custom-orders/${orderId}/confirm-escrow`;
 
   const confirmPay = async () => {
     setBusy(true);
     setError('');
     try {
-      await api(`/api/custom-orders/${orderId}/pay`, {
+      await api(startPayUrl, {
         method: 'POST',
         body: JSON.stringify({ channel })
       });
-      await api(`/api/custom-orders/${orderId}/confirm-escrow`, {
+      await api(finishPayUrl, {
         method: 'POST',
         body: JSON.stringify({ channel })
       });
@@ -55,7 +79,7 @@ export const PaymentCheckoutDrawer: React.FC<{
       >
         <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
-            <h3 className="text-base font-black text-slate-900">支付并托管</h3>
+            <h3 className="text-base font-black text-slate-900">{heading}</h3>
             <p className="text-xs text-slate-400 mt-0.5 truncate">{orderNo || title}</p>
           </div>
           <button
@@ -73,13 +97,13 @@ export const PaymentCheckoutDrawer: React.FC<{
               <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
                 <CheckCircle2 size={32} />
               </div>
-              <h4 className="text-base font-bold text-slate-900">支付成功</h4>
-              <p className="text-xs text-slate-500">款项已进入平台托管，专家可以开始交付。</p>
+              <h4 className="text-base font-bold text-slate-900">{successTitle}</h4>
+              <p className="text-xs text-slate-500">{successHint}</p>
             </div>
           ) : (
             <>
               <div className="rounded-2xl bg-slate-900 text-white p-5 space-y-1">
-                <div className="text-[11px] text-slate-400">应付金额（平台托管）</div>
+                <div className="text-[11px] text-slate-400">{amountLabel}</div>
                 <div className="text-3xl font-black tracking-tight">{yuan(amountCents)}</div>
                 {title && <div className="text-xs text-slate-300 pt-1 truncate">{title}</div>}
                 {deadlineAt && (
@@ -137,9 +161,7 @@ export const PaymentCheckoutDrawer: React.FC<{
 
               <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 text-[11px] text-slate-600 flex items-start gap-2">
                 <ShieldCheck size={14} className="text-blue-600 mt-0.5 shrink-0" />
-                <p>
-                  资金由平台托管至验收完成。验收通过并过观察期后，扣除平台服务费，结算至专家可提现余额。
-                </p>
+                <p>{escrowNote}</p>
               </div>
 
               {error && <p className="text-xs text-rose-600">{error}</p>}

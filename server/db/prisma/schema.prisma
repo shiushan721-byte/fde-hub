@@ -32,6 +32,7 @@ model User {
   wallet                Wallet?
   payments              PaymentRecord[]
   withdrawals           Withdrawal[]
+  agentPurchases        AgentPurchase[]
 }
 
 model Session {
@@ -98,10 +99,13 @@ model Agent {
   featured        Boolean  @default(false)
   sortOrder       Int      @default(0)
   solutionPayload String   @default("")
+  /** 外部工具适配分发包：[{ platformName, fileName, url, size }] */
+  adapterPackages String   @default("[]")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   comments        AgentComment[]
   shareLinks      AgentShareLink[]
+  purchases       AgentPurchase[]
 }
 
 /** 分享链接：私有/已下架智能体凭 token 仍可访问 */
@@ -112,6 +116,30 @@ model AgentShareLink {
   token     String   @unique
   createdAt DateTime @default(now())
 
+  @@index([agentId])
+}
+
+/** 市场标准版购买：价格按下单时快照，后续改价不影响已购用户 */
+model AgentPurchase {
+  id            String    @id
+  agentId       String
+  agent         Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /** monthly | annual | buyout */
+  plan          String
+  priceCents    Int
+  priceSnapshot String    @default("{}")
+  /** pending | paid */
+  status        String    @default("pending")
+  channel       String    @default("")
+  paymentId     String    @default("")
+  paidAt        DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId, agentId])
   @@index([agentId])
 }
 
@@ -197,8 +225,19 @@ model Expert {
   certification   ExpertCertification?
 }
 
-/** 平台统一维护的专家领域标签（上架才在前台展示/可选） */
+/** 平台统一维护的专家领域分类标签（上架才在前台展示/可选） */
 model ExpertTag {
+  id        String   @id
+  name      String   @unique
+  sortOrder Int      @default(0)
+  /** active | offline */
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/** 平台统一维护的专家头衔（上架才可在入驻审核时选择，并展示在专家卡片） */
+model ExpertTitle {
   id        String   @id
   name      String   @unique
   sortOrder Int      @default(0)

@@ -2,9 +2,11 @@ import dotenv from 'dotenv';
 import { ensureSampleCustomOrders } from './seedCustomOrders';
 import { ensureFinanceSynced } from './seedFinance';
 import { ensureSampleInReviewAgents, ensureSampleCreatorDeletedAgents } from './seedInReviewAgents';
+import { ensureSampleAdapterPackages } from './seedAdapterPackages';
 import { ensureExpertDomainTagsAligned } from './seedExpertTagUsage';
 import { ensureSampleCommentReports } from './seedCommentReports';
 import { ensureExpertTags } from '../services/expertTags';
+import { ensureExpertTitles } from '../services/expertTitles';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { toJson } from '../lib/json';
@@ -34,16 +36,19 @@ export async function seedDatabase(force = false) {
     await ensureExpertCasesSynced();
     await ensureFinanceSynced();
     await ensureExpertTags();
+    await ensureExpertTitles();
     await ensureSampleInReviewAgents();
     await ensureSampleCreatorDeletedAgents();
     await ensureExpertDomainTagsAligned();
     await ensureSampleCommentReports();
+    await ensureSampleAdapterPackages();
     return { seeded: false, agents: existing };
   }
 
   if (force) {
     await prisma.walletLedger.deleteMany();
     await prisma.withdrawal.deleteMany();
+    await prisma.agentPurchase.deleteMany();
     await prisma.paymentRecord.deleteMany();
     await prisma.wallet.deleteMany();
     await prisma.platformFeeRatePeriod.deleteMany();
@@ -52,6 +57,7 @@ export async function seedDatabase(force = false) {
     await prisma.financeJournal.deleteMany();
     await prisma.financeAccount.deleteMany();
     await prisma.expertTag.deleteMany();
+    await prisma.expertTitle.deleteMany();
     await prisma.userNotification.deleteMany();
     await prisma.customOrderEvent.deleteMany();
     await prisma.deliveryVersion.deleteMany();
@@ -326,10 +332,12 @@ export async function seedDatabase(force = false) {
   await ensureAgentComments();
   await ensureFinanceSynced();
   await ensureExpertTags();
+  await ensureExpertTitles();
   await ensureSampleInReviewAgents();
   await ensureSampleCreatorDeletedAgents();
   await ensureExpertDomainTagsAligned();
   await ensureSampleCommentReports();
+  await ensureSampleAdapterPackages();
 
   const count = await prisma.agent.count();
   return { seeded: true, agents: count };
@@ -601,6 +609,7 @@ export async function ensureExpertApplicationSeed() {
     await ensureSampleCreatorDeletedAgents();
     await ensureExpertDomainTagsAligned();
     await ensureSampleCommentReports();
+    await ensureSampleAdapterPackages();
   } catch (error) {
     console.warn('ensureExpertApplicationSeed skipped:', error);
   }
