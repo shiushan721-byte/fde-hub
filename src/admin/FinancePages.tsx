@@ -82,7 +82,16 @@ type SettlementRow = {
   createdAt?: string;
   buyer?: { id?: string; name?: string; email?: string; phone?: string } | null;
   seller?: { id?: string; name?: string; email?: string; phone?: string } | null;
+  interventionStatus?: string;
+  interventionReason?: string;
+  interventionAt?: string | null;
 };
+
+function interventionLabel(status?: string) {
+  if (status === 'processing') return '正在处理';
+  if (status === 'resolved') return '已处理';
+  return '';
+}
 
 function settlementFundStatus(status: string, paymentStatus: string) {
   if (status === 'completed' || paymentStatus === 'settled') return '已完成';
@@ -323,12 +332,16 @@ export const ExpertAccountsPage = () => {
 const SETTLEMENT_STATUS_OPTIONS = ['待支付', '平台托管中', '已完成'] as const;
 
 export const SettlementsPage = () => {
-  const { data, error, loading } = useAdminQuery<SettlementRow[]>('/api/admin/settlements');
+  const { data, error, loading, reload } = useAdminQuery<SettlementRow[]>('/api/admin/settlements');
   const [orderNo, setOrderNo] = useState('');
   const [phone, setPhone] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [status, setStatus] = useState('');
+  const [interveneTarget, setInterveneTarget] = useState<SettlementRow | null>(null);
+  const [interveneStatus, setInterveneStatus] = useState<'processing' | 'resolved'>('processing');
+  const [interveneReason, setInterveneReason] = useState('');
+  const [interveneBusy, setInterveneBusy] = useState(false);
 
   const rows = useMemo(() => {
     const list = data || [];
@@ -364,6 +377,29 @@ export const SettlementsPage = () => {
 
   const inputClass =
     'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
+
+  const submitIntervention = async () => {
+    if (!interveneTarget) return;
+    const reason = interveneReason.trim();
+    if (!reason) {
+      alert('请填写理由');
+      return;
+    }
+    setInterveneBusy(true);
+    try {
+      await api(`/api/admin/settlements/${interveneTarget.id}/intervene`, {
+        method: 'POST',
+        body: JSON.stringify({ status: interveneStatus, reason })
+      });
+      setInterveneTarget(null);
+      setInterveneReason('');
+      await reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '提交失败');
+    } finally {
+      setInterveneBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -437,49 +473,142 @@ export const SettlementsPage = () => {
               <th className="text-right p-3">订单金额</th>
               <th className="text-left p-3">状态</th>
               <th className="text-left p-3">下单时间</th>
+              <th className="text-left p-3">操作</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => (
-              <tr key={row.id} className="border-t border-slate-100">
-                <td className="p-3 text-slate-500 tabular-nums">{rows.length - index}</td>
-                <td className="p-3 font-mono text-[11px] text-slate-700 whitespace-nowrap">
-                  {row.orderNo}
-                </td>
-                <td className="p-3">
-                  <div className="font-bold text-slate-900">
-                    {row.baseAgentTitle || row.title || '—'}
-                  </div>
-                  <div className="text-slate-400 mt-0.5">
-                    {row.baseAgentVersion ? `版本 ${row.baseAgentVersion}` : '—'}
-                  </div>
-                </td>
-                <td className="p-3">
-                  <div className="font-bold text-slate-900">{row.buyer?.name || '—'}</div>
-                  <div className="text-slate-500 mt-0.5 font-mono">
-                    {row.buyer?.phone || '—'}
-                  </div>
-                </td>
-                <td className="p-3">
-                  <div className="font-bold text-slate-900">{row.seller?.name || '—'}</div>
-                  <div className="text-slate-500 mt-0.5 font-mono">
-                    {row.seller?.phone || '—'}
-                  </div>
-                  <div className="text-slate-400 mt-0.5 font-mono text-[10px]">
-                    {row.seller?.id || '—'}
-                  </div>
-                </td>
-                <td className="p-3 text-right font-bold">{yuan(row.priceCents)}</td>
-                <td className="p-3">{settlementFundStatus(row.status, row.paymentStatus)}</td>
-                <td className="p-3 text-slate-500 whitespace-nowrap">{formatTime(row.createdAt)}</td>
-              </tr>
-            ))}
+            {rows.map((row, index) => {
+              const currentLabel = interventionLabel(row.interventionStatus);
+              return (
+                <tr key={row.id} className="border-t border-slate-100">
+                  <td className="p-3 text-slate-500 tabular-nums">{rows.length - index}</td>
+                  <td className="p-3 font-mono text-[11px] text-slate-700 whitespace-nowrap">
+                    {row.orderNo}
+                  </td>
+                  <td className="p-3">
+                    <div className="font-bold text-slate-900">
+                      {row.baseAgentTitle || row.title || '—'}
+                    </div>
+                    <div className="text-slate-400 mt-0.5">
+                      {row.baseAgentVersion ? `版本 ${row.baseAgentVersion}` : '—'}
+                    </div>
+                  </td>
+                  <td className="p-3">
+                    <div className="font-bold text-slate-900">{row.buyer?.name || '—'}</div>
+                    <div className="text-slate-500 mt-0.5 font-mono">
+                      {row.buyer?.phone || '—'}
+                    </div>
+                  </td>
+                  <td className="p-3">
+                    <div className="font-bold text-slate-900">{row.seller?.name || '—'}</div>
+                    <div className="text-slate-500 mt-0.5 font-mono">
+                      {row.seller?.phone || '—'}
+                    </div>
+                    <div className="text-slate-400 mt-0.5 font-mono text-[10px]">
+                      {row.seller?.id || '—'}
+                    </div>
+                  </td>
+                  <td className="p-3 text-right font-bold">{yuan(row.priceCents)}</td>
+                  <td className="p-3">{settlementFundStatus(row.status, row.paymentStatus)}</td>
+                  <td className="p-3 text-slate-500 whitespace-nowrap">{formatTime(row.createdAt)}</td>
+                  <td className="p-3">
+                    <button
+                      type="button"
+                      className="text-rose-600 font-bold cursor-pointer hover:underline"
+                      onClick={() => {
+                        setInterveneTarget(row);
+                        setInterveneStatus(
+                          row.interventionStatus === 'resolved' ? 'resolved' : 'processing'
+                        );
+                        setInterveneReason(row.interventionReason || '');
+                      }}
+                    >
+                      平台介入
+                    </button>
+                    {currentLabel && (
+                      <div className="text-[10px] text-slate-400 mt-0.5">{currentLabel}</div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         {!loading && rows.length === 0 && (
           <p className="p-6 text-sm text-slate-400 text-center">暂无匹配的结算订单</p>
         )}
       </div>
+
+      {interveneTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => !interveneBusy && setInterveneTarget(null)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 p-5 w-full max-w-md space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="text-sm font-black">平台介入</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                订单 {interveneTarget.orderNo} · 选择处理状态并填写理由
+              </p>
+            </div>
+            <div className="flex gap-5 text-xs font-bold text-slate-800">
+              <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="intervention-status"
+                  checked={interveneStatus === 'processing'}
+                  onChange={() => setInterveneStatus('processing')}
+                />
+                正在处理
+              </label>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="intervention-status"
+                  checked={interveneStatus === 'resolved'}
+                  onChange={() => setInterveneStatus('resolved')}
+                />
+                已处理
+              </label>
+            </div>
+            <label className="block space-y-1">
+              <span className="text-[11px] text-slate-500">理由（必填）</span>
+              <textarea
+                rows={4}
+                value={interveneReason}
+                onChange={(e) => setInterveneReason(e.target.value)}
+                placeholder="请填写平台介入理由"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                autoFocus
+              />
+            </label>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                disabled={interveneBusy}
+                onClick={() => {
+                  setInterveneTarget(null);
+                  setInterveneReason('');
+                }}
+                className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={interveneBusy}
+                onClick={() => void submitIntervention()}
+                className="px-3 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+              >
+                {interveneBusy ? '提交中…' : '确认'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -106,6 +106,7 @@ model Agent {
   comments        AgentComment[]
   shareLinks      AgentShareLink[]
   purchases       AgentPurchase[]
+  showcases       AgentShowcase[]
 }
 
 /** 分享链接：私有/已下架智能体凭 token 仍可访问 */
@@ -126,7 +127,7 @@ model AgentPurchase {
   agent         Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
   userId        String
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  /** monthly | annual | buyout */
+  /** one_time（历史数据可能为 monthly / annual / buyout，展示时均视为一次性） */
   plan          String
   priceCents    Int
   priceSnapshot String    @default("{}")
@@ -143,11 +144,42 @@ model AgentPurchase {
   @@index([agentId])
 }
 
-/** 智能体评论（含作者回复：parentId 指向父评论） */
+/** 用户上传的智能体使用成果；作者可精选或隐藏 */
+model AgentShowcase {
+  id         String   @id
+  agentId    String
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  userId     String
+  userName   String
+  userAvatar String   @default("")
+  title      String   @default("")
+  description String  @default("")
+  imageUrl   String
+  fileName   String   @default("")
+  /** visible | hidden */
+  status     String   @default("visible")
+  featured   Boolean  @default(false)
+  /** 发现灵感分类：视频 | 图片 | 网页 | 其他 */
+  inspireCategory String @default("")
+  likesCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([agentId, status])
+  @@index([userId])
+  @@index([featured, inspireCategory])
+  comments    AgentComment[]
+}
+
+/** 评论：智能体详情或成果详情（source = agent | showcase） */
 model AgentComment {
   id         String   @id
   agentId    String
   agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  /** agent | showcase */
+  source     String   @default("agent")
+  showcaseId String?
+  showcase   AgentShowcase? @relation(fields: [showcaseId], references: [id], onDelete: Cascade)
   parentId   String?
   userId     String?
   userName   String
@@ -158,6 +190,9 @@ model AgentComment {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   reports    AgentCommentReport[]
+
+  @@index([agentId, source])
+  @@index([showcaseId])
 }
 
 /** 用户对智能体评论的举报工单 */
@@ -166,6 +201,9 @@ model AgentCommentReport {
   commentId      String
   comment        AgentComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
   agentId        String
+  /** agent | showcase，与评论来源一致 */
+  source         String       @default("agent")
+  showcaseId     String?
   reporterUserId String?
   reporterName   String       @default("")
   reason         String
@@ -181,6 +219,7 @@ model AgentCommentReport {
   @@index([status, createdAt])
   @@index([commentId])
   @@index([agentId])
+  @@index([source, status])
 }
 
 model Expert {
@@ -436,6 +475,10 @@ model CustomOrder {
   disputeReason         String    @default("")
   disputeOpenedAt       DateTime?
   disputeResolvedAt     DateTime?
+  /** none | processing | resolved */
+  interventionStatus    String    @default("none")
+  interventionReason    String    @default("")
+  interventionAt        DateTime?
   closedAt              DateTime?
   closeReason           String    @default("")
   leadId                String?

@@ -21,6 +21,7 @@ import { walletRouter } from './routes/wallet';
 
 
 dotenv.config();
+dotenv.config({ path: '.env.local', override: false });
 
 const app = express();
 const port = Number(process.env.API_PORT || 8787);

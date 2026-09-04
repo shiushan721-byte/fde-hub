@@ -162,7 +162,7 @@ export function MonthlyStatementModal({
                       <Bot size={14} className="text-sky-500 shrink-0" />
                       <span className="font-bold text-slate-900">标准智能体与知识库售卖</span>
                     </td>
-                    <td className="py-3 px-4 text-slate-600">个人/团队订阅与买断</td>
+                    <td className="py-3 px-4 text-slate-600">一次性购买</td>
                     <td className="py-3 px-4 text-slate-600 font-medium">70%</td>
                     <td className="py-3 px-4 text-right font-mono font-bold text-sky-700">
                       ￥{activeStatement.agentSalesIncome.toFixed(2)}

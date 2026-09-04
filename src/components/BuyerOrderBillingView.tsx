@@ -37,11 +37,8 @@ function channelText(channel?: string) {
   return '—';
 }
 
-function planText(plan?: string) {
-  if (plan === 'monthly') return '月付';
-  if (plan === 'annual') return '年付';
-  if (plan === 'buyout') return '买断';
-  return plan || '—';
+function planText(_plan?: string) {
+  return '一次性';
 }
 
 function catalogStatus(row: CatalogPurchaseRow) {
@@ -291,7 +288,7 @@ export const BuyerOrderBillingView: React.FC = () => {
               <ShoppingBag size={14} className="text-emerald-500" />
             </div>
             <div className="text-2xl font-black text-slate-900 tabular-nums">{catalogSummary.activeCount}</div>
-            <p className="text-[11px] text-slate-500">当前仍可使用的套餐</p>
+            <p className="text-[11px] text-slate-500">已购买且可使用</p>
           </div>
           <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-1.5">
             <div className="flex items-center justify-between text-[11px] text-slate-500">
@@ -425,7 +422,7 @@ export const BuyerOrderBillingView: React.FC = () => {
           filteredCatalog.length === 0 ? (
             <div className="py-16 text-center space-y-2 px-6">
               <p className="text-sm font-bold text-slate-800">暂无智能体购买</p>
-              <p className="text-xs text-slate-500">在智能体详情页选择套餐并完成支付后，会记在这里</p>
+              <p className="text-xs text-slate-500">在智能体详情页完成一次性购买后，会记在这里</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -435,7 +432,7 @@ export const BuyerOrderBillingView: React.FC = () => {
                     <th className="px-4 py-3 font-bold">付款 / 下单时间</th>
                     <th className="px-4 py-3 font-bold">订单</th>
                     <th className="px-4 py-3 font-bold">智能体</th>
-                    <th className="px-4 py-3 font-bold">套餐</th>
+                    <th className="px-4 py-3 font-bold">类型</th>
                     <th className="px-4 py-3 font-bold">状态</th>
                     <th className="px-4 py-3 font-bold">支付渠道</th>
                     <th className="px-4 py-3 font-bold">有效期</th>
@@ -470,11 +467,7 @@ export const BuyerOrderBillingView: React.FC = () => {
                         </td>
                         <td className="px-4 py-3.5 text-slate-600">{channelText(row.channel)}</td>
                         <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">
-                          {row.plan === 'buyout'
-                            ? '长期有效'
-                            : row.expiresAt
-                              ? formatOrderTime(row.expiresAt)
-                              : '—'}
+                          {row.status === 'paid' ? '长期有效' : '—'}
                         </td>
                         <td className="px-4 py-3.5 text-right font-bold tabular-nums text-slate-900">
                           {yuanAmount(row.priceCents || 0)}

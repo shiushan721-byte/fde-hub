@@ -37,6 +37,8 @@ import {
 import { ExpertTagsPage } from './ExpertTagsPage';
 import { ExpertTitlesPage } from './ExpertTitlesPage';
 import { CommentReportsPage } from './CommentReportsPage';
+import { RecommendCategoryDialog, ShowcasesPage } from './ShowcasesPage';
+import { guessInspirationCategory } from '../../shared/inspirationCategories';
 
 type AdminCaseItem = {
   id?: string;
@@ -61,6 +63,7 @@ type ExpertTagRow = {
 
 type AdminPage =
   | 'agents'
+  | 'showcases'
   | 'custom-agents'
   | 'deliveries'
   | 'comment-reports'
@@ -103,6 +106,7 @@ const nav: NavEntry[] = [
     icon: Bot,
     children: [
       { key: 'agents', label: '通用智能体' },
+      { key: 'showcases', label: '作品展示' },
       { key: 'custom-agents', label: '定制智能体' },
       { key: 'deliveries', label: '智能体审核' },
       { key: 'comment-reports', label: '评论举报' },
@@ -148,7 +152,7 @@ const nav: NavEntry[] = [
 ];
 
 const GROUP_PAGE_KEYS: Record<string, AdminPage[]> = {
-  'agent-mgmt': ['agents', 'custom-agents', 'deliveries', 'comment-reports', 'leads'],
+  'agent-mgmt': ['agents', 'showcases', 'custom-agents', 'deliveries', 'comment-reports', 'leads'],
   'expert-mgmt': ['experts', 'expert-tags', 'expert-titles', 'applications'],
   'fund-mgmt': ['expert-accounts', 'settlements', 'finance-rules'],
   'finance-mgmt': ['finance-balances', 'finance-ledger', 'withdrawals', 'escrows']
@@ -363,6 +367,7 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
             onClearAuthorFilter={() => setAgentsAuthorFilter(null)}
           />
         )}
+        {page === 'showcases' && <ShowcasesPage />}
         {page === 'custom-agents' && <CustomAgentsPage />}
         {page === 'deliveries' && <AgentReviewPage />}
         {page === 'comment-reports' && <CommentReportsPage />}
@@ -776,6 +781,51 @@ const CustomAgentsPage = () => {
   );
 };
 
+type AdminShowcaseItem = {
+  id: string;
+  userId?: string;
+  userName: string;
+  userAvatar: string;
+  title: string;
+  description?: string;
+  imageUrl: string;
+  fileName?: string;
+  likesCount?: number;
+  featured: boolean;
+  inspireCategory?: string;
+  hidden: boolean;
+  createdAt: string;
+};
+
+type AdminShowcaseAgent = {
+  id: string;
+  title: string;
+  desc?: string;
+  coverImage?: string | null;
+  category?: string;
+  authorId?: string | null;
+  authorName?: string | null;
+  author?: {
+    id: string;
+    name: string;
+    avatar: string;
+    title: string;
+  } | null;
+};
+
+function showcaseMediaKind(item: { imageUrl: string; fileName?: string }): 'image' | 'video' | 'document' {
+  const name = `${item.fileName || ''} ${item.imageUrl}`.split('?')[0].toLowerCase();
+  if (/\.(mp4|webm|mov|m4v|ogg)(\b|$)/i.test(name)) return 'video';
+  if (/\.(pdf|doc|docx|ppt|pptx|xls|xlsx|txt|csv)(\b|$)/i.test(name)) return 'document';
+  return 'image';
+}
+
+function showcaseMediaLabel(kind: 'image' | 'video' | 'document') {
+  if (kind === 'video') return '视频';
+  if (kind === 'document') return '文档';
+  return '图片';
+}
+
 const AgentsPage = ({
   authorFilter,
   onClearAuthorFilter
@@ -806,6 +856,22 @@ const AgentsPage = ({
         createdAt: string;
       }>;
     }>;
+  } | null>(null);
+  const [showcasesTarget, setShowcasesTarget] = useState<{ id: string; title: string } | null>(null);
+  const [showcasesLoading, setShowcasesLoading] = useState(false);
+  const [showcasesError, setShowcasesError] = useState('');
+  const [showcasesPayload, setShowcasesPayload] = useState<{
+    total: number;
+    featuredCount: number;
+    items: AdminShowcaseItem[];
+    agent?: AdminShowcaseAgent;
+  } | null>(null);
+  const [showcaseBusyId, setShowcaseBusyId] = useState('');
+  const [showcaseDetail, setShowcaseDetail] = useState<AdminShowcaseItem | null>(null);
+  const [recommendPick, setRecommendPick] = useState<AdminShowcaseItem | null>(null);
+  const [showcaseMediaPreview, setShowcaseMediaPreview] = useState<{
+    url: string;
+    title: string;
   } | null>(null);
   const [engagementTarget, setEngagementTarget] = useState<{
     id: string;
@@ -844,6 +910,8 @@ const AgentsPage = ({
     version?: string;
     coverImage?: string | null;
     commentsCount?: number | string;
+    showcaseCount?: number;
+    showcaseFeaturedCount?: number;
     likesCount?: string | number;
     likesActual?: number;
     likesManual?: number;
@@ -879,6 +947,133 @@ const AgentsPage = ({
     } finally {
       setCommentsLoading(false);
     }
+  };
+
+  const openShowcases = async (agent: { id: string; title: string }) => {
+    setShowcasesTarget(agent);
+    setShowcasesLoading(true);
+    setShowcasesError('');
+    setShowcasesPayload(null);
+    try {
+      const result = await api<{
+        total: number;
+        featuredCount: number;
+        items: AdminShowcaseItem[];
+        agent?: AdminShowcaseAgent;
+      }>(`/api/admin/agents/${agent.id}/showcases`);
+      setShowcasesPayload({
+        total: result.total,
+        featuredCount: result.featuredCount,
+        items: result.items,
+        agent: result.agent
+      });
+    } catch (err) {
+      setShowcasesError(err instanceof Error ? err.message : '加载成果失败');
+    } finally {
+      setShowcasesLoading(false);
+    }
+  };
+
+  const recommendShowcase = async (itemId: string, featured: boolean, inspireCategory?: string) => {
+    if (!showcasesTarget) return;
+    setShowcaseBusyId(itemId);
+    try {
+      await api(`/api/admin/agents/${showcasesTarget.id}/showcases/${itemId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ featured, inspireCategory })
+      });
+      await openShowcases(showcasesTarget);
+      setShowcaseDetail((prev) =>
+        prev && prev.id === itemId
+          ? { ...prev, featured, inspireCategory: inspireCategory ?? prev.inspireCategory }
+          : prev
+      );
+      setRecommendPick(null);
+      reload();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setShowcaseBusyId('');
+    }
+  };
+
+  const renderShowcaseMedia = (
+    item: AdminShowcaseItem,
+    options?: { maxHeightClass?: string; autoPlay?: boolean; previewable?: boolean }
+  ) => {
+    const kind = showcaseMediaKind(item);
+    const maxHeightClass = options?.maxHeightClass || 'max-h-[72vh]';
+    const openPreview = () =>
+      setShowcaseMediaPreview({
+        url: item.imageUrl,
+        title: item.title || '成果预览'
+      });
+    if (kind === 'video') {
+      return (
+        <video
+          src={item.imageUrl}
+          controls
+          autoPlay={options?.autoPlay !== false}
+          className={`w-full ${maxHeightClass} bg-black`}
+        />
+      );
+    }
+    if (kind === 'document') {
+      const isPdf = /\.pdf(\b|$)/i.test(`${item.fileName || ''} ${item.imageUrl}`);
+      if (isPdf) {
+        return (
+          <iframe
+            title={item.title || '文档'}
+            src={item.imageUrl}
+            className={`w-full ${maxHeightClass} bg-white`}
+          />
+        );
+      }
+      return (
+        <div className="h-48 flex flex-col items-center justify-center gap-3 text-slate-500">
+          <p className="text-sm">该文档需在新窗口打开</p>
+          <a
+            href={item.imageUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold"
+          >
+            打开文档
+          </a>
+        </div>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={options?.previewable ? openPreview : undefined}
+        className={`block w-full bg-slate-950 p-0 border-0 appearance-none ${
+          options?.previewable ? 'cursor-zoom-in' : 'cursor-default'
+        }`}
+        title={options?.previewable ? '点击放大预览' : undefined}
+      >
+        <img
+          src={item.imageUrl}
+          alt={item.title || '成果'}
+          referrerPolicy="no-referrer"
+          className={`w-full ${maxHeightClass} object-contain bg-slate-950 pointer-events-none`}
+        />
+      </button>
+    );
+  };
+
+  useEffect(() => {
+    if (!showcaseMediaPreview) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowcaseMediaPreview(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showcaseMediaPreview]);
+
+  const closeShowcaseDetail = () => {
+    setShowcaseMediaPreview(null);
+    setShowcaseDetail(null);
   };
 
   const deleteComment = async (commentId: string) => {
@@ -1079,6 +1274,20 @@ const AgentsPage = ({
                   <div className="space-y-1 text-[11px] text-slate-600">
                     <button
                       type="button"
+                      onClick={() => void openShowcases({ id: agent.id, title: agent.title })}
+                      className="flex items-center gap-1.5 font-bold text-blue-600 hover:text-blue-700 cursor-pointer tabular-nums"
+                      title="查看成果展示"
+                    >
+                      <span className="text-slate-400 font-medium w-7">成果</span>
+                      <span>{Number(agent.showcaseCount) || 0}</span>
+                      {Number(agent.showcaseFeaturedCount) > 0 && (
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1 py-0.5 rounded">
+                          荐 {agent.showcaseFeaturedCount}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => void openComments({ id: agent.id, title: agent.title })}
                       className="flex items-center gap-1.5 font-bold text-blue-600 hover:text-blue-700 cursor-pointer tabular-nums"
                       title="查看评论"
@@ -1266,6 +1475,343 @@ const AgentsPage = ({
             </div>
           </div>
         </div>
+      )}
+
+      {showcasesTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex justify-end animate-in fade-in duration-200"
+          onClick={() => {
+            setShowcasesTarget(null);
+            setShowcaseMediaPreview(null);
+            setShowcaseDetail(null);
+          }}
+        >
+          <div
+            className="w-full max-w-xl h-full bg-white border-l border-slate-200 shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-right duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
+              <div className="min-w-0">
+                <h3 className="text-base font-black text-slate-900 truncate">
+                  成果展示 · {showcasesTarget.title}
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  共 {showcasesPayload?.total ?? '—'} 条
+                  {typeof showcasesPayload?.featuredCount === 'number'
+                    ? ` · 已推荐 ${showcasesPayload.featuredCount}`
+                    : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowcasesTarget(null);
+                  setShowcaseMediaPreview(null);
+                  setShowcaseDetail(null);
+                }}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-3">
+              {showcasesLoading && <p className="text-sm text-slate-500">加载中…</p>}
+              {showcasesError && <p className="text-sm text-rose-600">{showcasesError}</p>}
+              {!showcasesLoading && !showcasesError && showcasesPayload?.items.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-8">暂无成果</p>
+              )}
+              {(showcasesPayload?.items || []).map((item) => {
+                const kind = showcaseMediaKind(item);
+                return (
+                <article
+                  key={item.id}
+                  className={`rounded-xl border p-3 ${
+                    item.hidden ? 'border-dashed border-slate-200 opacity-70' : 'border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-xs font-bold text-slate-900 truncate">
+                          {item.title || '未命名成果'}
+                        </p>
+                        <span className="text-[10px] font-bold text-slate-500 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded">
+                          {showcaseMediaLabel(kind)}
+                        </span>
+                        {item.featured && (
+                          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded">
+                            已推荐{item.inspireCategory ? ` · ${item.inspireCategory}` : ''}
+                          </span>
+                        )}
+                        {item.hidden && (
+                          <span className="text-[10px] font-bold text-slate-500 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded">
+                            已隐藏
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5 truncate">{item.userName}</p>
+                      {item.description ? (
+                        <p className="text-[11px] text-slate-500 mt-1 line-clamp-2 leading-snug">
+                          {item.description}
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-slate-300 mt-1">未填写成果介绍</p>
+                      )}
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        {new Date(item.createdAt).toLocaleString('zh-CN')}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowcaseDetail(item)}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer border border-slate-200 text-slate-700 hover:bg-slate-50"
+                      >
+                        查看详情
+                      </button>
+                      <button
+                        type="button"
+                        disabled={showcaseBusyId === item.id}
+                        onClick={() =>
+                          item.featured
+                            ? void recommendShowcase(item.id, false)
+                            : setRecommendPick(item)
+                        }
+                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer disabled:opacity-60 ${
+                          item.featured
+                            ? 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                            : 'bg-amber-500 text-white hover:bg-amber-600'
+                        }`}
+                      >
+                        {showcaseBusyId === item.id
+                          ? '处理中…'
+                          : item.featured
+                            ? '取消推荐'
+                            : '推荐'}
+                      </button>
+                    </div>
+                  </div>
+                </article>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showcaseDetail && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4"
+          onClick={closeShowcaseDetail}
+        >
+          <div
+            className="bg-white w-full max-w-5xl max-h-[92vh] rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-slate-900 truncate">
+                  {showcaseDetail.title || '未命名成果'}
+                </h3>
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                  <span className="text-[10px] font-bold text-slate-500 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded">
+                    {showcaseMediaLabel(showcaseMediaKind(showcaseDetail))}
+                  </span>
+                  {showcaseDetail.featured && (
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded">
+                      已推荐到发现灵感{showcaseDetail.inspireCategory ? ` · ${showcaseDetail.inspireCategory}` : ''}
+                    </span>
+                  )}
+                  {showcaseDetail.hidden && (
+                    <span className="text-[10px] font-bold text-slate-500 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded">
+                      已隐藏
+                    </span>
+                  )}
+                  <span className="text-[11px] text-slate-400">
+                    {new Date(showcaseDetail.createdAt).toLocaleString('zh-CN')}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeShowcaseDetail}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-auto p-5">
+              <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_280px] gap-5 items-start">
+                <div className="space-y-4 min-w-0">
+                  <div className="rounded-xl overflow-hidden bg-slate-950 border border-slate-200">
+                    {renderShowcaseMedia(showcaseDetail, {
+                      maxHeightClass: 'max-h-[56vh]',
+                      autoPlay: false,
+                      previewable: showcaseMediaKind(showcaseDetail) === 'image'
+                    })}
+                  </div>
+                  <div className="rounded-xl border border-slate-200 p-4 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[11px] font-bold text-slate-400">成果介绍</p>
+                      {showcaseDetail.fileName ? (
+                        <p className="text-[11px] text-slate-400 truncate">{showcaseDetail.fileName}</p>
+                      ) : null}
+                    </div>
+                    <p className="text-[13px] text-slate-700 leading-[1.8] whitespace-pre-wrap">
+                      {showcaseDetail.description?.trim() || '作者还没有填写介绍。'}
+                    </p>
+                  </div>
+                </div>
+
+                <aside className="space-y-3">
+                  <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+                    <p className="text-[11px] font-bold text-slate-400">成果作者</p>
+                    <div className="flex items-center gap-3">
+                      {showcaseDetail.userAvatar ? (
+                        <img
+                          src={showcaseDetail.userAvatar}
+                          alt=""
+                          className="w-10 h-10 rounded-full object-cover border border-slate-200"
+                        />
+                      ) : (
+                        <span className="w-10 h-10 rounded-full bg-slate-100" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-semibold text-slate-900 truncate">
+                          {showcaseDetail.userName}
+                        </div>
+                        <div className="text-[11px] text-slate-400 truncate">
+                          {showcaseDetail.userId || '上传了这条成果'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      点赞 {showcaseDetail.likesCount || 0}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+                    <p className="text-[11px] font-bold text-slate-400">基于智能体</p>
+                    {showcasesPayload?.agent ? (
+                      <>
+                        {showcasesPayload.agent.coverImage ? (
+                          <img
+                            src={showcasesPayload.agent.coverImage}
+                            alt=""
+                            className="w-full h-24 object-cover rounded-lg bg-slate-100"
+                          />
+                        ) : null}
+                        <div>
+                          <p className="text-[13px] font-semibold text-slate-900">
+                            {showcasesPayload.agent.title}
+                          </p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            {showcasesPayload.agent.category || '未分类'}
+                          </p>
+                        </div>
+                        {showcasesPayload.agent.desc ? (
+                          <p className="text-[11px] text-slate-500 leading-relaxed line-clamp-4">
+                            {showcasesPayload.agent.desc}
+                          </p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="text-[13px] font-semibold text-slate-900">
+                        {showcasesTarget?.title}
+                      </p>
+                    )}
+                    {showcasesPayload?.agent?.author && (
+                      <div className="flex items-center gap-2.5 pt-1">
+                        {showcasesPayload.agent.author.avatar ? (
+                          <img
+                            src={showcasesPayload.agent.author.avatar}
+                            alt=""
+                            className="w-8 h-8 rounded-full object-cover border border-slate-200"
+                          />
+                        ) : (
+                          <span className="w-8 h-8 rounded-full bg-slate-100" />
+                        )}
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-semibold text-slate-900 truncate">
+                            {showcasesPayload.agent.author.name}
+                          </div>
+                          <div className="text-[11px] text-slate-400 truncate">
+                            智能体作者
+                            {showcasesPayload.agent.author.title
+                              ? ` · ${showcasesPayload.agent.author.title}`
+                              : ''}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={showcaseBusyId === showcaseDetail.id}
+                    onClick={() =>
+                      showcaseDetail.featured
+                        ? void recommendShowcase(showcaseDetail.id, false)
+                        : setRecommendPick(showcaseDetail)
+                    }
+                    className={`w-full h-10 rounded-xl text-[13px] font-bold cursor-pointer disabled:opacity-60 ${
+                      showcaseDetail.featured
+                        ? 'border border-slate-200 text-slate-700 hover:bg-slate-50'
+                        : 'bg-amber-500 text-white hover:bg-amber-600'
+                    }`}
+                  >
+                    {showcaseBusyId === showcaseDetail.id
+                      ? '处理中…'
+                      : showcaseDetail.featured
+                        ? '取消推荐'
+                        : '推荐到发现灵感'}
+                  </button>
+                  <a
+                    href={showcaseDetail.imageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block w-full h-10 rounded-xl border border-slate-200 text-[13px] font-bold text-slate-700 hover:bg-slate-50 text-center leading-10"
+                  >
+                    打开原文件
+                  </a>
+                </aside>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showcaseMediaPreview && (
+        <div
+          className="fixed inset-0 z-[80] bg-black/90 flex items-center justify-center p-3 sm:p-6"
+          onClick={() => setShowcaseMediaPreview(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setShowcaseMediaPreview(null)}
+            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer"
+            aria-label="关闭预览"
+          >
+            <X size={18} />
+          </button>
+          <img
+            src={showcaseMediaPreview.url}
+            alt={showcaseMediaPreview.title}
+            referrerPolicy="no-referrer"
+            className="max-w-full max-h-[92vh] object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
+      {recommendPick && (
+        <RecommendCategoryDialog
+          title={recommendPick.title}
+          defaultCategory={recommendPick.inspireCategory || guessInspirationCategory(recommendPick)}
+          busy={showcaseBusyId === recommendPick.id}
+          onClose={() => setRecommendPick(null)}
+          onConfirm={(category) => void recommendShowcase(recommendPick.id, true, category)}
+        />
       )}
 
       {detailTarget && (

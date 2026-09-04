@@ -19,11 +19,15 @@ import {
   confirmCatalogPurchase,
   createCatalogCheckout,
   getActiveLicense,
-  isCatalogPlan,
   listMyPurchases,
   mapPurchase,
   payCatalogPurchase
 } from '../services/catalogPurchase';
+import {
+  createAgentShowcase,
+  deleteAgentShowcase,
+  moderateAgentShowcase
+} from '../services/agentShowcases';
 import { localStorageAdapter } from '../adapters/storage';
 import { normalizeAdapterPackages } from '../../shared/adapterPackages';
 import { normalizePricingPlans, validatePaidPlans } from '../../shared/pricingPlans';
@@ -431,6 +435,111 @@ meRouter.post(
   }
 );
 
+meRouter.post(
+  '/uploads/image',
+  express.raw({ type: '*/*', limit: '8mb' }),
+  async (req, res) => {
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+    if (!buf.length) return fail(res, '未收到图片');
+    const fileName = decodeURIComponent(String(req.headers['x-file-name'] || 'showcase.png'));
+    if (!/\.(png|jpe?g|webp|gif)$/i.test(fileName)) {
+      return fail(res, '请上传 png / jpg / webp / gif 图片');
+    }
+    const stored = await localStorageAdapter.upload({
+      fileName,
+      buffer: buf,
+      mimeType: 'image/jpeg'
+    });
+    return ok(res, {
+      fileKey: stored.fileKey,
+      url: stored.url,
+      fileName,
+      size: formatUploadSize(buf.length)
+    });
+  }
+);
+
+const createShowcaseSchema = z.object({
+  title: z.string().trim().min(1, '请填写成果标题').max(40),
+  description: z.string().trim().min(1, '请填写成果介绍').max(800),
+  imageUrl: z.string().min(1),
+  fileName: z.string().max(120).optional().default('')
+});
+
+meRouter.post('/agents/:id/showcases', async (req, res) => {
+  const parsed = createShowcaseSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '请完整填写成果标题、介绍和图片');
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { name: true, avatar: true }
+    });
+    const item = await createAgentShowcase({
+      agentId: req.params.id,
+      userId: req.user!.id,
+      userName: user?.name || req.user!.name,
+      userAvatar: user?.avatar || '',
+      title: parsed.data.title,
+      description: parsed.data.description,
+      imageUrl: parsed.data.imageUrl,
+      fileName: parsed.data.fileName
+    });
+    return ok(res, item, 201);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '上传失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
+meRouter.patch('/agents/:agentId/showcases/:id', async (req, res) => {
+  const parsed = z
+    .object({
+      featured: z.boolean().optional(),
+      hidden: z.boolean().optional()
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const item = await moderateAgentShowcase({
+      agentId: req.params.agentId,
+      showcaseId: req.params.id,
+      actorUserId: req.user!.id,
+      featured: parsed.data.featured,
+      hidden: parsed.data.hidden
+    });
+    return ok(res, item);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '操作失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
+meRouter.delete('/agents/:agentId/showcases/:id', async (req, res) => {
+  try {
+    const result = await deleteAgentShowcase({
+      agentId: req.params.agentId,
+      showcaseId: req.params.id,
+      actorUserId: req.user!.id
+    });
+    return ok(res, result);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '删除失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
 meRouter.put('/agents/:id/pricing', async (req, res) => {
   try {
     const plans = normalizePricingPlans(req.body);
@@ -464,13 +573,10 @@ meRouter.get('/agents/:id/license', async (req, res) => {
 
 meRouter.post('/agents/:id/checkout', async (req, res) => {
   try {
-    const plan = req.body?.plan;
     const channel = req.body?.channel === 'alipay' ? 'alipay' : 'wechat';
-    if (!isCatalogPlan(plan)) return fail(res, '请选择月付、年付或买断');
     const { purchase } = await createCatalogCheckout({
       userId: req.user!.id,
       agentId: req.params.id,
-      plan,
       channel
     });
     return ok(res, mapPurchase(purchase));

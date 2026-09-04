@@ -894,8 +894,8 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                           <span className="text-[10px] font-bold text-blue-700">
                             · {pricingLabel({
                               isFree: agent.pricingType === 'free' || agent.pricingPlans?.isFree,
-                              monthlyPrice: agent.pricingPlans?.monthlyPrice,
-                              price: agent.price
+                              price: agent.pricingPlans?.price || agent.price,
+                              monthlyPrice: agent.pricingPlans?.monthlyPrice
                             })}
                           </span>
                           {agent.status !== 'published' && (

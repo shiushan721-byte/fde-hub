@@ -2,6 +2,7 @@ import type { Agent, Expert } from '@prisma/client';
 import { parseJson } from './json';
 import { engagementTotals, formatEngagementCount } from './engagement';
 import { normalizeAdapterPackages } from '../../shared/adapterPackages';
+import { pricingFromAgent } from '../../shared/pricingPlans';
 
 export function agentToCatalog(agent: Agent) {
   const eng = engagementTotals(agent);
@@ -18,7 +19,10 @@ export function agentToCatalog(agent: Agent) {
     authorName: agent.authorName || undefined,
     authorId: agent.authorId || undefined,
     price: agent.price ?? undefined,
-    pricingPlans: parseJson(agent.pricingPlans, undefined),
+    pricingPlans: pricingFromAgent({
+      price: agent.price,
+      pricingPlans: parseJson(agent.pricingPlans, {})
+    }),
     likesCount: formatEngagementCount(eng.likesTotal),
     favoritesCount: formatEngagementCount(eng.favoritesTotal),
     commentsCount: agent.commentsCount,
@@ -53,7 +57,10 @@ export function agentToSolution(agent: Agent) {
     systemPromptSnippet: '',
     businessIntegrationTips: '',
     priceFrom: agent.price || 0,
-    pricingPlans: parseJson(agent.pricingPlans, undefined),
+    pricingPlans: pricingFromAgent({
+      price: agent.price,
+      pricingPlans: parseJson(agent.pricingPlans, {})
+    }),
     demoConversation: []
   };
 }

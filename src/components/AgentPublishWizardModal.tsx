@@ -331,17 +331,11 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
   const [pricingModel, setPricingModel] = useState<'paid' | 'free'>(
     agentToUpdate?.pricingType === 'free' || agentToUpdate?.pricingPlans?.isFree ? 'free' : 'paid'
   );
-  const [monthlyPrice, setMonthlyPrice] = useState<number>(
-    agentToUpdate?.pricingPlans?.monthlyPrice || agentToUpdate?.price || 39
-  );
-  const [annualPrice, setAnnualPrice] = useState<number>(
-    agentToUpdate?.pricingPlans?.annualPrice || (agentToUpdate?.price ? agentToUpdate.price * 9 : 368)
-  );
-  const [buyoutPrice, setBuyoutPrice] = useState<number>(
-    agentToUpdate?.pricingPlans?.buyoutPrice || (agentToUpdate?.price ? agentToUpdate.price * 15 : 599)
-  );
-  const [preferredPlan, setPreferredPlan] = useState<'monthly' | 'annual' | 'buyout'>(
-    agentToUpdate?.pricingPlans?.preferredPlan || 'annual'
+  const [price, setPrice] = useState<number>(
+    agentToUpdate?.pricingPlans?.price ||
+      agentToUpdate?.pricingPlans?.monthlyPrice ||
+      agentToUpdate?.price ||
+      39
   );
   const [enableEnterpriseCustomization, setEnableEnterpriseCustomization] = useState(
     agentToUpdate?.fdeCustomEnabled ?? true
@@ -381,14 +375,12 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       setPricingModel(
         agentToUpdate.pricingType === 'free' || agentToUpdate.pricingPlans?.isFree ? 'free' : 'paid'
       );
-      setMonthlyPrice(agentToUpdate.pricingPlans?.monthlyPrice || agentToUpdate.price || 39);
-      setAnnualPrice(
-        agentToUpdate.pricingPlans?.annualPrice || (agentToUpdate.price ? agentToUpdate.price * 9 : 368)
+      setPrice(
+        agentToUpdate.pricingPlans?.price ||
+          agentToUpdate.pricingPlans?.monthlyPrice ||
+          agentToUpdate.price ||
+          39
       );
-      setBuyoutPrice(
-        agentToUpdate.pricingPlans?.buyoutPrice || (agentToUpdate.price ? agentToUpdate.price * 15 : 599)
-      );
-      setPreferredPlan(agentToUpdate.pricingPlans?.preferredPlan || 'annual');
     }
     const preset = mockSkillPresets.find((p) => p.id === selectedPresetId) || mockSkillPresets[0];
     if (!agentToUpdate && !agentTitle) {
@@ -646,13 +638,10 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       agentToUpdate?.coverImage ||
       'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80',
     pricingType: pricingModel === 'free' ? 'free' : 'paid',
-    price: pricingModel === 'free' ? 0 : Number(monthlyPrice),
+    price: pricingModel === 'free' ? 0 : Number(price),
     pricingPlans: {
-      monthlyPrice: Number(monthlyPrice),
-      annualPrice: Number(annualPrice),
-      buyoutPrice: Number(buyoutPrice),
-      isFree: pricingModel === 'free',
-      preferredPlan
+      price: Number(price),
+      isFree: pricingModel === 'free'
     },
     tokenRebateEnabled: true,
     fdeCustomEnabled: enableEnterpriseCustomization,
@@ -690,10 +679,7 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
     if (mode !== 'custom_delivery') {
       const plans = normalizePricingPlans({
         isFree: pricingModel === 'free',
-        monthlyPrice,
-        annualPrice,
-        buyoutPrice,
-        preferredPlan
+        price
       });
       const invalid = validatePaidPlans(plans);
       if (invalid) {
@@ -1770,15 +1756,9 @@ your-skill-v1.0.0/
 
                 <AgentPricingFields
                   pricingModel={pricingModel}
-                  monthlyPrice={monthlyPrice}
-                  annualPrice={annualPrice}
-                  buyoutPrice={buyoutPrice}
-                  preferredPlan={preferredPlan}
+                  price={price}
                   onPricingModelChange={setPricingModel}
-                  onMonthlyPriceChange={setMonthlyPrice}
-                  onAnnualPriceChange={setAnnualPrice}
-                  onBuyoutPriceChange={setBuyoutPrice}
-                  onPreferredPlanChange={setPreferredPlan}
+                  onPriceChange={setPrice}
                   tokenRebateRate={tokenRebateRate}
                 />
 

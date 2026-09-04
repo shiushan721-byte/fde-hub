@@ -49,6 +49,7 @@ import {
   updateExpertTitle,
   validateActiveExpertTitle
 } from '../services/expertTitles';
+import { listAdminShowcases, listAllAgentShowcases, moderateAgentShowcase } from '../services/agentShowcases';
 
 export const adminRouter = Router();
 
@@ -252,18 +253,41 @@ adminRouter.get('/agents', async (req, res) => {
       ? []
       : await prisma.agentComment.groupBy({
           by: ['agentId'],
-          where: { agentId: { in: agentIds } },
+          where: { agentId: { in: agentIds }, source: 'agent' },
           _count: { _all: true }
         });
   const commentCountByAgent = new Map(
     commentCounts.map((row) => [row.agentId, row._count._all])
   );
 
+  const showcaseCounts =
+    agentIds.length === 0
+      ? []
+      : await prisma.agentShowcase.groupBy({
+          by: ['agentId'],
+          where: { agentId: { in: agentIds } },
+          _count: { _all: true }
+        });
+  const showcaseCountByAgent = new Map(
+    showcaseCounts.map((row) => [row.agentId, row._count._all])
+  );
+  const featuredShowcaseCounts =
+    agentIds.length === 0
+      ? []
+      : await prisma.agentShowcase.groupBy({
+          by: ['agentId'],
+          where: { agentId: { in: agentIds }, featured: true },
+          _count: { _all: true }
+        });
+  const featuredShowcaseCountByAgent = new Map(
+    featuredShowcaseCounts.map((row) => [row.agentId, row._count._all])
+  );
+
   const latestCommentRows =
     agentIds.length === 0
       ? []
       : await prisma.agentComment.findMany({
-          where: { agentId: { in: agentIds } },
+          where: { agentId: { in: agentIds }, source: 'agent' },
           orderBy: { createdAt: 'desc' },
           select: {
             id: true,
@@ -320,6 +344,8 @@ adminRouter.get('/agents', async (req, res) => {
         version: versionRaw.startsWith('v') ? versionRaw : `v${versionRaw}`,
         authorExpertNo: author?.expertNo || null,
         commentsCount,
+        showcaseCount: showcaseCountByAgent.get(agent.id) ?? 0,
+        showcaseFeaturedCount: featuredShowcaseCountByAgent.get(agent.id) ?? 0,
         likesActual: eng.likesActual,
         likesManual: eng.likesManual,
         likesCount: eng.likesTotal,
@@ -389,7 +415,7 @@ adminRouter.get('/agents/:id/comments', async (req, res) => {
   if (!agent) return fail(res, '智能体不存在', 404, 'NOT_FOUND');
 
   const comments = await prisma.agentComment.findMany({
-    where: { agentId: agent.id },
+    where: { agentId: agent.id, source: 'agent' },
     orderBy: { createdAt: 'desc' }
   });
 
@@ -424,15 +450,20 @@ adminRouter.delete('/agents/:agentId/comments/:commentId', async (req, res) => {
   await prisma.agentComment.deleteMany({
     where: {
       agentId: req.params.agentId,
+      source: comment.source === 'showcase' ? 'showcase' : 'agent',
       OR: [{ id: comment.id }, { parentId: comment.id }]
     }
   });
 
-  const remaining = await prisma.agentComment.count({ where: { agentId: req.params.agentId } });
-  await prisma.agent.update({
-    where: { id: req.params.agentId },
-    data: { commentsCount: String(remaining) }
+  const remaining = await prisma.agentComment.count({
+    where: { agentId: req.params.agentId, source: comment.source === 'showcase' ? 'showcase' : 'agent' }
   });
+  if (comment.source !== 'showcase') {
+    await prisma.agent.update({
+      where: { id: req.params.agentId },
+      data: { commentsCount: String(remaining) }
+    });
+  }
 
   await writeAudit({
     actorId: actorId(req),
@@ -443,6 +474,117 @@ adminRouter.delete('/agents/:agentId/comments/:commentId', async (req, res) => {
   });
 
   return ok(res, { remaining });
+});
+
+adminRouter.get('/agents/:id/showcases', async (req, res) => {
+  const agent = await prisma.agent.findUnique({
+    where: { id: req.params.id },
+    select: {
+      id: true,
+      title: true,
+      desc: true,
+      coverImage: true,
+      category: true,
+      authorId: true,
+      authorName: true
+    }
+  });
+  if (!agent) return fail(res, '智能体不存在', 404, 'NOT_FOUND');
+  const expert = agent.authorId
+    ? await prisma.expert.findUnique({
+        where: { id: agent.authorId },
+        select: { id: true, name: true, avatar: true, title: true }
+      })
+    : null;
+  const items = await listAllAgentShowcases(agent.id);
+  return ok(res, {
+    agent: {
+      id: agent.id,
+      title: agent.title,
+      desc: agent.desc,
+      coverImage: agent.coverImage,
+      category: agent.category,
+      authorId: agent.authorId,
+      authorName: agent.authorName,
+      author: expert
+        ? {
+            id: expert.id,
+            name: expert.name,
+            avatar: expert.avatar,
+            title: expert.title
+          }
+        : agent.authorId
+          ? {
+              id: agent.authorId,
+              name: agent.authorName || '作者',
+              avatar: '',
+              title: ''
+            }
+          : null
+    },
+    total: items.length,
+    featuredCount: items.filter((item) => item.featured).length,
+    items
+  });
+});
+
+adminRouter.get('/showcases', async (req, res) => {
+  const featuredRaw = typeof req.query.featured === 'string' ? req.query.featured : '';
+  const featured = featuredRaw === 'true' ? true : featuredRaw === 'false' ? false : undefined;
+  const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const items = await listAdminShowcases({
+    featured,
+    category: category || undefined,
+    q: q || undefined
+  });
+  return ok(res, {
+    total: items.length,
+    featuredCount: items.filter((item) => item.featured).length,
+    items
+  });
+});
+
+adminRouter.patch('/agents/:agentId/showcases/:id', async (req, res) => {
+  const parsed = z
+    .object({
+      featured: z.boolean().optional(),
+      hidden: z.boolean().optional(),
+      inspireCategory: z.string().optional()
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const item = await moderateAgentShowcase({
+      agentId: req.params.agentId,
+      showcaseId: req.params.id,
+      actorUserId: actorId(req) || '',
+      featured: parsed.data.featured,
+      hidden: parsed.data.hidden,
+      inspireCategory: parsed.data.inspireCategory,
+      asAdmin: true
+    });
+    await writeAudit({
+      actorId: actorId(req),
+      action:
+        parsed.data.featured === true
+          ? 'recommend_agent_showcase'
+          : parsed.data.featured === false
+            ? 'unrecommend_agent_showcase'
+            : 'update_agent_showcase',
+      targetType: 'agent_showcase',
+      targetId: item.id,
+      diff: { agentId: req.params.agentId, ...parsed.data }
+    });
+    return ok(res, item);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '操作失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
 });
 
 const agentPatch = z.object({
@@ -1879,6 +2021,9 @@ adminRouter.get('/settlements', async (_req, res) => {
         paymentChannel: order.paymentChannel,
         priceCents: order.priceCents,
         createdAt: order.createdAt,
+        interventionStatus: order.interventionStatus || 'none',
+        interventionReason: order.interventionReason || '',
+        interventionAt: order.interventionAt,
         buyer: order.buyer
           ? {
               id: order.buyer.id,
@@ -1901,6 +2046,77 @@ adminRouter.get('/settlements', async (_req, res) => {
       };
     })
   );
+});
+
+adminRouter.post('/settlements/:id/intervene', async (req, res) => {
+  const parsed = z
+    .object({
+      status: z.enum(['processing', 'resolved']),
+      reason: z.string().trim().min(1).max(500)
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return fail(res, '请选择处理状态并填写理由');
+
+  try {
+    const order = await prisma.customOrder.findUnique({ where: { id: req.params.id } });
+    if (!order) return fail(res, '订单不存在', 404, 'NOT_FOUND');
+
+    const statusLabel = parsed.data.status === 'processing' ? '正在处理' : '已处理';
+    const updated = await prisma.customOrder.update({
+      where: { id: order.id },
+      data: {
+        interventionStatus: parsed.data.status,
+        interventionReason: parsed.data.reason,
+        interventionAt: new Date()
+      }
+    });
+
+    await prisma.customOrderEvent.create({
+      data: {
+        id: `oevt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        orderId: order.id,
+        actorId: actorId(req),
+        eventType: 'platform_intervention',
+        fromStatus: order.interventionStatus || 'none',
+        toStatus: parsed.data.status,
+        reason: parsed.data.reason,
+        payload: JSON.stringify({ statusLabel })
+      }
+    });
+
+    const notifyUserIds = [...new Set([order.buyerUserId, order.creatorUserId].filter(Boolean))] as string[];
+    if (notifyUserIds.length > 0) {
+      await prisma.userNotification.createMany({
+        data: notifyUserIds.map((userId, index) => ({
+          id: `ntf_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
+          userId,
+          type: 'platform_intervention',
+          title: `平台介入 · ${statusLabel}`,
+          body: `${order.orderNo}：${parsed.data.reason}`,
+          link: '/#/orders',
+          payload: JSON.stringify({ orderId: order.id, status: parsed.data.status })
+        }))
+      });
+    }
+
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'platform_intervene_settlement',
+      targetType: 'custom_order',
+      targetId: order.id,
+      diff: parsed.data
+    });
+
+    return ok(res, {
+      id: updated.id,
+      interventionStatus: updated.interventionStatus,
+      interventionReason: updated.interventionReason,
+      interventionAt: updated.interventionAt
+    });
+  } catch (err) {
+    console.error(err);
+    return fail(res, err instanceof Error ? err.message : '提交失败', 500, 'INTERNAL');
+  }
 });
 
 adminRouter.get('/escrows', async (_req, res) => {
@@ -2354,7 +2570,8 @@ adminRouter.get('/comment-reports/pending-count', async (_req, res) => {
 
 adminRouter.get('/comment-reports', async (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-  const reports = await listCommentReports(status);
+  const source = typeof req.query.source === 'string' ? req.query.source : undefined;
+  const reports = await listCommentReports(status, source);
   return ok(res, reports);
 });
 

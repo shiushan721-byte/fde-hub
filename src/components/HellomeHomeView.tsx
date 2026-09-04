@@ -1,22 +1,31 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Search,
   Sparkles,
   ArrowRight,
   User,
   Heart,
-  Bookmark
+  Bookmark,
+  Lightbulb,
+  Loader2
 } from 'lucide-react';
 import {
   mockHellomeHomeAgents,
   HellomeAgentItem
 } from '../data/mockData';
 import { defaultHomeBanners, defaultHomeCategories, HomeBannerItem } from '../../shared/homeDefaults';
+import { INSPIRATION_HOME_CATEGORIES } from '../../shared/inspirationCategories';
 import { pricingFromAgent, pricingLabel } from '../../shared/pricingPlans';
+import { api } from '../lib/api';
+import { getMockPublicInspirations, type PublicInspiration } from '../lib/inspiration';
+import { InspirationFeed } from './InspirationFeed';
+import { AgentRecommendModal, type AgentRecommendItem } from './AgentRecommendModal';
 
 interface HellomeHomeViewProps {
   onOpenAuthorProfile: (authorId: string) => void;
   onOpenAgentDetail: (agent: HellomeAgentItem) => void;
+  onOpenInspiration?: (item: PublicInspiration) => void;
+  initialCatalogueTab?: 'agents' | 'inspiration';
   onNavigateToCreatorCenter?: () => void;
   favoriteAgentIds?: string[];
   onToggleFavoriteAgent?: (agentId: string) => void;
@@ -41,9 +50,17 @@ function platformSupportLabel(support?: HellomeAgentItem['platformSupport']) {
   }
 }
 
+const RECOMMEND_EXAMPLES = [
+  '帮我给新茶饮出三套主视觉 KV',
+  '写一篇能被 AI 搜索引用的选购长文',
+  '临时要一份上会请示，连夜出稿'
+];
+
 export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
   onOpenAuthorProfile,
   onOpenAgentDetail,
+  onOpenInspiration,
+  initialCatalogueTab = 'agents',
   onNavigateToCreatorCenter,
   favoriteAgentIds = [],
   onToggleFavoriteAgent,
@@ -65,17 +82,100 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
   const creatorBanner = bannerBySlot('creator');
 
   // Category & search state for 热门智能体
-  const [selectedAgentCategory, setSelectedAgentCategory] = useState('全部');
+  const [catalogueTab, setCatalogueTab] = useState<'agents' | 'inspiration'>(initialCatalogueTab);
+  const [selectedCategory, setSelectedCategory] = useState('全部');
   const [agentSearchQuery, setAgentSearchQuery] = useState('');
+  const [recommendOpen, setRecommendOpen] = useState(false);
+  const [recommendBusy, setRecommendBusy] = useState(false);
+  const [recommendError, setRecommendError] = useState('');
+  const [recommendQuery, setRecommendQuery] = useState('');
+  const [recommendSummary, setRecommendSummary] = useState('');
+  const [recommendIntents, setRecommendIntents] = useState<string[]>([]);
+  const [recommendItems, setRecommendItems] = useState<AgentRecommendItem[]>([]);
+  const [recommendSource, setRecommendSource] = useState<'ai' | 'local'>('local');
+  const [inspirations, setInspirations] = useState<PublicInspiration[]>([]);
+  const [inspirationsLoading, setInspirationsLoading] = useState(false);
 
-  const filteredAgents = catalogAgents.filter((item) => {
-    const matchesCat = selectedAgentCategory === '全部' || item.category === selectedAgentCategory;
+  useEffect(() => {
+    setCatalogueTab(initialCatalogueTab);
+    setSelectedCategory('全部');
+  }, [initialCatalogueTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setInspirationsLoading(true);
+    void api<{ items: PublicInspiration[] }>('/api/public/inspirations')
+      .then((res) => {
+        if (cancelled) return;
+        const items = res.items || [];
+        setInspirations(items.length > 0 ? items : getMockPublicInspirations());
+      })
+      .catch(() => {
+        if (!cancelled) setInspirations(getMockPublicInspirations());
+      })
+      .finally(() => {
+        if (!cancelled) setInspirationsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filteredInspirations = inspirations.filter((item) => {
+    const matchesCat =
+      selectedCategory === '全部' || item.inspireCategory === selectedCategory;
+    const q = agentSearchQuery.trim().toLowerCase();
     const matchesSearch =
-      !agentSearchQuery ||
-      item.title.toLowerCase().includes(agentSearchQuery.toLowerCase()) ||
-      item.desc.toLowerCase().includes(agentSearchQuery.toLowerCase());
+      !q ||
+      item.title.toLowerCase().includes(q) ||
+      item.description.toLowerCase().includes(q) ||
+      item.agent.title.toLowerCase().includes(q) ||
+      item.user.name.toLowerCase().includes(q);
     return matchesCat && matchesSearch;
   });
+
+  const filteredAgents = catalogAgents.filter((item) => {
+    const matchesCat = selectedCategory === '全部' || item.category === selectedCategory;
+    return matchesCat;
+  });
+
+  const submitAgentRecommend = async (raw?: string) => {
+    const query = (raw ?? agentSearchQuery).trim() || RECOMMEND_EXAMPLES[0];
+    setAgentSearchQuery(query);
+    setRecommendQuery(query);
+    setRecommendOpen(true);
+    setRecommendBusy(true);
+    setRecommendError('');
+    setRecommendItems([]);
+    setRecommendSummary('');
+    setRecommendIntents([]);
+    try {
+      const result = await api<{
+        source: 'ai' | 'local';
+        analysis: { summary: string; intents: string[] };
+        items: AgentRecommendItem[];
+      }>('/api/public/agents/recommend', {
+        method: 'POST',
+        body: JSON.stringify({ query })
+      });
+      const hydrated = (result.items || []).map((item) => {
+        const local = catalogAgents.find((agent) => agent.id === item.id);
+        return {
+          ...(local || item),
+          reason: item.reason,
+          matchScore: item.matchScore
+        };
+      });
+      setRecommendItems(hydrated);
+      setRecommendSummary(result.analysis?.summary || '');
+      setRecommendIntents(result.analysis?.intents || []);
+      setRecommendSource(result.source || 'local');
+    } catch (err) {
+      setRecommendError(err instanceof Error ? err.message : '推荐失败，请稍后重试');
+    } finally {
+      setRecommendBusy(false);
+    }
+  };
 
   return (
     <div id="hellome-home-page" className="space-y-8 pb-16">
@@ -220,45 +320,134 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
         {/* Main Header Container */}
         <div className="bg-white rounded-2xl border border-slate-200 p-2.5 shadow-2xs">
           <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-            {/* Left: 热门智能体 Title Pill */}
+            {/* Left: 热门智能体 / 发现灵感 */}
             <div className="flex items-center gap-2">
-              <div
+              <button
+                type="button"
                 id="tab-section-hot-agents"
-                className="flex items-center gap-2.5 px-6 py-3 rounded-xl font-bold text-sm bg-slate-900 text-white shadow-sm"
+                onClick={() => {
+                  setCatalogueTab('agents');
+                  setSelectedCategory('全部');
+                }}
+                className={`flex items-center gap-2.5 px-6 py-3 rounded-xl font-bold text-sm cursor-pointer ${
+                  catalogueTab === 'agents'
+                    ? 'bg-slate-900 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
               >
-                <Sparkles size={17} className="text-emerald-400" />
+                <Sparkles
+                  size={17}
+                  className={catalogueTab === 'agents' ? 'text-emerald-400' : 'text-slate-400'}
+                />
                 <span>{sectionTitle}</span>
-                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-white/20 text-emerald-300">
+                <span
+                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${
+                    catalogueTab === 'agents' ? 'bg-white/20 text-emerald-300' : 'bg-white text-slate-500'
+                  }`}
+                >
                   {catalogAgents.length}+
                 </span>
-              </div>
+              </button>
+              <button
+                type="button"
+                id="tab-section-inspiration"
+                onClick={() => {
+                  setCatalogueTab('inspiration');
+                  setSelectedCategory('全部');
+                }}
+                className={`flex items-center gap-2.5 px-6 py-3 rounded-xl font-bold text-sm cursor-pointer ${
+                  catalogueTab === 'inspiration'
+                    ? 'bg-slate-900 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <Lightbulb
+                  size={17}
+                  className={catalogueTab === 'inspiration' ? 'text-amber-300' : 'text-slate-400'}
+                />
+                <span>发现灵感</span>
+                {inspirations.length > 0 && (
+                  <span
+                    className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${
+                      catalogueTab === 'inspiration'
+                        ? 'bg-white/20 text-amber-200'
+                        : 'bg-white text-slate-500'
+                    }`}
+                  >
+                    {inspirations.length}
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* Right: Search Input */}
-            <div className="flex items-center justify-end gap-3 px-2">
-              <div className="relative w-full md:w-72">
+            <div className="flex items-center justify-end gap-3 px-2 w-full md:w-auto">
+              <div className={`relative w-full ${catalogueTab === 'agents' ? 'md:w-[28rem]' : 'md:w-72'}`}>
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
                   value={agentSearchQuery}
                   onChange={(e) => setAgentSearchQuery(e.target.value)}
-                  placeholder="搜索智能体名称、描述..."
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 text-xs text-slate-900 rounded-xl border border-slate-200 focus:border-emerald-500 focus:bg-white outline-none transition-all"
+                  onKeyDown={(e) => {
+                    if (e.nativeEvent.isComposing) return;
+                    if (e.key === 'Enter' && catalogueTab === 'agents') {
+                      e.preventDefault();
+                      void submitAgentRecommend();
+                    }
+                  }}
+                  placeholder={
+                    catalogueTab === 'inspiration'
+                      ? '搜索成果、作者或智能体...'
+                      : '用一句话描述你想做什么…'
+                  }
+                  className={`w-full pl-9 py-2 bg-slate-50 text-xs text-slate-900 rounded-xl border border-slate-200 focus:border-emerald-500 focus:bg-white outline-none transition-all ${
+                    catalogueTab === 'agents' ? 'pr-20' : 'pr-3'
+                  }`}
                 />
+                {catalogueTab === 'agents' && (
+                  <button
+                    type="button"
+                    disabled={recommendBusy}
+                    onClick={() => void submitAgentRecommend()}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white disabled:text-slate-400 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    {recommendBusy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                    匹配
+                  </button>
+                )}
               </div>
             </div>
           </div>
+          {catalogueTab === 'agents' && (
+            <div className="px-2 pt-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-slate-400 shrink-0">试试：</span>
+              {RECOMMEND_EXAMPLES.map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  disabled={recommendBusy}
+                  onClick={() => void submitAgentRecommend(example)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-200 text-[11px] text-slate-600 hover:text-emerald-700 cursor-pointer"
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Sub-bar for Agents: Category Filter Pills */}
           <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 overflow-x-auto no-scrollbar">
             <span className="text-xs font-bold text-slate-400 mr-1 shrink-0">分类:</span>
-            {agentCategories.map((cat) => (
+            {(catalogueTab === 'inspiration' ? INSPIRATION_HOME_CATEGORIES : agentCategories).map((cat) => (
               <button
                 key={cat}
-                onClick={() => setSelectedAgentCategory(cat)}
+                type="button"
+                onClick={() => setSelectedCategory(cat)}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                  selectedAgentCategory === cat
-                    ? 'bg-emerald-600 text-white shadow-2xs'
+                  selectedCategory === cat
+                    ? catalogueTab === 'inspiration'
+                      ? 'bg-amber-500 text-white shadow-2xs'
+                      : 'bg-emerald-600 text-white shadow-2xs'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
                 }`}
               >
@@ -268,9 +457,7 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
           </div>
         </div>
 
-        {/* ========================================================================= */}
-        {/* VIEW: 热门智能体 CARDS GRID (点击卡片进介绍页 / 点击作者进主页 / 点赞收藏评论独立) */}
-        {/* ========================================================================= */}
+        {catalogueTab === 'agents' ? (
         <div className="space-y-4">
           <div className="flex items-center justify-between text-xs text-slate-500 font-medium px-1">
             <span>共展示 {filteredAgents.length} 款应用智能体</span>
@@ -451,6 +638,18 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
             })}
           </div>
         </div>
+        ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between text-xs text-slate-500 font-medium px-1">
+            <span>共展示 {filteredInspirations.length} 条推荐成果</span>
+          </div>
+          <InspirationFeed
+            items={filteredInspirations}
+            loading={inspirationsLoading}
+            onOpen={(item) => onOpenInspiration?.(item)}
+          />
+        </div>
+        )}
       </section>
 
       {/* 3. Bottom Footer Legal info */}
@@ -462,6 +661,27 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
           大模型备案号：Jiangsu-CarrotAI-202407030002 · 懂业务的 AI 智能体应用平台
         </div>
       </footer>
+
+      {recommendOpen && (
+        <AgentRecommendModal
+          query={recommendQuery}
+          loading={recommendBusy}
+          error={recommendError}
+          summary={recommendSummary}
+          intents={recommendIntents}
+          items={recommendItems}
+          source={recommendSource}
+          onClose={() => setRecommendOpen(false)}
+          onOpenAgent={(agent) => {
+            setRecommendOpen(false);
+            onOpenAgentDetail(agent);
+          }}
+          onOpenAuthor={(authorId) => {
+            setRecommendOpen(false);
+            onOpenAuthorProfile(authorId);
+          }}
+        />
+      )}
     </div>
   );
 };

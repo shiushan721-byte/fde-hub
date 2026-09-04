@@ -68,11 +68,12 @@ export interface CreatorTierInfo {
 }
 
 export interface AgentPricingPlans {
-  monthlyPrice?: number; // 按月付费 (元/月)
-  annualPrice?: number;  // 按年付费 (元/年)
-  buyoutPrice?: number;  // 终身买断 (元)
-  isFree?: boolean;      // 免费开源
-  preferredPlan?: 'monthly' | 'annual' | 'buyout';
+  price?: number;
+  isFree?: boolean;
+  /** @deprecated 已改为一次性售价，读旧数据时由 pricingFromAgent 兼容 */
+  monthlyPrice?: number;
+  annualPrice?: number;
+  buyoutPrice?: number;
 }
 
 export interface AgentKnowledgeItem {
@@ -110,7 +111,7 @@ export interface CreatorAgentItem {
   coverImage: string;
   pricingType: 'free' | 'freemium' | 'paid';
   price?: number; // 默认/基准价格 (元)
-  pricingPlans?: AgentPricingPlans; // 包含按月/按年/买断定价
+  pricingPlans?: AgentPricingPlans;
   tokenRebateEnabled: boolean; // 是否开启词元返点
   fdeCustomEnabled: boolean; // 是否开启 FDE 接单/二开通道
   status: 'published' | 'draft' | 'under_review' | 'offline';
@@ -595,10 +596,7 @@ export interface AgentPublishConfig {
   
   // 成本与商业定价机制 (基于真实沙箱精算)
   pricingModel: 'paid' | 'free';
-  monthlyPrice: number; // 用户售价 (元/月)
-  annualPrice: number; // 年付售价
-  buyoutPrice: number; // 买断售价
-  preferredPlan: 'monthly' | 'annual' | 'buyout';
+  price: number;
   enableEnterpriseCustomization: boolean; // 是否开启 FDE 二开定制接单
   
   // 真实沙箱成本与收益推演

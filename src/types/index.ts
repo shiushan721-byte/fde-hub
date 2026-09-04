@@ -10,11 +10,12 @@ export type VerifyType =
   | 'none';
 
 export interface AgentPricingPlans {
-  monthlyPrice?: number; // 按月付费 (元/月)
-  annualPrice?: number;  // 按年付费 (元/年)
-  buyoutPrice?: number;  // 终身买断 (元)
-  isFree?: boolean;      // 免费开放使用
-  preferredPlan?: 'monthly' | 'annual' | 'buyout';
+  price?: number;
+  isFree?: boolean;
+  /** @deprecated 已改为一次性售价，读旧数据时由 pricingFromAgent 兼容 */
+  monthlyPrice?: number;
+  annualPrice?: number;
+  buyoutPrice?: number;
 }
 
 export interface FDEExpert {

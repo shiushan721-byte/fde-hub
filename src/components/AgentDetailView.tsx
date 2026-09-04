@@ -5,9 +5,6 @@ import {
   ArrowRight,
   CheckCircle2,
   XCircle,
-  Send,
-  Flag,
-  X,
   MoreHorizontal,
   Download
 } from 'lucide-react';
@@ -24,9 +21,13 @@ import {
 } from '../lib/agentShare';
 import { AgentShareModal } from './AgentShareModal';
 import { adapterDisplayName } from '../../shared/adapterPackages';
-import { pricingFromAgent, pricingLabel, type PreferredPlan } from '../../shared/pricingPlans';
+import { pricingFromAgent, pricingLabel } from '../../shared/pricingPlans';
 import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
+import { AgentShowcaseSection } from './AgentShowcaseSection';
+import { CommentThread, type ThreadComment } from './CommentThread';
+import { showcaseToPublicInspiration, type PublicInspiration } from '../lib/inspiration';
 import { yuanAmount } from '../lib/customOrderLabels';
+import { getMockComments } from '../data/agentSocialMock';
 
 interface AgentDetailViewProps {
   agent: HellomeAgentItem;
@@ -40,6 +41,8 @@ interface AgentDetailViewProps {
   isLiked?: boolean;
   onToggleLike?: (agentId: string) => void;
   onToast?: (message: string) => void;
+  enableAuthorShowcaseTools?: boolean;
+  onOpenInspiration?: (item: PublicInspiration) => void;
 }
 
 type CatalogLicense = {
@@ -54,40 +57,10 @@ type CatalogLicense = {
 
 type CheckoutOrder = {
   id: string;
-  plan: PreferredPlan;
   priceCents: number;
 };
 
-type PublicComment = {
-  id: string;
-  userName: string;
-  userAvatar: string;
-  isAuthor: boolean;
-  content: string;
-  createdAt: string;
-  replies?: Array<{
-    id: string;
-    userName: string;
-    userAvatar: string;
-    isAuthor: boolean;
-    content: string;
-    createdAt: string;
-  }>;
-};
-
-const REPORT_REASONS = [
-  { value: 'spam', label: '垃圾广告' },
-  { value: 'abuse', label: '辱骂骚扰' },
-  { value: 'illegal', label: '违法违规' },
-  { value: 'false_info', label: '虚假信息' },
-  { value: 'other', label: '其他' }
-] as const;
-
-function formatCommentTime(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
+type PublicComment = ThreadComment;
 
 export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   agent,
@@ -96,24 +69,23 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   onConsultAuthor,
   onCustomizeFromAgent,
   onUseAgent,
-  onToast
+  onToast,
+  enableAuthorShowcaseTools = false,
+  onOpenInspiration
 }) => {
   const [followed, setFollowed] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
   const [comments, setComments] = useState<PublicComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
-  const [reportTarget, setReportTarget] = useState<PublicComment | null>(null);
-  const [reportReason, setReportReason] = useState<(typeof REPORT_REASONS)[number]['value']>('spam');
-  const [reportDetail, setReportDetail] = useState('');
+  const [commentBusy, setCommentBusy] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
+  const [socialTab, setSocialTab] = useState<'showcase' | 'comments'>('showcase');
+  const [showcaseCount, setShowcaseCount] = useState(0);
   const [sharePosterOpen, setSharePosterOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
   const [shareBusy, setShareBusy] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
-  const [selectedPlan, setSelectedPlan] = useState<PreferredPlan>(
-    pricingFromAgent(agent).preferredPlan
-  );
   const [license, setLicense] = useState<CatalogLicense | null>(null);
   const [checkout, setCheckout] = useState<CheckoutOrder | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
@@ -130,13 +102,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const adapterPackages = agent.adapterPackages || [];
   const pricing = pricingFromAgent(agent);
   const priceText = pricingLabel(pricing);
-  const selectedYuan =
-    selectedPlan === 'annual'
-      ? pricing.annualPrice
-      : selectedPlan === 'buyout'
-        ? pricing.buyoutPrice
-        : pricing.monthlyPrice;
-  const selectedUnit = selectedPlan === 'annual' ? '/年' : selectedPlan === 'buyout' ? ' 买断' : '/月';
+  const saleYuan = pricing.price;
   const owned = Boolean(license?.active);
 
   const startCheckout = async () => {
@@ -147,14 +113,14 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
     setBuyBusy(true);
     try {
       await ensureMarketplaceSession();
-      const order = await api<{ id: string; plan: PreferredPlan; priceCents: number }>(
+      const order = await api<{ id: string; priceCents: number }>(
         `/api/me/agents/${agent.id}/checkout`,
         {
           method: 'POST',
-          body: JSON.stringify({ plan: selectedPlan, channel: 'wechat' })
+          body: JSON.stringify({ channel: 'wechat' })
         }
       );
-      setCheckout({ id: order.id, plan: selectedPlan, priceCents: order.priceCents });
+      setCheckout({ id: order.id, priceCents: order.priceCents });
     } catch (err) {
       onToast?.(err instanceof Error ? err.message : '无法发起支付');
     } finally {
@@ -175,7 +141,6 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   useEffect(() => {
     setShareUrl('');
     setCheckout(null);
-    setSelectedPlan(pricingFromAgent(agent).preferredPlan);
     let cancelled = false;
     (async () => {
       try {
@@ -228,10 +193,12 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
     const qs = currentShareToken ? `?share=${encodeURIComponent(currentShareToken)}` : '';
     void api<{ comments: PublicComment[] }>(`/api/public/agents/${agent.id}/comments${qs}`)
       .then((res) => {
-        if (!cancelled) setComments(res.comments || []);
+        if (cancelled) return;
+        const next = res.comments || [];
+        setComments(next.length > 0 ? next : getMockComments(agent.id, agent.authorName));
       })
       .catch(() => {
-        if (!cancelled) setComments([]);
+        if (!cancelled) setComments(getMockComments(agent.id, agent.authorName));
       })
       .finally(() => {
         if (!cancelled) setCommentsLoading(false);
@@ -241,21 +208,41 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
     };
   }, [agent.id, currentShareToken]);
 
-  const submitReport = async () => {
-    if (!reportTarget) return;
+  const submitComment = async () => {
+    const content = commentDraft.trim();
+    if (!content) return;
+    setCommentBusy(true);
+    try {
+      await ensureMarketplaceSession();
+      const created = await api<PublicComment>(`/api/public/agents/${agent.id}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({ content })
+      });
+      setComments((prev) => [created, ...prev]);
+      setCommentDraft('');
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : '评论失败，请先登录后重试');
+    } finally {
+      setCommentBusy(false);
+    }
+  };
+
+  const submitReport = async (input: {
+    comment: PublicComment;
+    reason: 'spam' | 'abuse' | 'illegal' | 'false_info' | 'other';
+    detail: string;
+  }) => {
     setReportBusy(true);
     try {
       await ensureMarketplaceSession();
-      await api(`/api/public/agents/${agent.id}/comments/${reportTarget.id}/report`, {
+      await api(`/api/public/agents/${agent.id}/comments/${input.comment.id}/report`, {
         method: 'POST',
-        body: JSON.stringify({ reason: reportReason, detail: reportDetail.trim() })
+        body: JSON.stringify({ reason: input.reason, detail: input.detail })
       });
       onToast?.('举报已提交，处理进展将发送至站内信');
-      setReportTarget(null);
-      setReportDetail('');
-      setReportReason('spam');
     } catch (err) {
       onToast?.(err instanceof Error ? err.message : '举报失败，请先登录后重试');
+      throw err;
     } finally {
       setReportBusy(false);
     }
@@ -268,43 +255,6 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
     { label: '平台内分享与收藏', allowed: true },
     { label: '二次分发源码', allowed: false }
   ];
-
-  const renderComment = (cmt: PublicComment, nested = false) => (
-    <div
-      key={cmt.id}
-      className={`rounded-xl border border-slate-200 bg-white p-3 space-y-2 ${nested ? 'ml-8 mt-2' : ''}`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <img
-            src={cmt.userAvatar || authorExpert.avatar}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0"
-          />
-          <div className="min-w-0">
-            <div className="text-[12px] font-semibold text-slate-900 truncate">{cmt.userName}</div>
-            <div className="text-[10px] text-slate-400">{formatCommentTime(cmt.createdAt)}</div>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            setReportTarget(cmt);
-            setReportReason('spam');
-            setReportDetail('');
-          }}
-          className="shrink-0 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-600 cursor-pointer px-2 py-1 rounded-lg hover:bg-rose-50"
-          title="举报评论"
-        >
-          <Flag size={11} />
-          举报
-        </button>
-      </div>
-      <p className="text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap">{cmt.content}</p>
-      {cmt.replies?.map((reply) => renderComment(reply, true))}
-    </div>
-  );
 
   return (
     <div id="agent-detail-view" className="min-h-full bg-white">
@@ -349,47 +299,57 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
             </p>
 
             <section className="pt-2 border-t border-slate-100 space-y-4">
-              <h3 className="text-[14px] font-semibold text-slate-900">
-                共 {comments.length || agent.commentsCount} 条评论
-              </h3>
-
-              {commentsLoading && <p className="text-xs text-slate-400">评论加载中…</p>}
-              {!commentsLoading && comments.length === 0 && (
-                <p className="text-xs text-slate-400">暂无评论，欢迎率先发表看法。</p>
-              )}
-              <div className="space-y-3">
-                {comments.map((cmt) => renderComment(cmt))}
+              <div className="flex items-end justify-between gap-3 border-b border-slate-100">
+                <div className="flex items-center gap-5">
+                  {(
+                    [
+                      { id: 'showcase' as const, label: '成果展示', count: showcaseCount },
+                      { id: 'comments' as const, label: '评论', count: comments.length }
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setSocialTab(tab.id)}
+                      className={`pb-2.5 text-[14px] font-semibold cursor-pointer border-b-2 -mb-px ${
+                        socialTab === tab.id
+                          ? 'text-slate-900 border-slate-900'
+                          : 'text-slate-400 border-transparent hover:text-slate-600'
+                      }`}
+                    >
+                      {tab.label}
+                      <span className="ml-1.5 font-medium text-slate-400">{tab.count}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="flex items-center gap-3 pt-2">
-                <img
-                  src={authorExpert.avatar}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  className="w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0 opacity-80"
+              <div className={socialTab === 'showcase' ? '' : 'hidden'}>
+                <AgentShowcaseSection
+                  agentId={agent.id}
+                  authorId={agent.authorId}
+                  enableAuthorTools={enableAuthorShowcaseTools}
+                  onToast={onToast}
+                  embedded
+                  onCountChange={setShowcaseCount}
+                  onOpenDetail={(item) => {
+                    onOpenInspiration?.(showcaseToPublicInspiration(item, agent));
+                  }}
                 />
-                <div className="flex-1 min-w-0 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/80 px-3 h-10 focus-within:bg-white focus-within:border-slate-300 focus-within:ring-2 focus-within:ring-slate-900/5">
-                  <input
-                    type="text"
-                    value={commentDraft}
-                    onChange={(e) => setCommentDraft(e.target.value)}
-                    placeholder="谈谈你的看法"
-                    className="flex-1 min-w-0 bg-transparent text-[13px] text-slate-800 outline-none placeholder:text-slate-400"
-                  />
-                  <button
-                    type="button"
-                    disabled={!commentDraft.trim()}
-                    onClick={() => setCommentDraft('')}
-                    className={`shrink-0 inline-flex items-center gap-1 text-[12px] font-semibold cursor-pointer ${
-                      commentDraft.trim()
-                        ? 'text-slate-900 hover:text-blue-600'
-                        : 'text-slate-300 cursor-not-allowed'
-                    }`}
-                  >
-                    <Send size={13} />
-                    <span>发送</span>
-                  </button>
-                </div>
+              </div>
+
+              <div className={socialTab === 'comments' ? 'space-y-4' : 'hidden space-y-4'}>
+                <CommentThread
+                  comments={comments}
+                  loading={commentsLoading}
+                  draft={commentDraft}
+                  onDraftChange={setCommentDraft}
+                  onSubmit={() => void submitComment()}
+                  submitBusy={commentBusy}
+                  avatar={authorExpert.avatar}
+                  onSubmitReport={submitReport}
+                  reportBusy={reportBusy}
+                />
               </div>
             </section>
           </div>
@@ -473,48 +433,20 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               ) : (
                 <div className="space-y-3">
                   <div className="text-[22px] font-bold text-slate-900 leading-none">
-                    ￥{selectedYuan}
-                    <span className="text-[13px] font-medium text-slate-400">{selectedUnit}</span>
+                    ￥{saleYuan}
+                    <span className="text-[13px] font-medium text-slate-400"> 一次性</span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(
-                      [
-                        { plan: 'monthly' as const, label: '月付', price: pricing.monthlyPrice },
-                        { plan: 'annual' as const, label: '年付', price: pricing.annualPrice },
-                        { plan: 'buyout' as const, label: '买断', price: pricing.buyoutPrice }
-                      ] as const
-                    )
-                      .filter((item) => item.price > 0)
-                      .map((item) => (
-                        <button
-                          key={item.plan}
-                          type="button"
-                          onClick={() => setSelectedPlan(item.plan)}
-                          className={`px-2 py-1 rounded-md text-[11px] font-semibold cursor-pointer border ${
-                            selectedPlan === item.plan
-                              ? 'bg-slate-900 text-white border-slate-900'
-                              : 'bg-slate-50 border-slate-100 text-slate-600 hover:bg-slate-100'
-                          }`}
-                        >
-                          {item.label} ￥{item.price}
-                        </button>
-                      ))}
-                  </div>
+                  <p className="text-[12px] text-slate-400">购买后可长期使用，不按月或年续费</p>
                   {owned ? (
-                    <p className="text-[11px] text-emerald-700">
-                      已购买{license?.plan === 'buyout' ? '买断' : license?.plan === 'annual' ? '年付' : '月付'}
-                      {license?.expiresAt
-                        ? `，有效至 ${new Date(license.expiresAt).toLocaleDateString('zh-CN')}`
-                        : '，可长期使用'}
-                    </p>
+                    <p className="text-[11px] text-emerald-700">已购买，可长期使用</p>
                   ) : (
                     <button
                       type="button"
-                      disabled={buyBusy || selectedYuan < 1}
+                      disabled={buyBusy || saleYuan < 1}
                       onClick={() => void startCheckout()}
                       className="w-full h-10 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[13px] font-semibold cursor-pointer disabled:opacity-60"
                     >
-                      {buyBusy ? '正在创建订单…' : `立即购买 ${yuanAmount(selectedYuan * 100)}`}
+                      {buyBusy ? '正在创建订单…' : `立即购买 ${yuanAmount(saleYuan * 100)}`}
                     </button>
                   )}
                 </div>
@@ -638,76 +570,6 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
         </div>
       </div>
 
-      {reportTarget && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => !reportBusy && setReportTarget(null)}
-        >
-          <div
-            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <h3 className="text-sm font-black text-slate-900">举报评论</h3>
-              <button
-                type="button"
-                onClick={() => setReportTarget(null)}
-                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <p className="text-xs text-slate-500 line-clamp-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
-              {reportTarget.content}
-            </p>
-            <label className="block space-y-1">
-              <span className="text-[11px] text-slate-500">举报原因</span>
-              <select
-                value={reportReason}
-                onChange={(e) =>
-                  setReportReason(e.target.value as (typeof REPORT_REASONS)[number]['value'])
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
-              >
-                {REPORT_REASONS.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block space-y-1">
-              <span className="text-[11px] text-slate-500">补充说明（选填）</span>
-              <textarea
-                value={reportDetail}
-                onChange={(e) => setReportDetail(e.target.value)}
-                rows={3}
-                maxLength={500}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white resize-none"
-                placeholder="请简要说明举报理由"
-              />
-            </label>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={reportBusy}
-                onClick={() => setReportTarget(null)}
-                className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                disabled={reportBusy}
-                onClick={() => void submitReport()}
-                className="px-3 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
-              >
-                {reportBusy ? '提交中…' : '提交举报'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {checkout && (
         <PaymentCheckoutDrawer
           orderId={checkout.id}
@@ -716,7 +578,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
           heading="购买智能体"
           amountLabel="应付金额"
           successTitle="购买成功"
-          successHint="已按当前套餐开通，后续改价不影响你已购的使用权。"
+          successHint="支付成功后按购买时价格开通，可长期使用；后续改价不影响已购使用权。"
           escrowNote="演示环境：扫码不会真实扣款。支付成功后按购买时价格开通，已购用户不受后续改价影响。"
           payUrl={`/api/me/purchases/${checkout.id}/pay`}
           confirmUrl={`/api/me/purchases/${checkout.id}/confirm`}
@@ -724,7 +586,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
           onPaid={() => {
             setLicense({
               id: checkout.id,
-              plan: checkout.plan,
+              plan: 'one_time',
               priceCents: checkout.priceCents,
               status: 'paid',
               active: true

@@ -3,12 +3,7 @@ import { X } from 'lucide-react';
 import { CreatorAgentItem } from '../types/creator';
 import { AGENT_PRICE_CHANGE_NOTICE } from '../lib/agentLifecycle';
 import { api, ApiError } from '../lib/api';
-import {
-  catalogPriceYuan,
-  normalizePricingPlans,
-  validatePaidPlans,
-  type PreferredPlan
-} from '../../shared/pricingPlans';
+import { catalogPriceYuan, normalizePricingPlans, pricingFromAgent, validatePaidPlans } from '../../shared/pricingPlans';
 import { AgentPricingFields } from './AgentPricingFields';
 
 interface AgentPricingModalProps {
@@ -18,30 +13,26 @@ interface AgentPricingModalProps {
 }
 
 export const AgentPricingModal: React.FC<AgentPricingModalProps> = ({ agent, onClose, onSaved }) => {
-  const initial = normalizePricingPlans({
-    ...agent.pricingPlans,
-    isFree: agent.pricingType === 'free' || agent.pricingPlans?.isFree,
-    monthlyPrice: agent.pricingPlans?.monthlyPrice || agent.price || 39
+  const initial = pricingFromAgent({
+    price: agent.price,
+    pricingPlans: {
+      ...agent.pricingPlans,
+      isFree: agent.pricingType === 'free' || agent.pricingPlans?.isFree
+    }
   });
   const [pricingModel, setPricingModel] = useState<'paid' | 'free'>(initial.isFree ? 'free' : 'paid');
-  const [monthlyPrice, setMonthlyPrice] = useState(initial.monthlyPrice || 39);
-  const [annualPrice, setAnnualPrice] = useState(initial.annualPrice || 368);
-  const [buyoutPrice, setBuyoutPrice] = useState(initial.buyoutPrice || 599);
-  const [preferredPlan, setPreferredPlan] = useState<PreferredPlan>(initial.preferredPlan);
+  const [price, setPrice] = useState(initial.price || 39);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     setError('');
-  }, [pricingModel, monthlyPrice, annualPrice, buyoutPrice, preferredPlan]);
+  }, [pricingModel, price]);
 
   const handleSave = async () => {
     const plans = normalizePricingPlans({
       isFree: pricingModel === 'free',
-      monthlyPrice,
-      annualPrice,
-      buyoutPrice,
-      preferredPlan
+      price
     });
     const invalid = validatePaidPlans(plans);
     if (invalid) {
@@ -99,15 +90,9 @@ export const AgentPricingModal: React.FC<AgentPricingModalProps> = ({ agent, onC
         <div className="px-6 py-4 space-y-3">
           <AgentPricingFields
             pricingModel={pricingModel}
-            monthlyPrice={monthlyPrice}
-            annualPrice={annualPrice}
-            buyoutPrice={buyoutPrice}
-            preferredPlan={preferredPlan}
+            price={price}
             onPricingModelChange={setPricingModel}
-            onMonthlyPriceChange={setMonthlyPrice}
-            onAnnualPriceChange={setAnnualPrice}
-            onBuyoutPriceChange={setBuyoutPrice}
-            onPreferredPlanChange={setPreferredPlan}
+            onPriceChange={setPrice}
           />
           <p className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
             {AGENT_PRICE_CHANGE_NOTICE}

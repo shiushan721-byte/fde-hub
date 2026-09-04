@@ -44,6 +44,8 @@ import {
   AgentToolConfigItem,
   AgentModelConfig
 } from '../types/creator';
+import { AgentPricingFields } from './AgentPricingFields';
+import { pricingFromAgent } from '../../shared/pricingPlans';
 
 interface AgentConfigModalProps {
   isOpen: boolean;
@@ -77,18 +79,15 @@ export const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
   const [title, setTitle] = useState(agent.title);
   const [desc, setDesc] = useState(agent.desc);
   const [category, setCategory] = useState(agent.category);
-  const [pricingType, setPricingType] = useState<'free' | 'paid'>(
-    agent.pricingType === 'free' || agent.pricingPlans?.isFree ? 'free' : 'paid'
-  );
-  const [monthlyPrice, setMonthlyPrice] = useState(
-    String(agent.pricingPlans?.monthlyPrice || agent.price || 29)
-  );
-  const [annualPrice, setAnnualPrice] = useState(
-    String(agent.pricingPlans?.annualPrice || (agent.price ? agent.price * 9 : 268))
-  );
-  const [buyoutPrice, setBuyoutPrice] = useState(
-    String(agent.pricingPlans?.buyoutPrice || (agent.price ? agent.price * 15 : 499))
-  );
+  const initialPlans = pricingFromAgent({
+    price: agent.price,
+    pricingPlans: {
+      ...agent.pricingPlans,
+      isFree: agent.pricingType === 'free' || agent.pricingPlans?.isFree
+    }
+  });
+  const [pricingType, setPricingType] = useState<'free' | 'paid'>(initialPlans.isFree ? 'free' : 'paid');
+  const [price, setPrice] = useState(initialPlans.price || 29);
   const [fdeCustomEnabled, setFdeCustomEnabled] = useState(agent.fdeCustomEnabled ?? true);
 
   // 2. Prompt & SOP Workflow State
@@ -331,13 +330,10 @@ export const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
       category,
       status: agentStatus,
       pricingType,
-      price: pricingType === 'free' ? 0 : Number(monthlyPrice || 29),
+      price: pricingType === 'free' ? 0 : Number(price || 29),
       pricingPlans: {
         isFree: pricingType === 'free',
-        monthlyPrice: pricingType === 'free' ? 0 : Number(monthlyPrice || 29),
-        annualPrice: pricingType === 'free' ? 0 : Number(annualPrice || 268),
-        buyoutPrice: pricingType === 'free' ? 0 : Number(buyoutPrice || 499),
-        preferredPlan: agent.pricingPlans?.preferredPlan || 'annual'
+        price: pricingType === 'free' ? 0 : Number(price || 29)
       },
       fdeCustomEnabled,
       systemPrompt,
@@ -684,7 +680,7 @@ export const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
                               ⚠️ 智能体处于【正常上架运行】状态，已锁定 Skill 替换通道
                             </div>
                             <p className="text-[11px] text-amber-800 leading-relaxed">
-                              为了保障全网已订阅用户调用的高可用与数据一致性，平台强制要求：<strong>必须先将智能体下架</strong>，才允许替换底层 Skill 包并重新触发 3 层沙箱验证。
+                              为了保障全网已购用户调用的高可用与数据一致性，平台强制要求：<strong>必须先将智能体下架</strong>，才允许替换底层 Skill 包并重新触发 3 层沙箱验证。
                             </p>
                           </div>
                         </div>
@@ -1082,93 +1078,13 @@ export const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
                   </div>
 
                   {/* Mode switch */}
-                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-800">计费模式</span>
-                      <div className="flex items-center gap-1 bg-slate-200 p-0.5 rounded-lg text-xs">
-                        <button
-                          type="button"
-                          onClick={() => setPricingType('paid')}
-                          className={`px-3 py-1 rounded-md font-bold transition-all cursor-pointer ${
-                            pricingType === 'paid'
-                              ? 'bg-blue-600 text-white shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          商业收费
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPricingType('free')}
-                          className={`px-3 py-1 rounded-md font-bold transition-all cursor-pointer ${
-                            pricingType === 'free'
-                              ? 'bg-blue-600 text-white shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          免费开源
-                        </button>
-                      </div>
-                    </div>
-
-                    {pricingType === 'paid' ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                        {/* 1. 按月付费 */}
-                        <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-1 shadow-2xs">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-bold text-slate-800">按月付费</span>
-                            <span className="text-[10px] text-slate-400">元/月</span>
-                          </div>
-                          <input
-                            type="number"
-                            value={monthlyPrice}
-                            onChange={(e) => setMonthlyPrice(e.target.value)}
-                            className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-900 outline-none"
-                          />
-                          <div className="text-[10px] text-emerald-600 font-medium">
-                            创作者实得 ￥{(Number(monthlyPrice || 0) * 0.7).toFixed(1)}/月
-                          </div>
-                        </div>
-
-                        {/* 2. 按年付费 */}
-                        <div className="p-3 bg-blue-50/40 rounded-xl border border-blue-200 space-y-1 shadow-2xs">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-bold text-blue-900">按年付费</span>
-                            <span className="text-[10px] text-blue-600 font-semibold">推荐75折</span>
-                          </div>
-                          <input
-                            type="number"
-                            value={annualPrice}
-                            onChange={(e) => setAnnualPrice(e.target.value)}
-                            className="w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-bold text-slate-900 outline-none"
-                          />
-                          <div className="text-[10px] text-blue-600 font-medium">
-                            创作者实得 ￥{(Number(annualPrice || 0) * 0.7).toFixed(1)}/年
-                          </div>
-                        </div>
-
-                        {/* 3. 终身买断制 */}
-                        <div className="p-3 bg-amber-50/40 rounded-xl border border-amber-200 space-y-1 shadow-2xs">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-bold text-amber-900">终身买断制</span>
-                            <span className="text-[10px] text-amber-700 font-semibold">永久授权</span>
-                          </div>
-                          <input
-                            type="number"
-                            value={buyoutPrice}
-                            onChange={(e) => setBuyoutPrice(e.target.value)}
-                            className="w-full px-2.5 py-1.5 bg-white border border-amber-200 rounded-lg text-xs font-bold text-slate-900 outline-none"
-                          />
-                          <div className="text-[10px] text-amber-700 font-medium">
-                            创作者实得 ￥{(Number(buyoutPrice || 0) * 0.7).toFixed(1)}/单
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-[11px] text-slate-500 pt-1">
-                        智能体免费开放给用户；用户调用消耗 Token 时依然需自充，您依然享有 <strong>15%~20% 算力返点</strong>。
-                      </p>
-                    )}
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                    <AgentPricingFields
+                      pricingModel={pricingType}
+                      price={price}
+                      onPricingModelChange={setPricingType}
+                      onPriceChange={setPrice}
+                    />
                   </div>
 
                   {/* Enterprise Customization Toggle */}

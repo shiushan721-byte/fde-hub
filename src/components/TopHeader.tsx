@@ -14,19 +14,22 @@ import {
   CheckCircle2,
   AlertCircle,
   Star,
-  Crown
+  Crown,
+  Lightbulb
 } from 'lucide-react';
 import { MainNavRoute } from './Sidebar';
 import { CreatorTierLevel, RealNameVerifyStatus, FDECertStatus, UserIdentityRole } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
 
 interface TopHeaderProps {
-  currentRoute: MainNavRoute | 'author-profile' | 'agent-detail';
+  currentRoute: MainNavRoute | 'author-profile' | 'agent-detail' | 'inspiration-detail';
   onNavigate: (route: MainNavRoute) => void;
   onOpenRechargeModal: () => void;
   currentTier?: CreatorTierLevel;
   activeAuthorName?: string | null;
   activeAgentTitle?: string | null;
+  activeInspirationTitle?: string | null;
+  inspirationBackLabel?: string;
   onBackToHome?: () => void;
   unreadCount?: number;
   favoriteAgentCount?: number;
@@ -49,6 +52,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   currentTier = 1 as CreatorTierLevel,
   activeAuthorName,
   activeAgentTitle,
+  activeInspirationTitle,
+  inspirationBackLabel = '返回发现灵感',
   onBackToHome,
   unreadCount = 0,
   favoriteAgentCount = 0,
@@ -99,6 +104,21 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <span className="text-slate-900 font-bold flex items-center gap-1.5 truncate max-w-[40vw]">
               <Sparkles size={13} className="text-blue-600 shrink-0" />
               <span className="truncate">{activeAgentTitle || '智能体详情'}</span>
+            </span>
+          </div>
+        ) : currentRoute === 'inspiration-detail' ? (
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              onClick={onBackToHome || (() => onNavigate('hellome-home'))}
+              className="text-slate-500 hover:text-slate-900 font-medium flex items-center gap-1 cursor-pointer"
+            >
+              <Home size={13} />
+              <span>{inspirationBackLabel}</span>
+            </button>
+            <ChevronRight size={12} className="text-slate-400" />
+            <span className="text-slate-900 font-bold flex items-center gap-1.5 truncate max-w-[40vw]">
+              <Lightbulb size={13} className="text-amber-500 shrink-0" />
+              <span className="truncate">{activeInspirationTitle || '成果详情'}</span>
             </span>
           </div>
         ) : currentRoute === 'author-profile' ? (

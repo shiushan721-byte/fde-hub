@@ -38,9 +38,14 @@ export async function createCommentReport(input: {
   detail?: string;
   reporterUserId?: string;
   reporterName?: string;
+  source?: 'agent' | 'showcase';
+  showcaseId?: string;
 }) {
   const comment = await prisma.agentComment.findFirst({
-    where: { id: input.commentId, agentId: input.agentId }
+    where:
+      input.source === 'showcase' || input.showcaseId
+        ? { id: input.commentId, showcaseId: input.showcaseId || undefined, source: 'showcase' }
+        : { id: input.commentId, agentId: input.agentId, source: 'agent' }
   });
   if (!comment) throw new Error('评论不存在');
 
@@ -56,16 +61,29 @@ export async function createCommentReport(input: {
   }
 
   const agent = await prisma.agent.findUnique({
-    where: { id: input.agentId },
+    where: { id: comment.agentId },
     select: { title: true }
   });
+  const showcase = comment.showcaseId
+    ? await prisma.agentShowcase.findUnique({
+        where: { id: comment.showcaseId },
+        select: { title: true }
+      })
+    : null;
+  const source = (comment.source === 'showcase' ? 'showcase' : 'agent') as 'agent' | 'showcase';
+  const place =
+    source === 'showcase'
+      ? `成果「${showcase?.title || '未命名成果'}」`
+      : `智能体「${agent?.title || '—'}」`;
 
   return prisma.$transaction(async (tx) => {
     const report = await tx.agentCommentReport.create({
       data: {
         id: newReportId(),
         commentId: input.commentId,
-        agentId: input.agentId,
+        agentId: comment.agentId,
+        source,
+        showcaseId: comment.showcaseId,
         reporterUserId: input.reporterUserId || null,
         reporterName: input.reporterName || '用户',
         reason: input.reason,
@@ -81,12 +99,14 @@ export async function createCommentReport(input: {
           userId: input.reporterUserId,
           type: 'comment_report_submitted',
           title: '举报已受理',
-          body: `您举报的评论已提交，平台核实后将通过站内信告知处理结果。关联智能体：${agent?.title || '—'}`,
+          body: `您举报的评论已提交，平台核实后将通过站内信告知处理结果。来源：${place}`,
           link: '',
           payload: toJson({
             reportId: report.id,
-            agentId: input.agentId,
+            agentId: comment.agentId,
             commentId: input.commentId,
+            source,
+            showcaseId: comment.showcaseId,
             reason: input.reason,
             reasonLabel: reasonLabel(input.reason)
           })
@@ -98,17 +118,21 @@ export async function createCommentReport(input: {
   });
 }
 
-export async function listCommentReports(status?: string) {
+export async function listCommentReports(status?: string, source?: string) {
   const reports = await prisma.agentCommentReport.findMany({
-    where: status ? { status } : {},
+    where: {
+      ...(status ? { status } : {}),
+      ...(source ? { source } : {})
+    },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: 200
   });
 
   const commentIds = [...new Set(reports.map((r) => r.commentId))];
   const agentIds = [...new Set(reports.map((r) => r.agentId))];
+  const showcaseIds = [...new Set(reports.map((r) => r.showcaseId).filter(Boolean))] as string[];
 
-  const [comments, agents] = await Promise.all([
+  const [comments, agents, showcases] = await Promise.all([
     commentIds.length
       ? prisma.agentComment.findMany({ where: { id: { in: commentIds } } })
       : Promise.resolve([]),
@@ -117,23 +141,35 @@ export async function listCommentReports(status?: string) {
           where: { id: { in: agentIds } },
           select: { id: true, title: true, authorName: true }
         })
+      : Promise.resolve([]),
+    showcaseIds.length
+      ? prisma.agentShowcase.findMany({
+          where: { id: { in: showcaseIds } },
+          select: { id: true, title: true }
+        })
       : Promise.resolve([])
   ]);
 
   const commentById = new Map(comments.map((c) => [c.id, c]));
   const agentById = new Map(agents.map((a) => [a.id, a]));
+  const showcaseById = new Map(showcases.map((s) => [s.id, s]));
 
   return reports.map((report) => {
     const comment = commentById.get(report.commentId);
     const agent = agentById.get(report.agentId);
+    const showcase = report.showcaseId ? showcaseById.get(report.showcaseId) : null;
+    const source = report.source === 'showcase' ? 'showcase' : 'agent';
     return {
       ...report,
+      source,
+      sourceLabel: source === 'showcase' ? '成果评论' : '智能体评论',
       reasonLabel: reasonLabel(report.reason),
       commentContent: comment?.content || '（评论已删除）',
       commentUserName: comment?.userName || '—',
       commentCreatedAt: comment?.createdAt || null,
       agentTitle: agent?.title || '—',
-      agentAuthorName: agent?.authorName || ''
+      agentAuthorName: agent?.authorName || '',
+      showcaseTitle: showcase?.title || ''
     };
   });
 }
@@ -200,14 +236,20 @@ export async function removeCommentForReport(reportId: string, reviewerId?: stri
       await tx.agentComment.deleteMany({
         where: {
           agentId: report.agentId,
+          source: comment.source === 'showcase' ? 'showcase' : 'agent',
+          ...(comment.showcaseId ? { showcaseId: comment.showcaseId } : {}),
           OR: [{ id: comment.id }, { parentId: comment.id }]
         }
       });
-      const remaining = await tx.agentComment.count({ where: { agentId: report.agentId } });
-      await tx.agent.update({
-        where: { id: report.agentId },
-        data: { commentsCount: String(remaining) }
+      const remaining = await tx.agentComment.count({
+        where: { agentId: report.agentId, source: comment?.source === 'showcase' ? 'showcase' : 'agent' }
       });
+      if (comment?.source !== 'showcase') {
+        await tx.agent.update({
+          where: { id: report.agentId },
+          data: { commentsCount: String(remaining) }
+        });
+      }
     }
 
     await tx.agentCommentReport.updateMany({

@@ -18,6 +18,9 @@ import {
   listExpertTags
 } from '../services/expertTags';
 import { listExpertTitles } from '../services/expertTitles';
+import { isAgentAuthor, listAgentShowcases, listPublicInspirations, getPublicInspiration } from '../services/agentShowcases';
+import { createComment, listComments } from '../services/agentComments';
+import { recommendAgents } from '../services/agentRecommend';
 
 export const publicRouter = Router();
 
@@ -103,6 +106,21 @@ publicRouter.get('/agents', async (req, res) => {
     catalog: agents.filter((a) => a.kind === 'catalog').map(agentToCatalog),
     solutions: agents.filter((a) => a.kind === 'solution').map(agentToSolution)
   });
+});
+
+const recommendSchema = z.object({
+  query: z.string().trim().min(2).max(500)
+});
+
+publicRouter.post('/agents/recommend', async (req, res) => {
+  const parsed = recommendSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '请用一两句话描述你想做什么');
+  try {
+    const result = await recommendAgents(parsed.data.query);
+    return ok(res, result);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '推荐失败，请稍后重试');
+  }
 });
 
 publicRouter.get('/agents/:id', async (req, res) => {
@@ -267,51 +285,135 @@ publicRouter.get('/agents/:id/comments', async (req, res) => {
     return fail(res, '智能体不存在或未上架', 404, 'NOT_FOUND');
   }
 
-  const comments = await prisma.agentComment.findMany({
-    where: { agentId: agent.id },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  const roots = comments.filter((c) => !c.parentId);
-  const repliesByParent = new Map<string, typeof comments>();
-  for (const c of comments) {
-    if (!c.parentId) continue;
-    const list = repliesByParent.get(c.parentId) || [];
-    list.push(c);
-    repliesByParent.set(c.parentId, list);
-  }
-
-  return ok(res, {
-    total: comments.length,
-    comments: roots.map((root) => ({
-      id: root.id,
-      agentId: root.agentId,
-      userName: root.userName,
-      userAvatar: root.userAvatar,
-      isAuthor: root.isAuthor,
-      content: root.content,
-      createdAt: root.createdAt.toISOString(),
-      replies: (repliesByParent.get(root.id) || [])
-        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-        .map((reply) => ({
-          id: reply.id,
-          userName: reply.userName,
-          userAvatar: reply.userAvatar,
-          isAuthor: reply.isAuthor,
-          content: reply.content,
-          createdAt: reply.createdAt.toISOString()
-        }))
-    }))
-  });
+  const comments = await listComments({ agentId: agent.id, source: 'agent' });
+  return ok(res, { total: comments.length, comments });
 });
 
-publicRouter.get('/comment-report-reasons', (_req, res) => {
-  return ok(res, COMMENT_REPORT_REASONS);
+const createCommentSchema = z.object({
+  content: z.string().trim().min(1).max(500),
+  parentId: z.string().optional()
 });
 
 const reportSchema = z.object({
   reason: z.enum(['spam', 'abuse', 'illegal', 'false_info', 'other']),
   detail: z.string().max(500).optional().default('')
+});
+
+publicRouter.post('/agents/:id/comments', requireAuth, async (req, res) => {
+  const parsed = createCommentSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '请填写评论内容');
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { name: true, avatar: true }
+    });
+    const item = await createComment({
+      source: 'agent',
+      agentId: req.params.id,
+      userId: req.user!.id,
+      userName: user?.name || req.user!.name,
+      userAvatar: user?.avatar || '',
+      content: parsed.data.content,
+      parentId: parsed.data.parentId
+    });
+    return ok(res, item, 201);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status || 400;
+    return fail(res, error instanceof Error ? error.message : '评论失败', status);
+  }
+});
+
+publicRouter.get('/inspirations', async (_req, res) => {
+  const items = await listPublicInspirations();
+  return ok(res, { items, total: items.length });
+});
+
+publicRouter.get('/inspirations/:id', async (req, res) => {
+  const item = await getPublicInspiration(req.params.id);
+  if (!item) return fail(res, '成果不存在或已隐藏', 404, 'NOT_FOUND');
+  return ok(res, item);
+});
+
+publicRouter.get('/inspirations/:id/comments', async (req, res) => {
+  const item = await getPublicInspiration(req.params.id);
+  if (!item) return fail(res, '成果不存在或已隐藏', 404, 'NOT_FOUND');
+  const comments = await listComments({
+    agentId: item.agent.id,
+    showcaseId: item.id,
+    source: 'showcase'
+  });
+  return ok(res, { total: comments.length, comments });
+});
+
+publicRouter.post('/inspirations/:id/comments', requireAuth, async (req, res) => {
+  const parsed = createCommentSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '请填写评论内容');
+  const item = await getPublicInspiration(req.params.id);
+  if (!item) return fail(res, '成果不存在或已隐藏', 404, 'NOT_FOUND');
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { name: true, avatar: true }
+    });
+    const comment = await createComment({
+      source: 'showcase',
+      agentId: item.agent.id,
+      showcaseId: item.id,
+      userId: req.user!.id,
+      userName: user?.name || req.user!.name,
+      userAvatar: user?.avatar || '',
+      content: parsed.data.content,
+      parentId: parsed.data.parentId
+    });
+    return ok(res, comment, 201);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status || 400;
+    return fail(res, error instanceof Error ? error.message : '评论失败', status);
+  }
+});
+
+publicRouter.post('/inspirations/:id/comments/:commentId/report', requireAuth, async (req, res) => {
+  const parsed = reportSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '举报原因无效');
+  const item = await getPublicInspiration(req.params.id);
+  if (!item) return fail(res, '成果不存在或已隐藏', 404, 'NOT_FOUND');
+  try {
+    const report = await createCommentReport({
+      agentId: item.agent.id,
+      commentId: req.params.commentId,
+      reason: parsed.data.reason as CommentReportReason,
+      detail: parsed.data.detail,
+      reporterUserId: req.user!.id,
+      reporterName: req.user!.name,
+      source: 'showcase',
+      showcaseId: item.id
+    });
+    return ok(res, { id: report.id }, 201);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '举报失败');
+  }
+});
+
+publicRouter.get('/agents/:id/showcases', async (req, res) => {
+  const share = typeof req.query.share === 'string' ? req.query.share.trim() : '';
+  const agent = await prisma.agent.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, authorId: true, status: true, creatorDeletedAt: true }
+  });
+  if (!agent || !(await canViewAgent(agent, share))) {
+    return fail(res, '智能体不存在或未上架', 404, 'NOT_FOUND');
+  }
+  const canModerate = await isAgentAuthor(req.user?.id, agent.authorId);
+  const items = await listAgentShowcases({
+    agentId: agent.id,
+    viewerUserId: req.user?.id,
+    isAuthor: canModerate
+  });
+  return ok(res, { items, canModerate, viewerUserId: req.user?.id || null });
+});
+
+publicRouter.get('/comment-report-reasons', (_req, res) => {
+  return ok(res, COMMENT_REPORT_REASONS);
 });
 
 publicRouter.post('/agents/:agentId/comments/:commentId/report', requireAuth, async (req, res) => {

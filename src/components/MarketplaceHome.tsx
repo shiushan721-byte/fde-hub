@@ -271,7 +271,7 @@ export const MarketplaceHome: React.FC<MarketplaceHomeProps> = ({
               <div>
                 <h2 className="text-xl font-bold text-slate-900 font-display">热门标准版智能体</h2>
                 <p className="text-xs text-slate-500">
-                  可直接查看与订阅使用，并在结果中一键咨询作者进行深度业务二次开发
+                  可直接查看与一次性购买使用，并在结果中一键咨询作者进行深度业务二次开发
                 </p>
               </div>
             </div>

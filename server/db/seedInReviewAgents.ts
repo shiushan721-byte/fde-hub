@@ -160,10 +160,8 @@ export async function ensureSampleInReviewAgents() {
       authorName: seed.authorName,
       price: seed.price,
       pricingPlans: toJson({
-        monthlyPrice: seed.price,
-        annualPrice: Math.max(seed.price * 10, 0),
-        buyoutPrice: Math.max(seed.price * 20, 0),
-        preferredPlan: 'monthly'
+        isFree: seed.price <= 0,
+        price: Math.max(seed.price, 0)
       }),
       likesCount: '0',
       favoritesCount: '0',
@@ -284,10 +282,8 @@ export async function ensureSampleCreatorDeletedAgents() {
           authorName: seed.authorName,
           price: seed.price,
           pricingPlans: toJson({
-            monthlyPrice: seed.price,
-            annualPrice: Math.max(seed.price * 10, 0),
-            buyoutPrice: Math.max(seed.price * 20, 0),
-            preferredPlan: 'monthly'
+            isFree: seed.price <= 0,
+            price: Math.max(seed.price, 0)
           }),
           likesCount: '36',
           favoritesCount: '18',

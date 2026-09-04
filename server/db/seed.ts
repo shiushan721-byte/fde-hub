@@ -13,6 +13,7 @@ import { toJson } from '../lib/json';
 import { EXPERT_VERIFY_META } from '../lib/mappers';
 import { formatExpertNo, ensureExpertNos } from '../lib/expertNo';
 import { defaultHomeBanners, defaultHomeCategories } from '../../shared/homeDefaults';
+import { INSPIRATION_MOCK_SHOWCASES } from '../../shared/inspirationMock';
 import {
   mockHellomeHomeAgents,
   mockExperts,
@@ -40,8 +41,10 @@ export async function seedDatabase(force = false) {
     await ensureSampleInReviewAgents();
     await ensureSampleCreatorDeletedAgents();
     await ensureExpertDomainTagsAligned();
-    await ensureSampleCommentReports();
     await ensureSampleAdapterPackages();
+    await ensureAgentShowcases();
+    await ensureShowcaseComments();
+    await ensureSampleCommentReports();
     return { seeded: false, agents: existing };
   }
 
@@ -77,6 +80,7 @@ export async function seedDatabase(force = false) {
     await prisma.expert.deleteMany();
     await prisma.agentComment.deleteMany();
     await prisma.agentCommentReport.deleteMany();
+    await prisma.agentShowcase.deleteMany();
     await prisma.agent.deleteMany();
     await prisma.homeBanner.deleteMany();
     await prisma.category.deleteMany();
@@ -336,8 +340,10 @@ export async function seedDatabase(force = false) {
   await ensureSampleInReviewAgents();
   await ensureSampleCreatorDeletedAgents();
   await ensureExpertDomainTagsAligned();
-  await ensureSampleCommentReports();
   await ensureSampleAdapterPackages();
+  await ensureAgentShowcases();
+  await ensureShowcaseComments();
+  await ensureSampleCommentReports();
 
   const count = await prisma.agent.count();
   return { seeded: true, agents: count };
@@ -608,8 +614,10 @@ export async function ensureExpertApplicationSeed() {
     await ensureSampleInReviewAgents();
     await ensureSampleCreatorDeletedAgents();
     await ensureExpertDomainTagsAligned();
-    await ensureSampleCommentReports();
     await ensureSampleAdapterPackages();
+    await ensureAgentShowcases();
+    await ensureShowcaseComments();
+    await ensureSampleCommentReports();
   } catch (error) {
     console.warn('ensureExpertApplicationSeed skipped:', error);
   }
@@ -626,13 +634,14 @@ export async function ensureAgentComments() {
 
   const existingByAgent = await prisma.agentComment.groupBy({
     by: ['agentId'],
+    where: { source: 'agent' },
     _count: { _all: true }
   });
   const hasComments = new Set(existingByAgent.map((r) => r.agentId));
   const missing = catalogAgents.filter((a) => !hasComments.has(a.id));
 
   if (missing.length === 0) {
-    await syncAgentCommentCounts();
+    await ensureExtraAgentComments();
     return;
   }
 
@@ -705,18 +714,385 @@ export async function ensureAgentComments() {
   });
 
   await prisma.agentComment.createMany({ data: samples });
+  await ensureExtraAgentComments();
+}
+
+async function ensureExtraAgentComments() {
+  const extra = [
+    {
+      id: 'cmt_hz-canvas_3',
+      agentId: 'hz-canvas',
+      userName: '品牌增长-程璐',
+      userAvatar:
+        'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=100&auto=format&fit=crop&q=80',
+      isAuthor: false,
+      content: '配合作者二次定制后打通了我们的资产库，交付速度比预期快。',
+      createdAt: new Date(Date.now() - 20 * 3600_000)
+    },
+    {
+      id: 'cmt_hz-canvas_4',
+      agentId: 'hz-canvas',
+      userName: '项目助理-陈欣',
+      userAvatar:
+        'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=100&auto=format&fit=crop&q=80',
+      isAuthor: false,
+      content: '临时救急非常管用，格式和语气都到位，已经收藏了。',
+      createdAt: new Date(Date.now() - 30 * 3600_000)
+    },
+    {
+      id: 'cmt_hz-canvas_5',
+      agentId: 'hz-canvas',
+      userName: 'SEO老兵-阿威',
+      userAvatar:
+        'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80',
+      isAuthor: false,
+      content: '希望后续能再多一些行业模板，现在已经能覆盖日常大部分需求。',
+      createdAt: new Date(Date.now() - 48 * 3600_000)
+    },
+    {
+      id: 'cmt_hz-canvas_6',
+      agentId: 'hz-canvas',
+      userName: '内容主编-阿月',
+      userAvatar:
+        'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80',
+      isAuthor: false,
+      content: '短视频分镜和主视觉延展都很稳，团队里已经在推广使用。',
+      createdAt: new Date(Date.now() - 56 * 3600_000)
+    }
+  ];
+  const existing = await prisma.agentComment.findMany({
+    where: { id: { in: extra.map((row) => row.id) } },
+    select: { id: true }
+  });
+  const existingIdSet = new Set(existing.map((row) => row.id));
+  const agents = await prisma.agent.findMany({
+    where: { id: { in: [...new Set(extra.map((row) => row.agentId))] } },
+    select: { id: true }
+  });
+  const existingAgentIds = new Set(agents.map((row) => row.id));
+  const rows = extra.filter(
+    (row) => existingAgentIds.has(row.agentId) && !existingIdSet.has(row.id)
+  );
+  if (rows.length === 0) return;
+  await prisma.agentComment.createMany({ data: rows });
   await syncAgentCommentCounts();
 }
 
 async function syncAgentCommentCounts() {
   const groups = await prisma.agentComment.groupBy({
     by: ['agentId'],
+    where: { source: 'agent' },
     _count: { _all: true }
   });
   for (const row of groups) {
     await prisma.agent.update({
       where: { id: row.agentId },
       data: { commentsCount: String(row._count._all) }
+    });
+  }
+}
+
+export async function ensureAgentShowcases() {
+  const catalogAgents = await prisma.agent.findMany({
+    where: { kind: 'catalog' },
+    orderBy: { sortOrder: 'asc' },
+    select: { id: true }
+  });
+  if (catalogAgents.length === 0) return;
+
+  const existing = await prisma.agentShowcase.groupBy({
+    by: ['agentId'],
+    _count: { _all: true }
+  });
+  const hasShowcases = new Set(existing.map((row) => row.agentId));
+  const missing = catalogAgents.filter((agent) => !hasShowcases.has(agent.id));
+
+  const samples = [
+    {
+      title: '品牌主视觉分镜稿',
+      description:
+        '用无限画布把品牌主视觉拆成可标注的分镜，圈选素材后直接出图。这次给新茶饮做了三套主 KV，色板和构图都更稳。',
+      imageUrl:
+        'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
+      userName: '视觉设计师-小澈',
+      featured: false,
+      likesCount: 128
+    },
+    {
+      title: '产品短视频分镜成片',
+      description:
+        '先在画布上标出镜头节奏，再导出成片。这条 15 秒产品视频从分镜到成片大约半天，Prompt 结构比手写稳定很多。',
+      imageUrl:
+        'https://images.unsplash.com/photo-1558591710-4b4a1ae0f04d?w=800&auto=format&fit=crop&q=80',
+      userName: '独立创作者-Leo',
+      featured: false,
+      likesCount: 86
+    },
+    {
+      title: '活动主KV延展',
+      description: '活动主视觉延展到物料和社媒尺寸，保持同一套构图语言，投放素材不用重新找感觉。',
+      imageUrl:
+        'https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=800&auto=format&fit=crop&q=80',
+      userName: '品牌增长-程璐',
+      featured: false,
+      likesCount: 54
+    },
+    {
+      title: '素材标注后的合成稿',
+      description: '把参考图和成品标注在同一画布上对照，合成边缘和光影更容易调。',
+      imageUrl:
+        'https://images.unsplash.com/photo-1545239351-1141bd82e8a6?w=800&auto=format&fit=crop&q=80',
+      userName: '项目助理-陈欣',
+      featured: false,
+      likesCount: 23
+    },
+    {
+      title: '包装系列视觉提案',
+      description: '系列包装主画面一次出三款配色，方便给客户对稿。',
+      imageUrl:
+        'https://images.unsplash.com/photo-1561070791-2526d30994b5?w=800&auto=format&fit=crop&q=80',
+      userName: '晴天工作室',
+      featured: false,
+      likesCount: 41
+    },
+    {
+      title: '社媒封面组图',
+      description: '一周社媒封面统一视觉语言，封面和内容页可以一起导出。',
+      imageUrl:
+        'https://images.unsplash.com/photo-1558655146-d09347e92766?w=800&auto=format&fit=crop&q=80',
+      userName: '内容主编-阿月',
+      featured: false,
+      likesCount: 19
+    }
+  ];
+  const avatars = [
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&auto=format&fit=crop&q=80'
+  ];
+
+  if (missing.length > 0) {
+    await prisma.agentShowcase.createMany({
+      data: missing.flatMap((agent, agentIndex) =>
+        samples.map((item, index) => ({
+          id: `ash_${agent.id}_${index + 1}`,
+          agentId: agent.id,
+          userId: `showcase-${agent.id}-${index}`,
+          userName: item.userName,
+          userAvatar: avatars[(agentIndex + index) % avatars.length],
+          title: item.title,
+          description: item.description,
+          imageUrl: item.imageUrl,
+          fileName: '',
+          status: 'visible',
+          featured: false,
+          likesCount: item.likesCount,
+          createdAt: new Date(Date.now() - (index + 1) * 36e5)
+        }))
+      )
+    });
+  }
+
+  const hz = catalogAgents.find((agent) => agent.id === 'hz-canvas');
+  if (hz) {
+    const extraShowcases = samples.slice(4).map((item, index) => ({
+      id: `ash_hz-canvas_${index + 5}`,
+      agentId: hz.id,
+      userId: `showcase-hz-canvas-${index + 4}`,
+      userName: item.userName,
+      userAvatar: avatars[(index + 2) % avatars.length],
+      title: item.title,
+      description: item.description,
+      imageUrl: item.imageUrl,
+      fileName: '',
+      status: 'visible',
+      featured: false,
+      likesCount: item.likesCount,
+      createdAt: new Date(Date.now() - (index + 5) * 36e5)
+    }));
+    const existingExtra = await prisma.agentShowcase.findMany({
+      where: { id: { in: extraShowcases.map((row) => row.id) } },
+      select: { id: true }
+    });
+    const extraIdSet = new Set(existingExtra.map((row) => row.id));
+    const extraRows = extraShowcases.filter((row) => !extraIdSet.has(row.id));
+    if (extraRows.length > 0) {
+      await prisma.agentShowcase.createMany({ data: extraRows });
+    }
+  }
+
+  const sampleIds = catalogAgents.flatMap((agent) =>
+    samples.map((_, index) => `ash_${agent.id}_${index + 1}`)
+  );
+  sampleIds.push('ash_hz-canvas_5', 'ash_hz-canvas_6');
+  await prisma.agentShowcase.updateMany({
+    where: {
+      OR: [{ id: { in: sampleIds } }, { id: { startsWith: 'ash_hz_' } }]
+    },
+    data: { featured: false }
+  });
+
+  const catalogIdSet = new Set(catalogAgents.map((agent) => agent.id));
+  for (const item of INSPIRATION_MOCK_SHOWCASES) {
+    if (!catalogIdSet.has(item.agentId)) continue;
+    await prisma.agentShowcase.upsert({
+      where: { id: item.id },
+      create: {
+        id: item.id,
+        agentId: item.agentId,
+        userId: item.userId,
+        userName: item.userName,
+        userAvatar: item.userAvatar,
+        title: item.title,
+        description: item.description,
+        imageUrl: item.imageUrl,
+        fileName: item.fileName,
+        status: 'visible',
+        featured: item.featured,
+        inspireCategory: item.inspireCategory,
+        likesCount: item.likesCount,
+        createdAt: new Date(Date.now() - item.hoursAgo * 36e5)
+      },
+      update: {
+        agentId: item.agentId,
+        userId: item.userId,
+        userName: item.userName,
+        userAvatar: item.userAvatar,
+        title: item.title,
+        description: item.description,
+        imageUrl: item.imageUrl,
+        fileName: item.fileName,
+        status: 'visible',
+        featured: item.featured,
+        inspireCategory: item.inspireCategory,
+        likesCount: item.likesCount
+      }
+    });
+  }
+}
+
+export async function ensureShowcaseComments() {
+  const showcases = await prisma.agentShowcase.findMany({
+    where: { id: { in: INSPIRATION_MOCK_SHOWCASES.map((item) => item.id) }, status: 'visible' },
+    select: {
+      id: true,
+      agentId: true,
+      title: true,
+      userId: true,
+      userName: true,
+      userAvatar: true
+    }
+  });
+  if (showcases.length === 0) return;
+
+  const existing = await prisma.agentComment.findMany({
+    where: { source: 'showcase', showcaseId: { in: showcases.map((row) => row.id) } },
+    select: { id: true }
+  });
+  const existingIds = new Set(existing.map((row) => row.id));
+
+  const avatars = [
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=100&auto=format&fit=crop&q=80'
+  ];
+  const samples = [
+    {
+      userName: '品牌增长-程璐',
+      content: '这套 KV 的色板很稳，直接能拿去给客户对稿。',
+      hoursAgo: 3
+    },
+    {
+      userName: '独立创作者-Leo',
+      content: '分镜结构清楚，后面出短视频也省很多沟通。',
+      hoursAgo: 9
+    },
+    {
+      userName: '内容主编-阿月',
+      content: '介绍写得很具体，想复用同一套智能体试试。',
+      hoursAgo: 20
+    }
+  ];
+  const authorReplies = [
+    '感谢认可！主视觉分镜可以直接在画布里改色板后再导出。',
+    '镜头节奏我标在画布右侧了，按那个切基本一次过。',
+    '欢迎直接用同款智能体，有定制也可以找我。'
+  ];
+
+  const rows: Array<{
+    id: string;
+    agentId: string;
+    source: string;
+    showcaseId: string;
+    parentId?: string;
+    userId?: string;
+    userName: string;
+    userAvatar: string;
+    isAuthor: boolean;
+    content: string;
+    createdAt: Date;
+  }> = [];
+
+  showcases.forEach((showcase, showcaseIndex) => {
+    const sample = samples[showcaseIndex % samples.length];
+    const rootId = `cmt_insp_${showcase.id}_1`;
+    rows.push({
+      id: rootId,
+      agentId: showcase.agentId,
+      source: 'showcase',
+      showcaseId: showcase.id,
+      userName: sample.userName,
+      userAvatar: avatars[showcaseIndex % avatars.length],
+      isAuthor: false,
+      content: sample.content,
+      createdAt: new Date(Date.now() - sample.hoursAgo * 36e5)
+    });
+    rows.push({
+      id: `cmt_insp_${showcase.id}_reply`,
+      agentId: showcase.agentId,
+      source: 'showcase',
+      showcaseId: showcase.id,
+      parentId: rootId,
+      userId: showcase.userId,
+      userName: showcase.userName,
+      userAvatar: showcase.userAvatar,
+      isAuthor: true,
+      content: authorReplies[showcaseIndex % authorReplies.length],
+      createdAt: new Date(Date.now() - Math.max(1, sample.hoursAgo - 2) * 36e5)
+    });
+    if (showcaseIndex % 2 === 0) {
+      const extra = samples[(showcaseIndex + 1) % samples.length];
+      rows.push({
+        id: `cmt_insp_${showcase.id}_2`,
+        agentId: showcase.agentId,
+        source: 'showcase',
+        showcaseId: showcase.id,
+        userName: extra.userName,
+        userAvatar: avatars[(showcaseIndex + 2) % avatars.length],
+        isAuthor: false,
+        content: extra.content,
+        createdAt: new Date(Date.now() - (extra.hoursAgo + 6) * 36e5)
+      });
+    }
+  });
+
+  const toCreate = rows.filter((row) => !existingIds.has(row.id));
+  if (toCreate.length > 0) {
+    await prisma.agentComment.createMany({ data: toCreate });
+  }
+
+  for (const showcase of showcases) {
+    await prisma.agentComment.updateMany({
+      where: { id: `cmt_insp_${showcase.id}_reply` },
+      data: {
+        userId: showcase.userId,
+        userName: showcase.userName,
+        userAvatar: showcase.userAvatar,
+        isAuthor: true
+      }
     });
   }
 }

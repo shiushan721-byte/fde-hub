@@ -104,10 +104,7 @@ export const mockCreatorAgentsList: CreatorAgentItem[] = [
     pricingType: 'freemium',
     price: 49,
     pricingPlans: {
-      monthlyPrice: 49,
-      annualPrice: 468,
-      buyoutPrice: 899,
-      preferredPlan: 'annual'
+      price: 49
     },
     tokenRebateEnabled: true,
     fdeCustomEnabled: true,
@@ -133,10 +130,7 @@ export const mockCreatorAgentsList: CreatorAgentItem[] = [
     pricingType: 'freemium',
     price: 29,
     pricingPlans: {
-      monthlyPrice: 29,
-      annualPrice: 268,
-      buyoutPrice: 499,
-      preferredPlan: 'monthly'
+      price: 29
     },
     tokenRebateEnabled: true,
     fdeCustomEnabled: true,
@@ -162,10 +156,7 @@ export const mockCreatorAgentsList: CreatorAgentItem[] = [
     pricingType: 'free',
     price: 0,
     pricingPlans: {
-      isFree: true,
-      monthlyPrice: 0,
-      annualPrice: 0,
-      buyoutPrice: 0
+      isFree: true
     },
     tokenRebateEnabled: true,
     fdeCustomEnabled: false,
@@ -191,10 +182,7 @@ export const mockCreatorAgentsList: CreatorAgentItem[] = [
     pricingType: 'paid',
     price: 199,
     pricingPlans: {
-      monthlyPrice: 199,
-      annualPrice: 1880,
-      buyoutPrice: 3880,
-      preferredPlan: 'annual'
+      price: 199
     },
     tokenRebateEnabled: true,
     fdeCustomEnabled: true,
@@ -583,8 +571,8 @@ export const mockCreatorWallet: CreatorWalletDetail = {
       id: 'tx_003',
       orderNo: 'TXN-20260808-6629-AS',
       type: 'agent_sale',
-      typeLabel: '单品订阅售卖',
-      title: '「GEO 品牌搜索优化」标准版企业月度订阅 (70% 分成结算)',
+      typeLabel: '一次性售卖',
+      title: '「GEO 品牌搜索优化」标准版一次性购买 (70% 分成结算)',
       grossAmount: 2673.0,
       splitRatio: 0.70,
       platformFee: 801.9,
@@ -1313,8 +1301,8 @@ export const creatorDatasetsByTier: Record<CreatorTierLevel, CreatorTierDataset>
           id: 'tx_lv2_001',
           orderNo: 'TXN-LV2-20260816-AS01',
           type: 'agent_sale',
-          typeLabel: '单品订阅售卖',
-          title: '「GEO 品牌搜索优化」标准版 86 笔订阅分成 (70%)',
+          typeLabel: '一次性售卖',
+          title: '「GEO 品牌搜索优化」标准版 86 笔购买分成 (70%)',
           grossAmount: 12028.5,
           splitRatio: 0.70,
           platformFee: 3608.5,
@@ -1357,7 +1345,7 @@ export const creatorDatasetsByTier: Record<CreatorTierLevel, CreatorTierDataset>
           id: 'tx_lv2_003',
           orderNo: 'TXN-LV2-20260801-AS02',
           type: 'agent_sale',
-          typeLabel: '单品订阅售卖',
+          typeLabel: '一次性售卖',
           title: '7月份智能体标准版购买收益 (70% 分成结算)',
           grossAmount: 18958.5,
           splitRatio: 0.70,

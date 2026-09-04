@@ -2,7 +2,7 @@ export const AGENT_LIFECYCLE_NOTICE =
   '智能体一旦有用户使用，将无法删除，只能从市场撤回为「仅自己可用」。定价可后续调整，但已购用户不受影响。';
 
 export const AGENT_PRICE_CHANGE_NOTICE =
-  '新价格仅对后续购买生效，已购用户仍按原价与原套餐使用。';
+  '新价格仅对后续购买生效，已购用户仍按原价使用。';
 
 /** 创作者侧：是否已有真实用户使用过，用过则禁止删除 */
 export function creatorAgentHasBeenUsed(agent: {

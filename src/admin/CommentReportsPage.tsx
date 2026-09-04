@@ -29,6 +29,8 @@ type CommentReportRow = {
   id: string;
   commentId: string;
   agentId: string;
+  source?: 'agent' | 'showcase';
+  sourceLabel?: string;
   reporterName: string;
   reason: string;
   reasonLabel: string;
@@ -42,6 +44,7 @@ type CommentReportRow = {
   commentCreatedAt?: string | null;
   agentTitle: string;
   agentAuthorName?: string;
+  showcaseTitle?: string;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -52,10 +55,15 @@ const STATUS_LABEL: Record<string, string> = {
 
 export const CommentReportsPage = () => {
   const [filter, setFilter] = useState('pending');
+  const [sourceFilter, setSourceFilter] = useState('');
   const [busy, setBusy] = useState('');
+  const query = new URLSearchParams({
+    ...(filter ? { status: filter } : {}),
+    ...(sourceFilter ? { source: sourceFilter } : {})
+  }).toString();
   const { data, error, loading, reload } = useAdminQuery<CommentReportRow[]>(
-    `/api/admin/comment-reports${filter ? `?status=${filter}` : ''}`,
-    filter
+    `/api/admin/comment-reports${query ? `?${query}` : ''}`,
+    query
   );
 
   const refreshAll = async () => {
@@ -82,19 +90,30 @@ export const CommentReportsPage = () => {
         <div>
           <h1 className="text-xl font-black">评论举报</h1>
           <p className="text-xs text-slate-500 mt-1">
-            处理用户对智能体评论的举报；删除评论将同步移除该评论及其回复。
+            处理用户对智能体评论或成果评论的举报；删除评论将同步移除该评论及其回复。
           </p>
         </div>
-        <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
-        >
-          <option value="pending">待处理</option>
-          <option value="dismissed">已忽略</option>
-          <option value="removed">已删评</option>
-          <option value="">全部</option>
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+          >
+            <option value="">全部来源</option>
+            <option value="agent">智能体评论</option>
+            <option value="showcase">成果评论</option>
+          </select>
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+          >
+            <option value="pending">待处理</option>
+            <option value="dismissed">已忽略</option>
+            <option value="removed">已删评</option>
+            <option value="">全部状态</option>
+          </select>
+        </div>
       </div>
 
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
@@ -105,9 +124,27 @@ export const CommentReportsPage = () => {
           <div key={report.id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-bold text-slate-900">{report.agentTitle}</div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                      report.source === 'showcase'
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {report.sourceLabel || (report.source === 'showcase' ? '成果评论' : '智能体评论')}
+                  </span>
+                  <div className="text-sm font-bold text-slate-900">
+                    {report.source === 'showcase' && report.showcaseTitle
+                      ? report.showcaseTitle
+                      : report.agentTitle}
+                  </div>
+                </div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  作者 {report.agentAuthorName || '—'} · 举报人 {report.reporterName}
+                  {report.source === 'showcase'
+                    ? `基于智能体 ${report.agentTitle} · 作者 ${report.agentAuthorName || '—'}`
+                    : `作者 ${report.agentAuthorName || '—'}`}
+                  {` · 举报人 ${report.reporterName}`}
                 </div>
               </div>
               <span

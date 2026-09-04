@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { parseJson, toJson } from '../lib/json';
-import { pricingFromAgent, type PreferredPlan } from '../../shared/pricingPlans';
+import { pricingFromAgent, type CatalogPlan } from '../../shared/pricingPlans';
 import { createPendingPayment, markPaymentPaid } from './payments';
 import { creatorPayoutCents, getOrCreateWallet, newWalletId } from './wallet';
 import type { PayChannel } from './wallet';
@@ -12,19 +12,7 @@ function httpError(message: string, status: number) {
   return err;
 }
 
-export type CatalogPlan = PreferredPlan;
-
-export function isCatalogPlan(raw: unknown): raw is CatalogPlan {
-  return raw === 'monthly' || raw === 'annual' || raw === 'buyout';
-}
-
-export function planExpiresAt(plan: CatalogPlan, paidAt: Date) {
-  if (plan === 'buyout') return null;
-  const expires = new Date(paidAt);
-  if (plan === 'annual') expires.setFullYear(expires.getFullYear() + 1);
-  else expires.setMonth(expires.getMonth() + 1);
-  return expires;
-}
+export const ONE_TIME_PLAN: CatalogPlan = 'one_time';
 
 export function licenseActive(row: { status: string; expiresAt: Date | null }) {
   if (row.status !== 'paid') return false;
@@ -76,12 +64,6 @@ export async function listMyPurchases(userId: string) {
     agentTitle: row.agent.title,
     authorName: row.agent.authorName || ''
   }));
-}
-
-function yuanForPlan(plan: CatalogPlan, monthly: number, annual: number, buyout: number) {
-  if (plan === 'annual') return annual;
-  if (plan === 'buyout') return buyout;
-  return monthly;
 }
 
 async function creditCatalogSale(purchaseId: string) {
@@ -138,7 +120,6 @@ async function creditCatalogSale(purchaseId: string) {
 export async function createCatalogCheckout(input: {
   userId: string;
   agentId: string;
-  plan: CatalogPlan;
   channel: PayChannel;
 }) {
   const agent = await prisma.agent.findFirst({
@@ -152,18 +133,16 @@ export async function createCatalogCheckout(input: {
   });
   if (plans.isFree) throw httpError('该智能体免费开放，无需购买', 400);
 
-  const yuan = yuanForPlan(input.plan, plans.monthlyPrice, plans.annualPrice, plans.buyoutPrice);
-  if (yuan < 1) throw httpError('所选套餐价格无效', 400);
+  const yuan = plans.price;
+  if (yuan < 1) throw httpError('售价无效', 400);
 
   const active = await getActiveLicense(input.userId, agent.id);
-  if (active?.plan === 'buyout') throw httpError('已买断该智能体，无需重复购买', 409);
-  if (active?.plan === input.plan) throw httpError('当前套餐仍在有效期内', 409);
+  if (active) throw httpError('已购买该智能体，无需重复购买', 409);
 
   const pending = await prisma.agentPurchase.findFirst({
     where: {
       userId: input.userId,
       agentId: agent.id,
-      plan: input.plan,
       status: 'pending'
     },
     orderBy: { createdAt: 'desc' }
@@ -177,7 +156,7 @@ export async function createCatalogCheckout(input: {
     });
     const updated = await prisma.agentPurchase.update({
       where: { id: pending.id },
-      data: { channel: input.channel, paymentId: payment.id }
+      data: { channel: input.channel, paymentId: payment.id, plan: ONE_TIME_PLAN }
     });
     return { purchase: updated, payment };
   }
@@ -187,9 +166,9 @@ export async function createCatalogCheckout(input: {
       id: newWalletId('ap'),
       agentId: agent.id,
       userId: input.userId,
-      plan: input.plan,
+      plan: ONE_TIME_PLAN,
       priceCents: yuan * 100,
-      priceSnapshot: toJson({ ...plans, plan: input.plan }),
+      priceSnapshot: toJson({ ...plans, plan: ONE_TIME_PLAN }),
       status: 'pending',
       channel: input.channel
     }
@@ -261,7 +240,8 @@ export async function confirmCatalogPurchase(input: {
       channel: input.channel || purchase.channel,
       paymentId,
       paidAt,
-      expiresAt: planExpiresAt(purchase.plan as CatalogPlan, paidAt)
+      expiresAt: null,
+      plan: ONE_TIME_PLAN
     }
   });
   await creditCatalogSale(updated.id).catch((err) =>

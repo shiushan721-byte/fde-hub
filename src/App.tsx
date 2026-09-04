@@ -18,6 +18,7 @@ import { UserIdentityRole, CustomerLeadItem, ConsultationMessage } from './types
 import { FavoritesView } from './components/FavoritesView';
 import { ExpertsCatalogView } from './components/ExpertsCatalogView';
 import { AgentDetailView } from './components/AgentDetailView';
+import { InspirationDetailView } from './components/InspirationDetailView';
 import { FDEIntroView } from './components/FDEIntroView';
 import { DemoModeBar } from './components/DemoModeBar';
 import { AdminApp } from './admin/AdminApp';
@@ -37,13 +38,22 @@ import {
 } from './data/mockData';
 import { FDEExpert, AgentSolution, ConsultationFormState } from './types';
 import { isExpertRole } from './utils/expertIdentity';
+import {
+  inspirationHash,
+  parseInspirationHash,
+  clearInspirationHash,
+  type PublicInspiration,
+  getMockPublicInspiration
+} from './lib/inspiration';
 
 export default function App() {
   const catalog = useCatalog();
   const [showAdmin, setShowAdmin] = useState(false);
 
   // Global sidebar route: 'hellome-home' | 'author-profile' | 'creator-center' | 'workspace' | 'account' | 'apikey'
-  const [currentRoute, setCurrentRoute] = useState<MainNavRoute | 'author-profile' | 'agent-detail'>('hellome-home');
+  const [currentRoute, setCurrentRoute] = useState<
+    MainNavRoute | 'author-profile' | 'agent-detail' | 'inspiration-detail'
+  >('hellome-home');
   const [creatorCenterTab, setCreatorCenterTab] = useState<CreatorCenterTab>('my-agents');
   const [activeAuthorId, setActiveAuthorId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -88,8 +98,16 @@ export default function App() {
   // Agent detail page（页内打开，非弹窗）
   const [activeDetailAgent, setActiveDetailAgent] = useState<HellomeAgentItem | null>(null);
   const [agentDetailBackRoute, setAgentDetailBackRoute] = useState<MainNavRoute>('hellome-home');
+  const [activeInspiration, setActiveInspiration] = useState<PublicInspiration | null>(null);
+  const [homeCatalogueTab, setHomeCatalogueTab] = useState<'agents' | 'inspiration'>('agents');
+  const [inspirationOrigin, setInspirationOrigin] = useState<'home' | 'agent'>('home');
   const detailAgentIdRef = useRef<string | null>(null);
+  const inspirationIdRef = useRef<string | null>(null);
+  const inspirationOriginRef = useRef<'home' | 'agent'>('home');
+  const agentBeforeInspirationRef = useRef<HellomeAgentItem | null>(null);
   const ignoreAgentHashRef = useRef(false);
+  const routeRef = useRef(currentRoute);
+  routeRef.current = currentRoute;
 
   // Modals for becoming expert, recharge, onboarding, and identity debug panel
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
@@ -124,6 +142,98 @@ export default function App() {
     clearAgentShareHash();
   };
 
+  const leaveInspirationRoute = () => {
+    inspirationIdRef.current = null;
+    setActiveInspiration(null);
+    clearInspirationHash();
+  };
+
+  const handleOpenInspiration = (
+    item: PublicInspiration,
+    origin: 'home' | 'agent' = 'home'
+  ) => {
+    inspirationOriginRef.current = origin;
+    setInspirationOrigin(origin);
+    if (origin === 'agent') {
+      agentBeforeInspirationRef.current = activeDetailAgent;
+    } else {
+      agentBeforeInspirationRef.current = null;
+      leaveAgentDetailRoute();
+      setHomeCatalogueTab('inspiration');
+    }
+    inspirationIdRef.current = item.id;
+    setActiveInspiration(item);
+    setCurrentRoute('inspiration-detail');
+    if (!item.id.startsWith('mock_')) {
+      const nextHash = inspirationHash(item.id);
+      if (window.location.hash.replace(/^#/, '') !== nextHash) {
+        ignoreAgentHashRef.current = true;
+        window.location.hash = nextHash;
+      }
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const restoreInspirationHash = (id: string) => {
+    const nextHash = inspirationHash(id);
+    if (window.location.hash.replace(/^#/, '') !== nextHash) {
+      ignoreAgentHashRef.current = true;
+      window.location.hash = nextHash;
+    }
+  };
+
+  const restoreAgentHash = (agentId: string) => {
+    const nextHash = agentShareHash(agentId);
+    if (window.location.hash.replace(/^#/, '') !== nextHash) {
+      ignoreAgentHashRef.current = true;
+      window.location.hash = nextHash;
+    }
+  };
+
+  const handleBackFromInspiration = () => {
+    const returnAgent =
+      inspirationOriginRef.current === 'agent'
+        ? activeDetailAgent || agentBeforeInspirationRef.current
+        : null;
+    if (returnAgent) {
+      leaveInspirationRoute();
+      inspirationOriginRef.current = 'home';
+      setInspirationOrigin('home');
+      agentBeforeInspirationRef.current = null;
+      detailAgentIdRef.current = returnAgent.id;
+      setActiveDetailAgent(returnAgent);
+      setCurrentRoute('agent-detail');
+      restoreAgentHash(returnAgent.id);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setCurrentRoute('hellome-home');
+    leaveInspirationRoute();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleOpenAgentFromInspiration = async (agentId: string) => {
+    const local = catalog.homeAgents.find((item) => item.id === agentId);
+    if (local) {
+      handleOpenAgentDetail(local);
+      return;
+    }
+    try {
+      const data = await api<Record<string, unknown>>(`/api/public/agents/${encodeURIComponent(agentId)}`);
+      handleOpenAgentDetail(toHellomeAgentItem(data));
+    } catch {
+      showToast('智能体不存在或已下架');
+    }
+  };
+
+  const handleOpenAuthorFromInspiration = (authorId: string) => {
+    if (!catalog.experts.some((expert) => expert.id === authorId)) {
+      showToast('作者主页暂不可用');
+      return;
+    }
+    handleOpenAuthorProfile(authorId);
+  };
+
   // Navigate to Author Profile Page (triggered when clicking author name)
   const handleOpenAuthorProfile = (authorId: string) => {
     leaveAgentDetailRoute();
@@ -137,7 +247,7 @@ export default function App() {
     const from =
       currentRoute === 'agent-detail' || currentRoute === 'author-profile'
         ? agentDetailBackRoute
-        : (currentRoute as MainNavRoute);
+        : 'hellome-home';
     setAgentDetailBackRoute(from);
     detailAgentIdRef.current = agent.id;
     setActiveDetailAgent(agent);
@@ -153,6 +263,13 @@ export default function App() {
   };
 
   const handleBackFromAgentDetail = () => {
+    if (activeInspiration) {
+      setCurrentRoute('inspiration-detail');
+      leaveAgentDetailRoute();
+      restoreInspirationHash(activeInspiration.id);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     setCurrentRoute(agentDetailBackRoute);
     leaveAgentDetailRoute();
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -166,8 +283,37 @@ export default function App() {
         ignoreAgentHashRef.current = false;
         return;
       }
+
+      const inspirationParsed = parseInspirationHash(window.location.hash);
+      if (inspirationParsed) {
+        if (
+          inspirationIdRef.current === inspirationParsed.id &&
+          routeRef.current === 'inspiration-detail'
+        ) {
+          return;
+        }
+        try {
+          const data = await api<PublicInspiration>(
+            `/api/public/inspirations/${encodeURIComponent(inspirationParsed.id)}`
+          );
+          if (cancelled) return;
+          handleOpenInspiration(data);
+        } catch {
+          const local = getMockPublicInspiration(inspirationParsed.id);
+          if (cancelled) return;
+          if (local) handleOpenInspiration(local);
+          else showToast('成果不存在或已取消推荐');
+        }
+        return;
+      }
+
       const parsed = parseAgentShareHash(window.location.hash);
       if (!parsed) {
+        if (inspirationIdRef.current && routeRef.current === 'inspiration-detail') {
+          inspirationIdRef.current = null;
+          setActiveInspiration(null);
+          setCurrentRoute('hellome-home');
+        }
         if (detailAgentIdRef.current) {
           detailAgentIdRef.current = null;
           setActiveDetailAgent(null);
@@ -219,6 +365,7 @@ export default function App() {
     setCurrentRoute('hellome-home');
     setActiveAuthorId(null);
     leaveAgentDetailRoute();
+    leaveInspirationRoute();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -386,7 +533,9 @@ export default function App() {
       {/* 1. Left Global Sidebar */}
       <Sidebar
         currentRoute={
-          currentRoute === 'author-profile' || currentRoute === 'agent-detail'
+          currentRoute === 'author-profile' ||
+          currentRoute === 'agent-detail' ||
+          currentRoute === 'inspiration-detail'
             ? 'hellome-home'
             : currentRoute
         }
@@ -396,12 +545,14 @@ export default function App() {
             setCurrentRoute('creator-center');
             setActiveAuthorId(null);
             leaveAgentDetailRoute();
+            leaveInspirationRoute();
             window.scrollTo({ top: 0, behavior: 'smooth' });
             return;
           }
           setCurrentRoute(route);
           setActiveAuthorId(null);
           leaveAgentDetailRoute();
+          leaveInspirationRoute();
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         collapsed={sidebarCollapsed}
@@ -432,17 +583,25 @@ export default function App() {
               setCurrentRoute('creator-center');
               setActiveAuthorId(null);
               leaveAgentDetailRoute();
+              leaveInspirationRoute();
               return;
             }
             setCurrentRoute(route);
             setActiveAuthorId(null);
             leaveAgentDetailRoute();
+            leaveInspirationRoute();
             if (route !== 'creator-center') setCreatorCenterBackRoute(null);
           }}
           activeAuthorName={activeAuthor?.name}
           activeAgentTitle={activeDetailAgent?.title}
+          activeInspirationTitle={activeInspiration?.title}
+          inspirationBackLabel={inspirationOrigin === 'agent' ? '返回智能体' : '返回发现灵感'}
           onBackToHome={
-            currentRoute === 'agent-detail' ? handleBackFromAgentDetail : handleBackToHome
+            currentRoute === 'agent-detail'
+              ? handleBackFromAgentDetail
+              : currentRoute === 'inspiration-detail'
+                ? handleBackFromInspiration
+                : handleBackToHome
           }
           onOpenRechargeModal={() => setIsRechargeOpen(true)}
           unreadCount={
@@ -457,6 +616,7 @@ export default function App() {
             setCurrentRoute('favorites');
             setActiveAuthorId(null);
             leaveAgentDetailRoute();
+            leaveInspirationRoute();
           }}
           onOpenBecomeCreator={() => setIsCreatorOnboardingOpen(true)}
           userRole={userRole}
@@ -472,6 +632,8 @@ export default function App() {
               <HellomeHomeView
                 onOpenAuthorProfile={handleOpenAuthorProfile}
                 onOpenAgentDetail={handleOpenAgentDetail}
+                onOpenInspiration={handleOpenInspiration}
+                initialCatalogueTab={homeCatalogueTab}
                 favoriteAgentIds={favoriteAgentIds}
                 onToggleFavoriteAgent={handleToggleFavoriteAgent}
                 likedAgentIds={likedAgentIds}
@@ -549,6 +711,19 @@ export default function App() {
             </div>
           )}
 
+          {currentRoute === 'inspiration-detail' && activeInspiration && (
+            <InspirationDetailView
+              item={activeInspiration}
+              onBack={handleBackFromInspiration}
+              backLabel={inspirationOrigin === 'agent' ? '返回智能体' : '返回发现灵感'}
+              onOpenAgent={(agentId) => {
+                void handleOpenAgentFromInspiration(agentId);
+              }}
+              onOpenAgentAuthor={handleOpenAuthorFromInspiration}
+              onToast={showToast}
+            />
+          )}
+
           {/* ROUTE: Agent Detail Page */}
           {currentRoute === 'agent-detail' && activeDetailAgent && (
             <AgentDetailView
@@ -569,6 +744,8 @@ export default function App() {
               isLiked={likedAgentIds.includes(activeDetailAgent.id)}
               onToggleLike={handleToggleLikeAgent}
               onToast={showToast}
+              enableAuthorShowcaseTools={isExpertRole(userRole)}
+              onOpenInspiration={(item) => handleOpenInspiration(item, 'agent')}
             />
           )}
 

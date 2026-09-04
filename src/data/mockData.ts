@@ -45,10 +45,7 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-maya',
     price: 39,
     pricingPlans: {
-      monthlyPrice: 39,
-      annualPrice: 368,
-      buyoutPrice: 599,
-      preferredPlan: 'annual'
+      price: 39
     },
     likesCount: '2.4k',
     favoritesCount: '1.8k',
@@ -94,10 +91,7 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-maya',
     price: 29,
     pricingPlans: {
-      monthlyPrice: 29,
-      annualPrice: 268,
-      buyoutPrice: 499,
-      preferredPlan: 'monthly'
+      price: 29
     },
     likesCount: '5.1k',
     favoritesCount: '3.6k',

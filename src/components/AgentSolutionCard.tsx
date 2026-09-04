@@ -50,11 +50,8 @@ export const AgentSolutionCard: React.FC<AgentSolutionCardProps> = ({
               <span>免费开源</span>
             </span>
           ) : (
-            <span
-              className="px-2 py-1 rounded-full text-[11px] font-bold bg-amber-500/90 backdrop-blur-md text-white flex items-center gap-1 shadow-xs"
-              title="支持按月订阅、按年优惠与终身买断制"
-            >
-              <span>￥{agent.pricingPlans?.monthlyPrice || agent.price || 29}/月起</span>
+            <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-amber-500/90 backdrop-blur-md text-white flex items-center gap-1 shadow-xs">
+              <span>￥{agent.pricingPlans?.price || agent.pricingPlans?.monthlyPrice || agent.price || 29}</span>
             </span>
           )}
           <span className="px-2 py-1 rounded-full text-xs font-semibold bg-slate-900/80 backdrop-blur-md text-amber-300 flex items-center gap-1">
