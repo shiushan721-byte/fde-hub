@@ -66,7 +66,7 @@ export async function listMyPurchases(userId: string) {
   }));
 }
 
-async function creditCatalogSale(purchaseId: string) {
+export async function creditCatalogSale(purchaseId: string) {
   const purchase = await prisma.agentPurchase.findUnique({
     where: { id: purchaseId },
     include: { agent: true, user: { select: { name: true } } }
@@ -106,6 +106,7 @@ async function creditCatalogSale(purchaseId: string) {
       feeCents: purchase.priceCents - payoutCents,
       balanceAfterCents: wallet.pendingCents + wallet.availableCents + payoutCents,
       title: `标准版购买 · ${purchase.agent.title}`,
+      sourceKind: 'agent',
       sourceOrderNo: purchase.id,
       sourceBuyer: purchase.user.name,
       sourceAgent: purchase.agent.title,

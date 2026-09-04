@@ -1,4 +1,7 @@
 import { prisma } from '../lib/prisma';
+import { parseJson, toJson } from '../lib/json';
+import { pricingFromAgent } from '../../shared/pricingPlans';
+import { creditCatalogSale } from '../services/catalogPurchase';
 import {
   bindPayoutAccount,
   creditCreatorPendingIncome,
@@ -84,6 +87,55 @@ export async function ensureFinanceSynced() {
 
     await creditCreatorPendingIncome(order.id, order.acceptanceStartedAt || order.settledAt || order.createdAt);
   }
+
+  const linranAgents = await prisma.agent.findMany({
+    where: { authorId: 'fde-linran', creatorDeletedAt: null, status: 'published' }
+  });
+  const paidAgents = linranAgents
+    .map((agent) => ({
+      agent,
+      plans: pricingFromAgent({
+        price: agent.price,
+        pricingPlans: parseJson(agent.pricingPlans, {})
+      })
+    }))
+    .filter((row) => !row.plans.isFree && row.plans.price > 0)
+    .slice(0, 4);
+
+  for (const [index, row] of paidAgents.entries()) {
+    const purchaseId = `ap_seed_${row.agent.id}`;
+    const paidAt = new Date(Date.now() - (index + 2) * 24 * 60 * 60 * 1000);
+    await prisma.agentPurchase.upsert({
+      where: { id: purchaseId },
+      create: {
+        id: purchaseId,
+        agentId: row.agent.id,
+        userId: BUYER_ID,
+        plan: 'one_time',
+        priceCents: row.plans.price * 100,
+        priceSnapshot: toJson(row.plans),
+        status: 'paid',
+        channel: index % 2 === 0 ? 'alipay' : 'wechat',
+        paidAt,
+        createdAt: paidAt
+      },
+      update: {
+        status: 'paid',
+        priceCents: row.plans.price * 100,
+        paidAt
+      }
+    });
+    await creditCatalogSale(purchaseId);
+  }
+
+  await prisma.walletLedger.updateMany({
+    where: { type: 'income', title: { contains: '定制订单' } },
+    data: { sourceKind: 'custom' }
+  });
+  await prisma.walletLedger.updateMany({
+    where: { type: 'income', OR: [{ title: { contains: '标准版购买' } }, { relatedOrderId: { startsWith: 'ap_' } }] },
+    data: { sourceKind: 'agent' }
+  });
 
   await releasePendingIncomes();
   const wallet = await prisma.wallet.findUnique({ where: { userId: CREATOR_ID } });

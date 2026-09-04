@@ -20,7 +20,7 @@ import {
   parseAgentShareHash
 } from '../lib/agentShare';
 import { AgentShareModal } from './AgentShareModal';
-import { adapterDisplayName } from '../../shared/adapterPackages';
+import { adapterDisplayName, buildAdapterSkillPrompt } from '../../shared/adapterPackages';
 import { pricingFromAgent, pricingLabel } from '../../shared/pricingPlans';
 import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
 import { AgentShowcaseSection } from './AgentShowcaseSection';
@@ -85,6 +85,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const [shareUrl, setShareUrl] = useState('');
   const [shareBusy, setShareBusy] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [copiedPackId, setCopiedPackId] = useState('');
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const [license, setLicense] = useState<CatalogLicense | null>(null);
   const [checkout, setCheckout] = useState<CheckoutOrder | null>(null);
@@ -104,6 +105,25 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const priceText = pricingLabel(pricing);
   const saleYuan = pricing.price;
   const owned = Boolean(license?.active);
+
+  const copyAdapterPrompt = async (pack: (typeof adapterPackages)[number]) => {
+    const text = buildAdapterSkillPrompt({
+      agentTitle: agent.title,
+      agentDesc: agent.desc,
+      platformName: pack.platformName,
+      zipUrl: pack.url
+    });
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedPackId(pack.id);
+      onToast?.('提示词已复制，发给该 AI 即可安装 skills');
+      window.setTimeout(() => {
+        setCopiedPackId((current) => (current === pack.id ? '' : current));
+      }, 2000);
+    } catch {
+      onToast?.('复制失败，请手动复制');
+    }
+  };
 
   const startCheckout = async () => {
     if (pricing.isFree || owned) {
@@ -500,19 +520,33 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                     adapterPackages.map((pack) => (
                       <div
                         key={pack.id}
-                        className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-slate-100 first:border-t-0"
+                        className="px-3 py-2.5 border-t border-slate-100 first:border-t-0 space-y-2"
                       >
-                        <span className="text-[12px] text-slate-800 truncate">
-                          {adapterDisplayName(pack.platformName)}
-                        </span>
-                        <a
-                          href={pack.url}
-                          download={pack.fileName}
-                          className="shrink-0 h-7 px-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-bold inline-flex items-center gap-1 no-underline"
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[12px] text-slate-800 truncate">
+                            {adapterDisplayName(pack.platformName)}
+                          </span>
+                          <a
+                            href={pack.url}
+                            download={pack.fileName}
+                            className="shrink-0 h-7 px-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-bold inline-flex items-center gap-1 no-underline"
+                          >
+                            <Download size={12} />
+                            下载 ZIP
+                          </a>
+                        </div>
+                        <p className="text-[10px] leading-relaxed text-slate-400">
+                          将提示词发送给该AI安装该 skills
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void copyAdapterPrompt(pack)}
+                          className="rounded-full p-[1.5px] cursor-pointer bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-rose-400 shadow-[0_8px_18px_-6px_rgba(34,211,238,0.55),0_8px_18px_-6px_rgba(251,113,133,0.42)] hover:brightness-[1.03] active:scale-[0.98] transition"
                         >
-                          <Download size={12} />
-                          下载 ZIP
-                        </a>
+                          <span className="flex h-7 min-w-[92px] items-center justify-center rounded-full bg-white px-3.5 text-[11px] font-semibold text-slate-900">
+                            {copiedPackId === pack.id ? '已复制' : '复制 prompt'}
+                          </span>
+                        </button>
                       </div>
                     ))
                   )}

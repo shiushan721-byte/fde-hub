@@ -11,6 +11,23 @@ import {
 } from './platformFinance';
 
 export type PayChannel = 'wechat' | 'alipay';
+export type IncomeSourceKind = 'agent' | 'custom';
+
+export function resolveIncomeSourceKind(row: {
+  sourceKind?: string | null;
+  title?: string | null;
+  relatedOrderId?: string | null;
+  sourceOrderNo?: string | null;
+}): IncomeSourceKind {
+  if (row.sourceKind === 'custom' || row.sourceKind === 'agent') return row.sourceKind;
+  const title = row.title || '';
+  const related = row.relatedOrderId || '';
+  const orderNo = row.sourceOrderNo || '';
+  if (title.includes('定制订单') || related.startsWith('cord_') || orderNo.startsWith('CUS-')) {
+    return 'custom';
+  }
+  return 'agent';
+}
 
 /** @deprecated 使用 getFinanceSettings / resolvePlatformFeeRate；保留常量作默认展示兜底 */
 export const PLATFORM_FEE_RATE = 0.1;
@@ -123,6 +140,7 @@ export async function creditCreatorPendingIncome(orderId: string, startedAt?: Da
       feeCents: 0,
       balanceAfterCents: wallet.pendingCents + wallet.availableCents + (legacy ? 0 : payoutCents),
       title: `定制订单收益 · ${order.orderNo}`,
+      sourceKind: 'custom',
       sourceOrderNo: order.orderNo,
       sourceBuyer: order.buyer?.name || '客户',
       sourceAgent: order.baseAgentTitle || order.title,
@@ -387,6 +405,22 @@ export async function getWalletOverview(userId: string) {
   ]);
 
   const incomeLedgers = ledgers.filter((l) => l.type === 'income');
+  const relatedIds = [...new Set(incomeLedgers.map((l) => l.relatedOrderId).filter(Boolean))];
+  const customOrders = relatedIds.length
+    ? await prisma.customOrder.findMany({
+        where: { id: { in: relatedIds } },
+        select: { id: true, title: true, baseAgentTitle: true }
+      })
+    : [];
+  const customById = new Map(customOrders.map((row) => [row.id, row]));
+  const incomes = incomeLedgers.map((l) => {
+    const custom = customById.get(l.relatedOrderId);
+    return {
+      ...l,
+      sourceKind: custom ? 'custom' : resolveIncomeSourceKind(l),
+      sourceProject: custom?.title || ''
+    };
+  });
   const withdrawLedgers = ledgers.filter((l) => l.type === 'withdrawal');
   const totalIncomeCents = incomeLedgers.reduce((sum, l) => sum + l.amountCents, 0);
   const withdrawnTotalCents = withdrawals
@@ -413,7 +447,7 @@ export async function getWalletOverview(userId: string) {
       alipayBound: wallet.alipayBound,
       alipayAccount: wallet.alipayAccount
     },
-    incomes: incomeLedgers,
+    incomes,
     withdrawals,
     withdrawLedgers
   };

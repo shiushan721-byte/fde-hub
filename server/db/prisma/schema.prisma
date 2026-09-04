@@ -599,6 +599,8 @@ model WalletLedger {
   balanceAfterCents   Int
   channel             String    @default("")
   title               String
+  /** agent = 智能体订单交易; custom = 定制订单交易 */
+  sourceKind          String    @default("")
   sourceOrderNo       String    @default("")
   sourceBuyer         String    @default("")
   sourceAgent         String    @default("")

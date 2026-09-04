@@ -20,15 +20,18 @@ interface AccountViewProps {
 
 type PayChannel = 'alipay';
 type LedgerTab = 'income' | 'withdraw';
+type IncomeKind = 'agent' | 'custom';
 type WithdrawFilter = 'all' | 'received' | 'processing' | 'failed';
 
 type IncomeItem = {
   id: string;
   amountCents: number;
   title: string;
+  sourceKind?: IncomeKind | string;
   sourceOrderNo: string;
   sourceBuyer: string;
   sourceAgent: string;
+  sourceProject?: string;
   createdAt: string;
   availableAt?: string | null;
   released: boolean;
@@ -155,6 +158,17 @@ function feeFor(amountYuan: number, rate: number, minCents: number) {
   return Math.max(minCents, Math.round(amountCents * rate));
 }
 
+function incomeSourceKind(row: IncomeItem): IncomeKind {
+  if (row.sourceKind === 'custom' || row.sourceKind === 'agent') return row.sourceKind;
+  if (
+    (row.title || '').includes('定制订单') ||
+    (row.sourceOrderNo || '').startsWith('CUS-')
+  ) {
+    return 'custom';
+  }
+  return 'agent';
+}
+
 function inDateRange(iso: string, from: string, to: string) {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return false;
@@ -171,6 +185,7 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
   const [error, setError] = useState('');
   const [wallet, setWallet] = useState<WalletOverview | null>(null);
   const [ledgerTab, setLedgerTab] = useState<LedgerTab>('income');
+  const [incomeKind, setIncomeKind] = useState<IncomeKind>('agent');
   const [alipayAccount, setAlipayAccount] = useState('');
   const [editingAccount, setEditingAccount] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -235,14 +250,25 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
     if (!wallet) return [];
     const q = query.trim().toLowerCase();
     return wallet.incomes.filter((row) => {
+      if (incomeSourceKind(row) !== incomeKind) return false;
       if (!inDateRange(row.createdAt, dateFrom, dateTo)) return false;
       if (!q) return true;
-      return [row.sourceOrderNo, row.sourceAgent, row.sourceBuyer, row.title, yuanPlain(row.amountCents)]
+      return [row.sourceOrderNo, row.sourceAgent, row.sourceBuyer, row.sourceProject, row.title, yuanPlain(row.amountCents)]
         .join(' ')
         .toLowerCase()
         .includes(q);
     });
-  }, [wallet, query, dateFrom, dateTo]);
+  }, [wallet, query, dateFrom, dateTo, incomeKind]);
+
+  const incomeKindCounts = useMemo(() => {
+    if (!wallet) return { agent: 0, custom: 0 };
+    const counts = { agent: 0, custom: 0 };
+    for (const row of wallet.incomes) {
+      if (!inDateRange(row.createdAt, dateFrom, dateTo)) continue;
+      counts[incomeSourceKind(row)] += 1;
+    }
+    return counts;
+  }, [wallet, dateFrom, dateTo]);
 
   const filteredWithdrawals = useMemo(() => {
     if (!wallet) return [];
@@ -424,29 +450,63 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs">
             <div className="px-5 pt-4 pb-3 flex flex-col xl:flex-row xl:items-center gap-3 justify-between">
-              <div className="flex items-center gap-6">
-                <button
-                  type="button"
-                  onClick={() => setLedgerTab('income')}
-                  className={`text-sm cursor-pointer pb-1 border-b-2 ${
-                    ledgerTab === 'income'
-                      ? 'font-bold text-slate-900 border-slate-900'
-                      : 'font-medium text-slate-400 border-transparent hover:text-slate-700'
-                  }`}
-                >
-                  交易流水
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLedgerTab('withdraw')}
-                  className={`text-sm cursor-pointer pb-1 border-b-2 ${
-                    ledgerTab === 'withdraw'
-                      ? 'font-bold text-slate-900 border-slate-900'
-                      : 'font-medium text-slate-400 border-transparent hover:text-slate-700'
-                  }`}
-                >
-                  提现记录
-                </button>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-6">
+                  <button
+                    type="button"
+                    onClick={() => setLedgerTab('income')}
+                    className={`text-sm cursor-pointer pb-1 border-b-2 ${
+                      ledgerTab === 'income'
+                        ? 'font-bold text-slate-900 border-slate-900'
+                        : 'font-medium text-slate-400 border-transparent hover:text-slate-700'
+                    }`}
+                  >
+                    交易流水
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLedgerTab('withdraw')}
+                    className={`text-sm cursor-pointer pb-1 border-b-2 ${
+                      ledgerTab === 'withdraw'
+                        ? 'font-bold text-slate-900 border-slate-900'
+                        : 'font-medium text-slate-400 border-transparent hover:text-slate-700'
+                    }`}
+                  >
+                    提现记录
+                  </button>
+                </div>
+                {ledgerTab === 'income' && (
+                  <div className="flex flex-wrap gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-200 w-fit">
+                    <button
+                      type="button"
+                      onClick={() => setIncomeKind('agent')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        incomeKind === 'agent'
+                          ? 'bg-slate-900 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                      }`}
+                    >
+                      智能体订单交易
+                      <span className={`ml-1.5 tabular-nums ${incomeKind === 'agent' ? 'text-slate-300' : 'text-slate-400'}`}>
+                        {incomeKindCounts.agent}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIncomeKind('custom')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        incomeKind === 'custom'
+                          ? 'bg-slate-900 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                      }`}
+                    >
+                      定制订单交易
+                      <span className={`ml-1.5 tabular-nums ${incomeKind === 'custom' ? 'text-slate-300' : 'text-slate-400'}`}>
+                        {incomeKindCounts.custom}
+                      </span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -497,7 +557,9 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                     <tr className="border-y border-slate-100 text-xs text-slate-400">
                       <th className="px-5 py-3 font-medium">时间</th>
                       <th className="px-5 py-3 font-medium">交易订单号</th>
-                      <th className="px-5 py-3 font-medium">智能体</th>
+                      <th className="px-5 py-3 font-medium">
+                        {incomeKind === 'custom' ? '定制项目' : '智能体'}
+                      </th>
                       <th className="px-5 py-3 font-medium">客户</th>
                       <th className="px-5 py-3 font-medium text-right">金额</th>
                     </tr>
@@ -506,7 +568,7 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                     {filteredIncomes.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="px-5 py-16 text-center text-xs text-slate-400">
-                          暂无交易流水
+                          {incomeKind === 'custom' ? '暂无定制订单交易' : '暂无智能体订单交易'}
                         </td>
                       </tr>
                     ) : (
@@ -516,7 +578,14 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                             {formatDateTime(tx.createdAt)}
                           </td>
                           <td className="px-5 py-4 text-slate-800 font-medium">{tx.sourceOrderNo || tx.title || '—'}</td>
-                          <td className="px-5 py-4 text-slate-700">{tx.sourceAgent || '—'}</td>
+                          <td className="px-5 py-4 text-slate-700">
+                            <div>{tx.sourceAgent || tx.sourceProject || '—'}</div>
+                            {incomeKind === 'custom' && tx.sourceProject && tx.sourceProject !== tx.sourceAgent && (
+                              <div className="text-[11px] text-slate-400 mt-0.5 truncate max-w-[240px]">
+                                {tx.sourceProject}
+                              </div>
+                            )}
+                          </td>
                           <td className="px-5 py-4 text-slate-700">{tx.sourceBuyer || '—'}</td>
                           <td className="px-5 py-4 text-right text-slate-900 font-semibold tabular-nums">
                             {yuanPlain(tx.amountCents)}
