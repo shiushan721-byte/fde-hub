@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { toJson } from '../lib/json';
 import { findExpertForUser } from './creatorAgents';
 import { isInspirationCategory } from '../../shared/inspirationCategories';
 
@@ -13,6 +14,14 @@ function httpError(message: string, status: number) {
 
 function newShowcaseId() {
   return `ash_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function newLikeId() {
+  return `asl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function newNotificationId() {
+  return `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function mapShowcase(row: {
@@ -157,7 +166,7 @@ export async function moderateAgentShowcase(input: {
   });
   if (!agent) throw httpError('智能体不存在', 404);
   if (!input.asAdmin && !(await isAgentAuthor(input.actorUserId, agent.authorId))) {
-    throw httpError('仅作者可精选或隐藏成果', 403);
+    throw httpError('仅作者可精选成果', 403);
   }
 
   const row = await prisma.agentShowcase.findFirst({
@@ -246,7 +255,8 @@ function mapInspiration(
       authorName: string | null;
     };
   },
-  authorExpert: { id: string; name: string; avatar: string; title: string } | null
+  authorExpert: { id: string; name: string; avatar: string; title: string } | null,
+  liked = false
 ) {
   return {
     id: row.id,
@@ -255,6 +265,7 @@ function mapInspiration(
     imageUrl: row.imageUrl,
     fileName: row.fileName,
     likesCount: row.likesCount || 0,
+    liked,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     featured: row.featured,
@@ -291,7 +302,16 @@ function mapInspiration(
   };
 }
 
-export async function listPublicInspirations() {
+async function likedShowcaseIds(viewerUserId: string | undefined, showcaseIds: string[]) {
+  if (!viewerUserId || showcaseIds.length === 0) return new Set<string>();
+  const rows = await prisma.agentShowcaseLike.findMany({
+    where: { userId: viewerUserId, showcaseId: { in: showcaseIds } },
+    select: { showcaseId: true }
+  });
+  return new Set(rows.map((row) => row.showcaseId));
+}
+
+export async function listPublicInspirations(viewerUserId?: string) {
   const rows = await prisma.agentShowcase.findMany({
     where: {
       featured: true,
@@ -322,10 +342,20 @@ export async function listPublicInspirations() {
       })
     : [];
   const expertById = new Map(experts.map((e) => [e.id, e]));
-  return rows.map((row) => mapInspiration(row, row.agent.authorId ? expertById.get(row.agent.authorId) || null : null));
+  const likedIds = await likedShowcaseIds(
+    viewerUserId,
+    rows.map((row) => row.id)
+  );
+  return rows.map((row) =>
+    mapInspiration(
+      row,
+      row.agent.authorId ? expertById.get(row.agent.authorId) || null : null,
+      likedIds.has(row.id)
+    )
+  );
 }
 
-export async function getPublicInspiration(id: string) {
+export async function getPublicInspiration(id: string, viewerUserId?: string) {
   const row = await prisma.agentShowcase.findFirst({
     where: {
       id,
@@ -353,7 +383,8 @@ export async function getPublicInspiration(id: string) {
         select: { id: true, name: true, avatar: true, title: true }
       })
     : null;
-  return mapInspiration(row, expert);
+  const likedIds = await likedShowcaseIds(viewerUserId, [row.id]);
+  return mapInspiration(row, expert, likedIds.has(row.id));
 }
 
 export async function listAdminShowcases(input?: {
@@ -394,4 +425,97 @@ export async function listAdminShowcases(input?: {
     ...mapShowcase(row),
     agent: row.agent
   }));
+}
+
+async function resolveShowcaseNotifyUserId(input: {
+  ownerUserId: string;
+  agentAuthorId: string | null;
+  likerUserId: string;
+}) {
+  if (input.ownerUserId && input.ownerUserId !== input.likerUserId) {
+    const owner = await prisma.user.findUnique({
+      where: { id: input.ownerUserId },
+      select: { id: true }
+    });
+    if (owner) return owner.id;
+  }
+  if (!input.agentAuthorId) return null;
+  const expert = await prisma.expert.findUnique({
+    where: { id: input.agentAuthorId },
+    select: { userId: true }
+  });
+  if (expert?.userId && expert.userId !== input.likerUserId) return expert.userId;
+  return null;
+}
+
+export async function toggleShowcaseLike(input: { showcaseId: string; userId: string; userName?: string }) {
+  const row = await prisma.agentShowcase.findFirst({
+    where: {
+      id: input.showcaseId,
+      status: 'visible',
+      agent: { status: 'published', creatorDeletedAt: null }
+    },
+    include: {
+      agent: { select: { id: true, title: true, authorId: true } }
+    }
+  });
+  if (!row) throw httpError('成果不存在或已隐藏', 404);
+
+  const existing = await prisma.agentShowcaseLike.findUnique({
+    where: { showcaseId_userId: { showcaseId: row.id, userId: input.userId } }
+  });
+
+  if (existing) {
+    await prisma.$transaction([
+      prisma.agentShowcaseLike.delete({ where: { id: existing.id } }),
+      prisma.agentShowcase.update({
+        where: { id: row.id },
+        data: { likesCount: Math.max(0, row.likesCount - 1) }
+      })
+    ]);
+    return { liked: false, likesCount: Math.max(0, row.likesCount - 1) };
+  }
+
+  const nextCount = row.likesCount + 1;
+  await prisma.$transaction([
+    prisma.agentShowcaseLike.create({
+      data: {
+        id: newLikeId(),
+        showcaseId: row.id,
+        userId: input.userId
+      }
+    }),
+    prisma.agentShowcase.update({
+      where: { id: row.id },
+      data: { likesCount: nextCount }
+    })
+  ]);
+
+  const notifyUserId = await resolveShowcaseNotifyUserId({
+    ownerUserId: row.userId,
+    agentAuthorId: row.agent.authorId,
+    likerUserId: input.userId
+  });
+  if (notifyUserId) {
+    const likerName = (input.userName || '有人').trim() || '有人';
+    const title = row.title || '未命名成果';
+    await prisma.userNotification.create({
+      data: {
+        id: newNotificationId(),
+        userId: notifyUserId,
+        type: 'showcase_like',
+        title: '有人点赞了你的成果',
+        body: `${likerName} 赞了「${title}」`,
+        link: `#/inspiration/${row.id}`,
+        payload: toJson({
+          showcaseId: row.id,
+          agentId: row.agent.id,
+          agentTitle: row.agent.title,
+          likerUserId: input.userId
+        })
+      }
+    });
+  }
+
+  return { liked: true, likesCount: nextCount };
 }

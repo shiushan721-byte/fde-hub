@@ -5,7 +5,36 @@ export type AgentAdapterPackage = {
   size: string;
   url: string;
   fileKey?: string;
+  /** 缺省为免费，兼容旧数据 */
+  isFree?: boolean;
+  /** 元；收费时须 > 0 */
+  price?: number;
 };
+
+function toNonNegInt(raw: unknown, fallback = 0) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.round(n);
+}
+
+export function adapterPackageIsFree(pack: Pick<AgentAdapterPackage, 'isFree' | 'price'>) {
+  if (pack.isFree === false) return false;
+  if (typeof pack.price === 'number' && pack.price > 0) return false;
+  return true;
+}
+
+export function adapterPackagePriceYuan(pack: Pick<AgentAdapterPackage, 'isFree' | 'price'>) {
+  if (adapterPackageIsFree(pack)) return 0;
+  return Math.max(0, toNonNegInt(pack.price));
+}
+
+export function validateAdapterPackagePricing(pack: Pick<AgentAdapterPackage, 'platformName' | 'isFree' | 'price'>) {
+  if (adapterPackageIsFree(pack)) return null;
+  if (adapterPackagePriceYuan(pack) < 1) {
+    return `「${pack.platformName || '适配包'}」收费时售价须大于 0`;
+  }
+  return null;
+}
 
 export function normalizeAdapterPackages(raw: unknown): AgentAdapterPackage[] {
   if (!Array.isArray(raw)) return [];
@@ -16,16 +45,36 @@ export function normalizeAdapterPackages(raw: unknown): AgentAdapterPackage[] {
       const platformName = String(row.platformName || '').trim();
       const url = String(row.url || '').trim();
       if (!platformName || !url) return null;
+      const price = toNonNegInt(row.price ?? (Number(row.priceCents) > 0 ? Number(row.priceCents) / 100 : 0));
+      const isFree = row.isFree === false ? false : row.isFree === true ? true : !(price > 0);
       return {
         id: String(row.id || `adp_${Math.random().toString(36).slice(2, 10)}`),
         platformName,
         fileName: String(row.fileName || `${platformName}.zip`),
         size: String(row.size || ''),
         url,
-        fileKey: row.fileKey ? String(row.fileKey) : undefined
+        fileKey: row.fileKey ? String(row.fileKey) : undefined,
+        isFree,
+        price: isFree ? 0 : price
       };
     })
-    .filter((item): item is AgentAdapterPackage => Boolean(item));
+    .filter(Boolean) as AgentAdapterPackage[];
+}
+
+/** 前台公开列表：收费包不返回真实下载地址 */
+export function adapterPackagesForPublic(raw: unknown): AgentAdapterPackage[] {
+  return normalizeAdapterPackages(raw).map((pack) => {
+    if (adapterPackageIsFree(pack)) return pack;
+    return { ...pack, url: '', fileKey: undefined };
+  });
+}
+
+export function adapterPackagesForOwner(raw: unknown): AgentAdapterPackage[] {
+  return normalizeAdapterPackages(raw);
+}
+
+export function findAdapterPackage(raw: unknown, packageId: string) {
+  return normalizeAdapterPackages(raw).find((pack) => pack.id === packageId) || null;
 }
 
 export function adapterDisplayName(platformName: string) {

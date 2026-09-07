@@ -20,7 +20,7 @@ import {
   parseAgentShareHash
 } from '../lib/agentShare';
 import { AgentShareModal } from './AgentShareModal';
-import { adapterDisplayName, buildAdapterSkillPrompt } from '../../shared/adapterPackages';
+import { adapterDisplayName, adapterPackageIsFree, adapterPackagePriceYuan, adapterZipAbsoluteUrl, buildAdapterSkillPrompt } from '../../shared/adapterPackages';
 import { pricingFromAgent, pricingLabel } from '../../shared/pricingPlans';
 import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
 import { AgentShowcaseSection } from './AgentShowcaseSection';
@@ -58,6 +58,16 @@ type CatalogLicense = {
 type CheckoutOrder = {
   id: string;
   priceCents: number;
+  kind?: 'catalog' | 'adapter';
+  packageId?: string;
+};
+
+type AdapterEntitlement = {
+  packageId: string;
+  owned: boolean;
+  url: string;
+  isFree: boolean;
+  price: number;
 };
 
 type PublicComment = ThreadComment;
@@ -88,6 +98,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const [copiedPackId, setCopiedPackId] = useState('');
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const [license, setLicense] = useState<CatalogLicense | null>(null);
+  const [adapterEntitlements, setAdapterEntitlements] = useState<AdapterEntitlement[]>([]);
   const [checkout, setCheckout] = useState<CheckoutOrder | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
   const catalog = useCatalog();
@@ -106,12 +117,16 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const saleYuan = pricing.price;
   const owned = Boolean(license?.active);
 
-  const copyAdapterPrompt = async (pack: (typeof adapterPackages)[number]) => {
+  const copyAdapterPrompt = async (pack: (typeof adapterPackages)[number], zipUrl: string) => {
+    if (!zipUrl) {
+      onToast?.('请先购买后再复制安装提示词');
+      return;
+    }
     const text = buildAdapterSkillPrompt({
       agentTitle: agent.title,
       agentDesc: agent.desc,
       platformName: pack.platformName,
-      zipUrl: pack.url
+      zipUrl
     });
     try {
       await navigator.clipboard.writeText(text);
@@ -140,11 +155,53 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
           body: JSON.stringify({ channel: 'wechat' })
         }
       );
-      setCheckout({ id: order.id, priceCents: order.priceCents });
+      setCheckout({ id: order.id, priceCents: order.priceCents, kind: 'catalog' });
     } catch (err) {
       onToast?.(err instanceof Error ? err.message : '无法发起支付');
     } finally {
       setBuyBusy(false);
+    }
+  };
+
+  const startAdapterCheckout = async (packageId: string) => {
+    setBuyBusy(true);
+    try {
+      await ensureMarketplaceSession();
+      const order = await api<{ id: string; priceCents: number }>(
+        `/api/me/agents/${agent.id}/adapters/${packageId}/checkout`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ channel: 'wechat' })
+        }
+      );
+      setCheckout({ id: order.id, priceCents: order.priceCents, kind: 'adapter', packageId });
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : '无法发起支付');
+    } finally {
+      setBuyBusy(false);
+    }
+  };
+
+  const downloadAdapterFile = async (pack: (typeof adapterPackages)[number], owned: boolean) => {
+    const path = adapterPackageIsFree(pack)
+      ? `/api/public/agents/${agent.id}/adapters/${pack.id}/file`
+      : `/api/me/agents/${agent.id}/adapters/${pack.id}/file`;
+    if (!adapterPackageIsFree(pack) && !owned) {
+      void startAdapterCheckout(pack.id);
+      return;
+    }
+    try {
+      const res = await fetch(path, { credentials: 'include' });
+      if (!res.ok) throw new Error('下载失败');
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = pack.fileName || `${pack.platformName}.zip`;
+      a.click();
+      URL.revokeObjectURL(href);
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : '下载失败');
     }
   };
 
@@ -165,10 +222,19 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
     (async () => {
       try {
         await ensureMarketplaceSession();
-        const item = await api<CatalogLicense | null>(`/api/me/agents/${agent.id}/license`);
-        if (!cancelled) setLicense(item);
+        const [item, adapters] = await Promise.all([
+          api<CatalogLicense | null>(`/api/me/agents/${agent.id}/license`),
+          api<AdapterEntitlement[]>(`/api/me/agents/${agent.id}/adapter-licenses`).catch(() => [])
+        ]);
+        if (!cancelled) {
+          setLicense(item);
+          setAdapterEntitlements(adapters);
+        }
       } catch {
-        if (!cancelled) setLicense(null);
+        if (!cancelled) {
+          setLicense(null);
+          setAdapterEntitlements([]);
+        }
       }
     })();
     return () => {
@@ -517,38 +583,74 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                   {adapterPackages.length === 0 ? (
                     <p className="px-3 py-3 text-[12px] text-slate-400">暂无外部工具分发包</p>
                   ) : (
-                    adapterPackages.map((pack) => (
+                    adapterPackages.map((pack) => {
+                      const entitlement = adapterEntitlements.find((item) => item.packageId === pack.id);
+                      const free = adapterPackageIsFree(pack) || entitlement?.isFree;
+                      const ownedPack = Boolean(free || entitlement?.owned);
+                      const zipUrl = entitlement?.url || (free ? pack.url : '');
+                      const priceYuan = adapterPackagePriceYuan(pack) || entitlement?.price || 0;
+                      return (
                       <div
                         key={pack.id}
                         className="px-3 py-2.5 border-t border-slate-100 first:border-t-0 space-y-2"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[12px] text-slate-800 truncate">
-                            {adapterDisplayName(pack.platformName)}
+                          <span className="min-w-0">
+                            <span className="text-[12px] text-slate-800 truncate block">
+                              {adapterDisplayName(pack.platformName)}
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              {free ? '免费下载' : `¥${priceYuan} · 单独购买`}
+                            </span>
                           </span>
-                          <a
-                            href={pack.url}
-                            download={pack.fileName}
-                            className="shrink-0 h-7 px-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-bold inline-flex items-center gap-1 no-underline"
-                          >
-                            <Download size={12} />
-                            下载 ZIP
-                          </a>
+                          {ownedPack ? (
+                            <button
+                              type="button"
+                              onClick={() => void downloadAdapterFile(pack, true)}
+                              className="shrink-0 h-7 px-2.5 rounded-lg bg-slate-900 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Download size={12} />
+                              下载 ZIP
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={buyBusy}
+                              onClick={() => void startAdapterCheckout(pack.id)}
+                              className="shrink-0 h-7 px-2.5 rounded-lg bg-amber-500 text-white text-[11px] font-bold cursor-pointer disabled:opacity-60"
+                            >
+                              购买下载
+                            </button>
+                          )}
                         </div>
-                        <p className="text-[10px] leading-relaxed text-slate-400">
-                          将提示词发送给该AI安装该 skills
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => void copyAdapterPrompt(pack)}
-                          className="rounded-full p-[1.5px] cursor-pointer bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-rose-400 shadow-[0_8px_18px_-6px_rgba(34,211,238,0.55),0_8px_18px_-6px_rgba(251,113,133,0.42)] hover:brightness-[1.03] active:scale-[0.98] transition"
-                        >
-                          <span className="flex h-7 min-w-[92px] items-center justify-center rounded-full bg-white px-3.5 text-[11px] font-semibold text-slate-900">
-                            {copiedPackId === pack.id ? '已复制' : '复制 prompt'}
-                          </span>
-                        </button>
+                        {ownedPack ? (
+                          <>
+                            <p className="text-[10px] leading-relaxed text-slate-400">
+                              将提示词发送给该AI安装该 skills
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void copyAdapterPrompt(
+                                  pack,
+                                  zipUrl || adapterZipAbsoluteUrl(`/api/public/agents/${agent.id}/adapters/${pack.id}/file`)
+                                )
+                              }
+                              className="rounded-full p-[1.5px] cursor-pointer bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-rose-400 shadow-[0_8px_18px_-6px_rgba(34,211,238,0.55),0_8px_18px_-6px_rgba(251,113,133,0.42)] hover:brightness-[1.03] active:scale-[0.98] transition"
+                            >
+                              <span className="flex h-7 min-w-[92px] items-center justify-center rounded-full bg-white px-3.5 text-[11px] font-semibold text-slate-900">
+                                {copiedPackId === pack.id ? '已复制' : '复制 prompt'}
+                              </span>
+                            </button>
+                          </>
+                        ) : (
+                          <p className="text-[10px] leading-relaxed text-slate-400">
+                            购买后可下载 ZIP，并复制安装提示词。
+                          </p>
+                        )}
                       </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               )}
@@ -609,15 +711,40 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
           orderId={checkout.id}
           title={agent.title}
           amountCents={checkout.priceCents}
-          heading="购买智能体"
+          heading={checkout.kind === 'adapter' ? '购买 Skill 下载' : '购买智能体'}
           amountLabel="应付金额"
-          successTitle="购买成功"
-          successHint="支付成功后按购买时价格开通，可长期使用；后续改价不影响已购使用权。"
-          escrowNote="演示环境：扫码不会真实扣款。支付成功后按购买时价格开通，已购用户不受后续改价影响。"
+          successTitle={checkout.kind === 'adapter' ? '购买成功' : '购买成功'}
+          successHint={
+            checkout.kind === 'adapter'
+              ? '支付成功后即可下载该适配 ZIP，并复制安装提示词。'
+              : '支付成功后按购买时价格开通，可长期使用；后续改价不影响已购使用权。'
+          }
+          escrowNote="演示环境：扫码不会真实扣款。支付成功后按购买时价格开通。"
           payUrl={`/api/me/purchases/${checkout.id}/pay`}
           confirmUrl={`/api/me/purchases/${checkout.id}/confirm`}
           onClose={() => setCheckout(null)}
           onPaid={() => {
+            if (checkout.kind === 'adapter' && checkout.packageId) {
+              setAdapterEntitlements((prev) => {
+                const rest = prev.filter((item) => item.packageId !== checkout.packageId);
+                return [
+                  ...rest,
+                  {
+                    packageId: checkout.packageId!,
+                    owned: true,
+                    url: '',
+                    isFree: false,
+                    price: checkout.priceCents / 100
+                  }
+                ];
+              });
+              setCheckout(null);
+              onToast?.('支付成功，可以下载适配包了');
+              api<AdapterEntitlement[]>(`/api/me/agents/${agent.id}/adapter-licenses`)
+                .then(setAdapterEntitlements)
+                .catch(() => undefined);
+              return;
+            }
             setLicense({
               id: checkout.id,
               plan: 'one_time',

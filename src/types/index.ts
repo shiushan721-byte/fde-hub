@@ -1,3 +1,5 @@
+import type { AgentCustomProject } from '../../shared/customProjects';
+
 export type VerifyType =
   | 'ai_expert'
   | 'level_1_expert'
@@ -83,6 +85,8 @@ export interface AgentSolution {
   businessIntegrationTips: string;
   priceFrom: number;
   pricingPlans?: AgentPricingPlans;
+  canFDECustom?: boolean;
+  customProjects?: AgentCustomProject[];
   isFavorite?: boolean;
   demoConversation: Array<{
     role: 'user' | 'assistant';
@@ -169,6 +173,7 @@ export interface ConsultationFormState {
   contactCompany: string;
   contactPhone: string;
   additionalNotes?: string;
+  priceCents?: number;
 }
 
 /** 平台内智能体二次改造定制单（必须关联基础智能体） */
@@ -183,6 +188,8 @@ export interface AgentCustomizationSpec {
   needsThirdPartyIntegration: boolean;
   integrationsDescription?: string;
   audienceType: 'individual' | 'enterprise_members';
+  selectedProjectIds?: string[];
+  selectedProjects?: Array<{ id: string; title: string; description?: string; price: number; priceCents: number }>;
 }
 
 export interface MessageItem {

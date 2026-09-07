@@ -9,6 +9,7 @@ interface DeliveryProposalFormProps {
   baseAgentVersion: string;
   baseAgentId?: string;
   initialCustomization?: string;
+  initialPriceYuan?: string;
   onSubmit: (proposal: Omit<DeliveryProposal, 'submittedAt' | 'version'>) => Promise<void>;
 }
 
@@ -19,12 +20,13 @@ export const DeliveryProposalForm: React.FC<DeliveryProposalFormProps> = ({
   baseAgentVersion,
   baseAgentId,
   initialCustomization = '',
+  initialPriceYuan = '',
   onSubmit
 }) => {
   const [customizationItems, setCustomizationItems] = useState(initialCustomization);
   const [excludedItems, setExcludedItems] = useState('');
   const [deliverables, setDeliverables] = useState('');
-  const [priceYuan, setPriceYuan] = useState('');
+  const [priceYuan, setPriceYuan] = useState(initialPriceYuan);
   const [deliveryDays, setDeliveryDays] = useState('14');
   const [freeRevisionCount, setFreeRevisionCount] = useState('2');
   const [acceptanceCriteria, setAcceptanceCriteria] = useState('');

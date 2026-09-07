@@ -25,7 +25,7 @@ import {
   hasViewableProposal
 } from './DeliveryProposalReviewPanel';
 import { DeliveryProposal } from '../types/deliveryProposal';
-import { CustomServiceDeal } from '../types/customService';
+import { CustomServiceDeal, CustomServiceOrder } from '../types/customService';
 import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
 
 /** 买家视角：我的定制（咨询 → 方案 → 支付 → 交付 → 验收） */

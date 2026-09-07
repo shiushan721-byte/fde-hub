@@ -21,6 +21,7 @@ export type CustomServiceOrder = {
   baseAgentTitle: string;
   baseAgentVersion: string;
   priceCents?: number;
+  customizationSpec?: Record<string, unknown>;
   deliveryDays?: number;
   serviceScope?: string;
   quoteNote?: string;

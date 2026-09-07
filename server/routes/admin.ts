@@ -14,6 +14,7 @@ import {
   writeCertEventStandalone
 } from '../services/certification';
 import { markWithdrawalPaid, releasePendingIncomes, reviewWithdrawal } from '../services/wallet';
+import { licenseActive } from '../services/catalogPurchase';
 import {
   getFinanceSettings,
   updateFinanceSettings
@@ -1931,6 +1932,92 @@ adminRouter.get('/expert-accounts', async (_req, res) => {
           alipayAccount: wallet?.alipayAccount || ''
         };
       })
+  );
+});
+
+adminRouter.get('/catalog-orders', async (_req, res) => {
+  const items = await prisma.agentPurchase.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+    include: {
+      user: { select: { id: true, name: true, email: true, phone: true } },
+      agent: {
+        select: {
+          id: true,
+          title: true,
+          authorId: true,
+          authorName: true
+        }
+      }
+    }
+  });
+  const authorIds = [...new Set(items.map((row) => row.agent.authorId).filter(Boolean))] as string[];
+  const experts = authorIds.length
+    ? await prisma.expert.findMany({
+        where: { id: { in: authorIds } },
+        select: {
+          id: true,
+          name: true,
+          expertNo: true,
+          user: { select: { id: true, name: true, email: true, phone: true } }
+        }
+      })
+    : [];
+  const expertById = new Map(experts.map((row) => [row.id, row]));
+
+  return ok(
+    res,
+    items.map((row) => {
+      const expert = row.agent.authorId ? expertById.get(row.agent.authorId) : null;
+      const sellerUser = expert?.user;
+      return {
+        id: row.id,
+        orderNo: row.id,
+        plan: row.plan,
+        kind: row.kind || 'catalog',
+        packageId: row.packageId || '',
+        packageName: (() => {
+          try {
+            const snap = JSON.parse(row.priceSnapshot || '{}') as { packageName?: string };
+            return snap.packageName || '';
+          } catch {
+            return '';
+          }
+        })(),
+        status: row.status,
+        active: licenseActive(row),
+        channel: row.channel,
+        priceCents: row.priceCents,
+        paidAt: row.paidAt,
+        expiresAt: row.expiresAt,
+        createdAt: row.createdAt,
+        agent: {
+          id: row.agent.id,
+          title: row.agent.title
+        },
+        buyer: row.user
+          ? {
+              id: row.user.id,
+              name: row.user.name,
+              email: row.user.email,
+              phone: row.user.phone || (row.user.id === 'user-demo' ? '13900001111' : '')
+            }
+          : null,
+        seller: expert
+          ? {
+              id: expert.expertNo || sellerUser?.id || expert.id,
+              name: expert.name || sellerUser?.name || row.agent.authorName || '—',
+              email: sellerUser?.email || '',
+              phone: sellerUser?.phone || ''
+            }
+          : {
+              id: row.agent.authorId || '',
+              name: row.agent.authorName || '—',
+              email: '',
+              phone: ''
+            }
+      };
+    })
   );
 });
 

@@ -1,5 +1,6 @@
 import { VerifyType } from './index';
 import type { AgentAdapterPackage } from '../../shared/adapterPackages';
+import type { AgentCustomProject } from '../../shared/customProjects';
 
 // 平台两类核心用户主体：普通用户 / AI 专家
 // creator / fde 为历史兼容别名，UI 一律按 expert 展示
@@ -154,6 +155,8 @@ export interface CreatorAgentItem {
   platformSupport?: 'mac' | 'windows' | 'both';
   /** 外部工具适配分发包 */
   adapterPackages?: AgentAdapterPackage[];
+  /** FDE 可维护的标准定制项目 */
+  customProjects?: AgentCustomProject[];
   /** 当前线上标准版本号，普通用户始终使用最新可用标准版 */
   currentStandardVersion?: string;
   /** 标准版历史版本列表 */

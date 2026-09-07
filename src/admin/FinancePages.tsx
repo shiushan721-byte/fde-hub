@@ -87,6 +87,24 @@ type SettlementRow = {
   interventionAt?: string | null;
 };
 
+type CatalogOrderRow = {
+  id: string;
+  orderNo: string;
+  plan: string;
+  kind?: string;
+  packageName?: string;
+  status: string;
+  active: boolean;
+  channel: string;
+  priceCents: number;
+  paidAt?: string | null;
+  expiresAt?: string | null;
+  createdAt?: string;
+  agent?: { id?: string; title?: string } | null;
+  buyer?: { id?: string; name?: string; email?: string; phone?: string } | null;
+  seller?: { id?: string; name?: string; email?: string; phone?: string } | null;
+};
+
 function interventionLabel(status?: string) {
   if (status === 'processing') return '正在处理';
   if (status === 'resolved') return '已处理';
@@ -119,6 +137,11 @@ function settlementFundStatus(status: string, paymentStatus: string) {
     return '平台托管中';
   }
   return '待支付';
+}
+
+function catalogOrderStatus(row: CatalogOrderRow) {
+  if (row.status !== 'paid') return '待支付';
+  return row.active ? '已开通' : '已到期';
 }
 
 type EscrowRow = {
@@ -330,9 +353,41 @@ export const ExpertAccountsPage = () => {
 };
 
 const SETTLEMENT_STATUS_OPTIONS = ['待支付', '平台托管中', '已完成'] as const;
+const CATALOG_STATUS_OPTIONS = ['待支付', '已开通', '已到期'] as const;
+
+function matchOrderFilters(row: {
+  orderNo: string;
+  createdAt?: string;
+  buyer?: { phone?: string } | null;
+  seller?: { phone?: string } | null;
+}, orderNo: string, phone: string, dateFrom: string, dateTo: string) {
+  const orderQ = orderNo.trim().toLowerCase();
+  const phoneQ = phone.trim();
+  const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+  const toTs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+
+  if (orderQ && !row.orderNo.toLowerCase().includes(orderQ)) return false;
+
+  if (phoneQ) {
+    const buyerPhone = row.buyer?.phone || '';
+    const sellerPhone = row.seller?.phone || '';
+    if (!buyerPhone.includes(phoneQ) && !sellerPhone.includes(phoneQ)) return false;
+  }
+
+  if (fromTs != null || toTs != null) {
+    const created = row.createdAt ? new Date(row.createdAt).getTime() : NaN;
+    if (!Number.isFinite(created)) return false;
+    if (fromTs != null && created < fromTs) return false;
+    if (toTs != null && created > toTs) return false;
+  }
+
+  return true;
+}
 
 export const SettlementsPage = () => {
-  const { data, error, loading, reload } = useAdminQuery<SettlementRow[]>('/api/admin/settlements');
+  const catalogQuery = useAdminQuery<CatalogOrderRow[]>('/api/admin/catalog-orders');
+  const customQuery = useAdminQuery<SettlementRow[]>('/api/admin/settlements');
+  const [kind, setKind] = useState<'catalog' | 'custom'>('catalog');
   const [orderNo, setOrderNo] = useState('');
   const [phone, setPhone] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -343,37 +398,28 @@ export const SettlementsPage = () => {
   const [interveneReason, setInterveneReason] = useState('');
   const [interveneBusy, setInterveneBusy] = useState(false);
 
-  const rows = useMemo(() => {
-    const list = data || [];
-    const orderQ = orderNo.trim().toLowerCase();
-    const phoneQ = phone.trim();
-    const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
-    const toTs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+  const catalogRows = useMemo(() => {
+    return (catalogQuery.data || []).filter((row) => {
+      if (!matchOrderFilters(row, orderNo, phone, dateFrom, dateTo)) return false;
+      if (status && catalogOrderStatus(row) !== status) return false;
+      return true;
+    });
+  }, [catalogQuery.data, orderNo, phone, dateFrom, dateTo, status]);
 
-    return list.filter((row) => {
-      if (orderQ && !row.orderNo.toLowerCase().includes(orderQ)) return false;
-
-      if (phoneQ) {
-        const buyerPhone = row.buyer?.phone || '';
-        const sellerPhone = row.seller?.phone || '';
-        if (!buyerPhone.includes(phoneQ) && !sellerPhone.includes(phoneQ)) return false;
-      }
-
-      if (fromTs != null || toTs != null) {
-        const created = row.createdAt ? new Date(row.createdAt).getTime() : NaN;
-        if (!Number.isFinite(created)) return false;
-        if (fromTs != null && created < fromTs) return false;
-        if (toTs != null && created > toTs) return false;
-      }
-
+  const customRows = useMemo(() => {
+    return (customQuery.data || []).filter((row) => {
+      if (!matchOrderFilters(row, orderNo, phone, dateFrom, dateTo)) return false;
       if (status) {
         const fundStatus = settlementFundStatus(row.status, row.paymentStatus);
         if (fundStatus !== status) return false;
       }
-
       return true;
     });
-  }, [data, orderNo, phone, dateFrom, dateTo, status]);
+  }, [customQuery.data, orderNo, phone, dateFrom, dateTo, status]);
+
+  const loading = kind === 'catalog' ? catalogQuery.loading : customQuery.loading;
+  const error = kind === 'catalog' ? catalogQuery.error : customQuery.error;
+  const statusOptions = kind === 'catalog' ? CATALOG_STATUS_OPTIONS : SETTLEMENT_STATUS_OPTIONS;
 
   const inputClass =
     'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
@@ -393,7 +439,7 @@ export const SettlementsPage = () => {
       });
       setInterveneTarget(null);
       setInterveneReason('');
-      await reload();
+      await customQuery.reload();
     } catch (err) {
       alert(err instanceof Error ? err.message : '提交失败');
     } finally {
@@ -403,7 +449,33 @@ export const SettlementsPage = () => {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-black">订单结算</h1>
+      <h1 className="text-xl font-black">订单管理</h1>
+      <div className="flex rounded-xl border border-slate-200 p-0.5 w-fit bg-white">
+        <button
+          type="button"
+          onClick={() => {
+            setKind('catalog');
+            setStatus('');
+          }}
+          className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer ${
+            kind === 'catalog' ? 'bg-slate-900 text-white' : 'text-slate-500'
+          }`}
+        >
+          智能体订单 ({catalogQuery.data?.length || 0})
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setKind('custom');
+            setStatus('');
+          }}
+          className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer ${
+            kind === 'custom' ? 'bg-slate-900 text-white' : 'text-slate-500'
+          }`}
+        >
+          定制订单 ({customQuery.data?.length || 0})
+        </button>
+      </div>
       <div className="flex flex-wrap items-end gap-2">
         <label className="space-y-1">
           <span className="block text-[11px] text-slate-500">订单号</span>
@@ -451,7 +523,7 @@ export const SettlementsPage = () => {
             className={inputClass}
           >
             <option value="">全部</option>
-            {SETTLEMENT_STATUS_OPTIONS.map((opt) => (
+            {statusOptions.map((opt) => (
               <option key={opt} value={opt}>
                 {opt}
               </option>
@@ -461,36 +533,35 @@ export const SettlementsPage = () => {
       </div>
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-        <table className="w-full text-xs">
-          <thead className="bg-slate-50 text-slate-500">
-            <tr>
-              <th className="text-left p-3 w-14">序号</th>
-              <th className="text-left p-3">订单编号</th>
-              <th className="text-left p-3">订单智能体</th>
-              <th className="text-left p-3">买家</th>
-              <th className="text-left p-3">卖家</th>
-              <th className="text-right p-3">订单金额</th>
-              <th className="text-left p-3">状态</th>
-              <th className="text-left p-3">下单时间</th>
-              <th className="text-left p-3">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => {
-              const currentLabel = interventionLabel(row.interventionStatus);
-              return (
+      {kind === 'catalog' ? (
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="text-left p-3 w-14">序号</th>
+                <th className="text-left p-3">订单编号</th>
+                <th className="text-left p-3">智能体</th>
+                <th className="text-left p-3">买家</th>
+                <th className="text-left p-3">卖家</th>
+                <th className="text-right p-3">订单金额</th>
+                <th className="text-left p-3">状态</th>
+                <th className="text-left p-3">下单时间</th>
+                <th className="text-left p-3">支付渠道</th>
+              </tr>
+            </thead>
+            <tbody>
+              {catalogRows.map((row, index) => (
                 <tr key={row.id} className="border-t border-slate-100">
-                  <td className="p-3 text-slate-500 tabular-nums">{rows.length - index}</td>
+                  <td className="p-3 text-slate-500 tabular-nums">{catalogRows.length - index}</td>
                   <td className="p-3 font-mono text-[11px] text-slate-700 whitespace-nowrap">
                     {row.orderNo}
                   </td>
                   <td className="p-3">
-                    <div className="font-bold text-slate-900">
-                      {row.baseAgentTitle || row.title || '—'}
-                    </div>
+                    <div className="font-bold text-slate-900">{row.agent?.title || '—'}</div>
                     <div className="text-slate-400 mt-0.5">
-                      {row.baseAgentVersion ? `版本 ${row.baseAgentVersion}` : '—'}
+                      {row.kind === 'adapter'
+                        ? `Skill 下载${row.packageName ? ` · ${row.packageName}` : ''}`
+                        : '一次性使用权'}
                     </div>
                   </td>
                   <td className="p-3">
@@ -509,35 +580,96 @@ export const SettlementsPage = () => {
                     </div>
                   </td>
                   <td className="p-3 text-right font-bold">{yuan(row.priceCents)}</td>
-                  <td className="p-3">{settlementFundStatus(row.status, row.paymentStatus)}</td>
+                  <td className="p-3">{catalogOrderStatus(row)}</td>
                   <td className="p-3 text-slate-500 whitespace-nowrap">{formatTime(row.createdAt)}</td>
-                  <td className="p-3">
-                    <button
-                      type="button"
-                      className="text-rose-600 font-bold cursor-pointer hover:underline"
-                      onClick={() => {
-                        setInterveneTarget(row);
-                        setInterveneStatus(
-                          row.interventionStatus === 'resolved' ? 'resolved' : 'processing'
-                        );
-                        setInterveneReason(row.interventionReason || '');
-                      }}
-                    >
-                      平台介入
-                    </button>
-                    {currentLabel && (
-                      <div className="text-[10px] text-slate-400 mt-0.5">{currentLabel}</div>
-                    )}
-                  </td>
+                  <td className="p-3 text-slate-600">{channelText(row.channel)}</td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {!loading && rows.length === 0 && (
-          <p className="p-6 text-sm text-slate-400 text-center">暂无匹配的结算订单</p>
-        )}
-      </div>
+              ))}
+            </tbody>
+          </table>
+          {!loading && catalogRows.length === 0 && (
+            <p className="p-6 text-sm text-slate-400 text-center">暂无匹配的智能体订单</p>
+          )}
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="text-left p-3 w-14">序号</th>
+                <th className="text-left p-3">订单编号</th>
+                <th className="text-left p-3">订单智能体</th>
+                <th className="text-left p-3">买家</th>
+                <th className="text-left p-3">卖家</th>
+                <th className="text-right p-3">订单金额</th>
+                <th className="text-left p-3">状态</th>
+                <th className="text-left p-3">下单时间</th>
+                <th className="text-left p-3">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {customRows.map((row, index) => {
+                const currentLabel = interventionLabel(row.interventionStatus);
+                return (
+                  <tr key={row.id} className="border-t border-slate-100">
+                    <td className="p-3 text-slate-500 tabular-nums">{customRows.length - index}</td>
+                    <td className="p-3 font-mono text-[11px] text-slate-700 whitespace-nowrap">
+                      {row.orderNo}
+                    </td>
+                    <td className="p-3">
+                      <div className="font-bold text-slate-900">
+                        {row.baseAgentTitle || row.title || '—'}
+                      </div>
+                      <div className="text-slate-400 mt-0.5">
+                        {row.baseAgentVersion ? `版本 ${row.baseAgentVersion}` : '—'}
+                      </div>
+                    </td>
+                    <td className="p-3">
+                      <div className="font-bold text-slate-900">{row.buyer?.name || '—'}</div>
+                      <div className="text-slate-500 mt-0.5 font-mono">
+                        {row.buyer?.phone || '—'}
+                      </div>
+                    </td>
+                    <td className="p-3">
+                      <div className="font-bold text-slate-900">{row.seller?.name || '—'}</div>
+                      <div className="text-slate-500 mt-0.5 font-mono">
+                        {row.seller?.phone || '—'}
+                      </div>
+                      <div className="text-slate-400 mt-0.5 font-mono text-[10px]">
+                        {row.seller?.id || '—'}
+                      </div>
+                    </td>
+                    <td className="p-3 text-right font-bold">{yuan(row.priceCents)}</td>
+                    <td className="p-3">{settlementFundStatus(row.status, row.paymentStatus)}</td>
+                    <td className="p-3 text-slate-500 whitespace-nowrap">{formatTime(row.createdAt)}</td>
+                    <td className="p-3">
+                      <button
+                        type="button"
+                        className="text-rose-600 font-bold cursor-pointer hover:underline"
+                        onClick={() => {
+                          setInterveneTarget(row);
+                          setInterveneStatus(
+                            row.interventionStatus === 'resolved' ? 'resolved' : 'processing'
+                          );
+                          setInterveneReason(row.interventionReason || '');
+                        }}
+                      >
+                        平台介入
+                      </button>
+                      {currentLabel && (
+                        <div className="text-[10px] text-slate-400 mt-0.5">{currentLabel}</div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!loading && customRows.length === 0 && (
+            <p className="p-6 text-sm text-slate-400 text-center">暂无匹配的定制订单</p>
+          )}
+        </div>
+      )}
 
       {interveneTarget && (
         <div

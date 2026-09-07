@@ -451,7 +451,8 @@ export default function App() {
                 ...data,
                 expertId: consultationTargetExpert?.id,
                 createCustomOrder: Boolean(data.customizationSpec && data.agentId),
-                baseAgentVersion: data.standardVersionAtRequest || 'v1.0.0'
+                baseAgentVersion: data.standardVersionAtRequest || 'v1.0.0',
+                priceCents: data.priceCents
               })
             })
           )
@@ -477,7 +478,13 @@ export default function App() {
     const existing =
       catalog.solutions.find((a) => a.id === agent.id) ||
       catalog.solutions.find((a) => a.title === agent.title);
-    if (existing) return existing;
+    if (existing) {
+      return {
+        ...existing,
+        canFDECustom: agent.canFDECustom,
+        customProjects: agent.customProjects || existing.customProjects
+      };
+    }
     return {
       id: agent.id,
       title: agent.title,
@@ -500,6 +507,8 @@ export default function App() {
       businessIntegrationTips: '',
       priceFrom: agent.price || 0,
       pricingPlans: agent.pricingPlans,
+      canFDECustom: agent.canFDECustom,
+      customProjects: agent.customProjects,
       demoConversation: []
     };
   };
@@ -647,6 +656,7 @@ export default function App() {
                 categories={catalog.categories}
                 sectionTitle={catalog.settings.sectionTitle}
                 creatorCountLabel={catalog.settings.creatorCountLabel}
+                onToast={showToast}
               />
             </div>
           )}
@@ -721,6 +731,9 @@ export default function App() {
               }}
               onOpenAgentAuthor={handleOpenAuthorFromInspiration}
               onToast={showToast}
+              onLikeChange={(next) => {
+                setActiveInspiration((prev) => (prev ? { ...prev, ...next } : prev));
+              }}
             />
           )}
 

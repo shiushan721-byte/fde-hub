@@ -22,6 +22,8 @@ type CatalogPurchaseRow = {
   agentTitle?: string;
   authorName?: string;
   plan: string;
+  kind?: string;
+  packageName?: string;
   priceCents: number;
   status: string;
   channel: string;
@@ -37,8 +39,11 @@ function channelText(channel?: string) {
   return '—';
 }
 
-function planText(_plan?: string) {
-  return '一次性';
+function planText(row: { plan?: string; kind?: string; packageName?: string }) {
+  if (row.kind === 'adapter' || row.plan === 'adapter') {
+    return row.packageName ? `Skill 下载 · ${row.packageName}` : 'Skill 下载';
+  }
+  return '一次性使用权';
 }
 
 function catalogStatus(row: CatalogPurchaseRow) {
@@ -455,7 +460,7 @@ export const BuyerOrderBillingView: React.FC = () => {
                           <div className="font-bold text-slate-900">{row.agentTitle || '—'}</div>
                           <div className="text-[11px] text-slate-500 mt-0.5">{row.authorName || '—'}</div>
                         </td>
-                        <td className="px-4 py-3.5 text-slate-700">{planText(row.plan)}</td>
+                        <td className="px-4 py-3.5 text-slate-700">{planText(row)}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           <span
                             className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ring-1 ring-inset ${catalogBadgeClass(

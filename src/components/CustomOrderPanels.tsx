@@ -27,6 +27,13 @@ import { AgentPublishWizardModal } from './AgentPublishWizardModal';
 
 type OrderRow = CustomServiceOrder;
 
+function selectedProjectsFromOrder(order?: OrderRow | null) {
+  const spec = order?.customizationSpec;
+  if (!spec || typeof spec !== 'object') return [];
+  const rows = (spec as { selectedProjects?: Array<{ title?: string; price?: number }> }).selectedProjects;
+  return Array.isArray(rows) ? rows.filter((row) => row?.title) : [];
+}
+
 /** 创作者：定制服务（咨询线索与订单同一条流程） */
 export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadItem[] }> = ({
   sessionLeads = []
@@ -266,6 +273,14 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
                     ? ` ${deal.standardVersionAtRequest || order?.baseAgentVersion}`
                     : ''}
                 </div>
+                {selectedProjectsFromOrder(order).length > 0 && (
+                  <div className="text-[11px] text-slate-600 mt-1">
+                    标准项目：
+                    {selectedProjectsFromOrder(order)
+                      .map((item) => `${item.title}${item.price ? ` ¥${item.price}` : ''}`)
+                      .join('、')}
+                  </div>
+                )}
                 {timeValue && (
                   <div className="text-[11px] text-slate-500 mt-1">
                     {isConsulting ? '咨询时间' : '下单时间'} · {formatOrderTime(timeValue)}
@@ -353,7 +368,14 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
           baseAgentId={proposalOrder.baseAgentId || ''}
           baseAgentTitle={proposalOrder.baseAgentTitle}
           baseAgentVersion={proposalOrder.baseAgentVersion}
-          initialCustomization={proposalOrder.title}
+          initialCustomization={
+            selectedProjectsFromOrder(proposalOrder)
+              .map((item) => item.title)
+              .join('\n') || proposalOrder.title
+          }
+          initialPriceYuan={
+            proposalOrder.priceCents > 0 ? String((proposalOrder.priceCents / 100).toFixed(0)) : ''
+          }
           onSubmit={async (proposal) => {
             await submitProposal(proposalOrder.id, proposal);
             setProposalOrder(null);

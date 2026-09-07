@@ -69,7 +69,7 @@ import { CustomerAgentInstance } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
 import { AccountView } from './AccountView';
 import { api, ApiError } from '../lib/api';
-import { creatorAgentHasBeenUsed } from '../lib/agentLifecycle';
+import { creatorAgentHasBeenUsed, creatorListingBadgeClass, creatorListingLabel } from '../lib/agentLifecycle';
 import { pricingLabel } from '../../shared/pricingPlans';
 
 function platformSupportLabel(support: CreatorAgentItem['platformSupport']) {
@@ -237,6 +237,20 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
 
   // Agents State (我的智能体)
   const [agentsList, setAgentsList] = useState<CreatorAgentItem[]>(() => mockCreatorAgentsList);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<CreatorAgentItem[]>('/api/me/agents')
+      .then((items) => {
+        if (!cancelled && Array.isArray(items)) setAgentsList(items);
+      })
+      .catch(() => {
+        /* keep mock fallback */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [agentForSkillReplacement, setAgentForSkillReplacement] = useState<CreatorAgentItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CreatorAgentItem | null>(null);
@@ -378,16 +392,45 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     });
   };
 
-  // Handle Toggle Agent Status (Publish / Unpublish)
-  const handleToggleAgentStatus = (agentId: string, targetStatus: 'published' | 'offline') => {
-    if (verifyStatus !== 'verified' && targetStatus === 'published') {
-      alert('⚠️ 无法发布：您尚未通过实名认证。请先完成实名认证后方可全网发布智能体。');
+  const applyAgentUpdate = (agentId: string, patch: Partial<CreatorAgentItem>) => {
+    setAgentsList((prev) =>
+      prev.map((a) => (a.id === agentId ? { ...a, ...patch, updatedAt: '刚刚' } : a))
+    );
+  };
+
+  const handleUnpublishAgent = async (agentId: string) => {
+    try {
+      const saved = await api<CreatorAgentItem>(`/api/me/agents/${agentId}/unpublish`, {
+        method: 'POST'
+      });
+      applyAgentUpdate(agentId, saved);
+    } catch (err) {
+      if (err instanceof ApiError && err.status !== 404 && err.code !== 'NETWORK_ERROR') {
+        alert(err.message);
+        return;
+      }
+      applyAgentUpdate(agentId, { status: 'offline' });
+    }
+  };
+
+  const handleSubmitPublicAgent = async (agentId: string) => {
+    if (verifyStatus !== 'verified') {
+      alert('⚠️ 无法公开上架：您尚未通过实名认证。请先完成实名认证后再提交公开审核。');
       setShowRealNameModal(true);
       return;
     }
-    setAgentsList((prev) =>
-      prev.map((a) => (a.id === agentId ? { ...a, status: targetStatus, updatedAt: '刚刚' } : a))
-    );
+    try {
+      const saved = await api<CreatorAgentItem>(`/api/me/agents/${agentId}/submit-public`, {
+        method: 'POST'
+      });
+      applyAgentUpdate(agentId, saved);
+    } catch (err) {
+      if (err instanceof ApiError && err.status !== 404 && err.code !== 'NETWORK_ERROR') {
+        alert(err.message);
+        return;
+      }
+      applyAgentUpdate(agentId, { status: 'under_review' });
+    }
   };
 
   const confirmDeleteAgent = async () => {
@@ -887,7 +930,12 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                         >
                           {platformSupportLabel(agent.platformSupport)}
                         </span>
-                        <div className="flex items-center gap-2 mt-1.5">
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <span
+                            className={`inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold border ${creatorListingBadgeClass(agent.status)}`}
+                          >
+                            {creatorListingLabel(agent.status)}
+                          </span>
                           <span className="text-[10px] text-slate-500 font-mono">
                             v{agent.version || '1.0.0'}
                           </span>
@@ -898,9 +946,6 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                               monthlyPrice: agent.pricingPlans?.monthlyPrice
                             })}
                           </span>
-                          {agent.status !== 'published' && (
-                            <span className="text-[10px] text-slate-400">· 已下架 / 草稿</span>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -932,17 +977,40 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                 <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
                   {agent.status === 'published' ? (
                     <button
-                      onClick={() => handleToggleAgentStatus(agent.id, 'offline')}
+                      type="button"
+                      onClick={() => handleUnpublishAgent(agent.id)}
                       className="flex-1 py-2 px-3 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                     >
-                      下架智能体
+                      下架为私有
+                    </button>
+                  ) : agent.status === 'under_review' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleUnpublishAgent(agent.id)}
+                      className="flex-1 py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      撤回为私有
+                    </button>
+                  ) : agent.status === 'draft' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInstanceForSkillReplacement(null);
+                        setAgentForSkillReplacement(agent);
+                        setShowPublishModal(true);
+                      }}
+                      className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                    >
+                      继续发布
                     </button>
                   ) : (
                     <button
-                      onClick={() => handleToggleAgentStatus(agent.id, 'published')}
+                      type="button"
+                      onClick={() => handleSubmitPublicAgent(agent.id)}
                       className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                      title="私有转公开必须提交平台审核"
                     >
-                      重新发布上架
+                      申请公开上架
                     </button>
                   )}
                   <button
@@ -955,11 +1023,15 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
-                  {agent.status === 'published' ? (
+                  {agent.status === 'published' || agent.status === 'under_review' ? (
                     <button
                       type="button"
                       disabled
-                      title="请先下架智能体后再更新 Skill 包"
+                      title={
+                        agent.status === 'under_review'
+                          ? '审核中请先撤回为私有，再更新 Skill 包'
+                          : '请先下架为私有后再更新 Skill 包'
+                      }
                       className="flex-1 py-2 px-3 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold cursor-not-allowed flex items-center justify-center gap-1 opacity-75"
                     >
                       <RefreshCw size={12} />
@@ -1904,7 +1976,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    handleToggleAgentStatus(blockedDeleteTarget.id, 'offline');
+                    handleUnpublishAgent(blockedDeleteTarget.id);
                     setBlockedDeleteTarget(null);
                   }}
                   className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium cursor-pointer"

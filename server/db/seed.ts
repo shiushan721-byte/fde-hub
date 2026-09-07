@@ -3,6 +3,7 @@ import { ensureSampleCustomOrders } from './seedCustomOrders';
 import { ensureFinanceSynced } from './seedFinance';
 import { ensureSampleInReviewAgents, ensureSampleCreatorDeletedAgents } from './seedInReviewAgents';
 import { ensureSampleAdapterPackages } from './seedAdapterPackages';
+import { ensureAdapterPackagePricing, ensureSampleCustomProjects } from './seedCustomProjects';
 import { ensureExpertDomainTagsAligned } from './seedExpertTagUsage';
 import { ensureSampleCommentReports } from './seedCommentReports';
 import { ensureExpertTags } from '../services/expertTags';
@@ -42,6 +43,8 @@ export async function seedDatabase(force = false) {
     await ensureSampleCreatorDeletedAgents();
     await ensureExpertDomainTagsAligned();
     await ensureSampleAdapterPackages();
+    await ensureAdapterPackagePricing();
+    await ensureSampleCustomProjects();
     await ensureAgentShowcases();
     await ensureShowcaseComments();
     await ensureSampleCommentReports();
@@ -341,6 +344,8 @@ export async function seedDatabase(force = false) {
   await ensureSampleCreatorDeletedAgents();
   await ensureExpertDomainTagsAligned();
   await ensureSampleAdapterPackages();
+  await ensureAdapterPackagePricing();
+  await ensureSampleCustomProjects();
   await ensureAgentShowcases();
   await ensureShowcaseComments();
   await ensureSampleCommentReports();
@@ -615,6 +620,8 @@ export async function ensureExpertApplicationSeed() {
     await ensureSampleCreatorDeletedAgents();
     await ensureExpertDomainTagsAligned();
     await ensureSampleAdapterPackages();
+    await ensureAdapterPackagePricing();
+    await ensureSampleCustomProjects();
     await ensureAgentShowcases();
     await ensureShowcaseComments();
     await ensureSampleCommentReports();

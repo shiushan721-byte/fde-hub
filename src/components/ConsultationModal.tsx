@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Bot, ArrowRight, ArrowLeft } from 'lucide-react';
 import { FDEExpert, AgentSolution, ConsultationFormState } from '../types';
 import { getStandardVersionForAgent } from '../data/agentInstanceMockData';
+import { activeCustomProjects, customProjectsTotalYuan } from '../../shared/customProjects';
 
 interface ConsultationModalProps {
   isOpen: boolean;
@@ -38,6 +39,7 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
   const [step, setStep] = useState<'select-agent' | 'form'>(agentLocked ? 'form' : 'select-agent');
   const [selectedAgent, setSelectedAgent] = useState<AgentSolution | null>(referenceAgent || null);
   const [requirement, setRequirement] = useState('');
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [contactName, setContactName] = useState('');
   const [contactCompany, setContactCompany] = useState('');
   const [contactPhone, setContactPhone] = useState('');
@@ -58,6 +60,7 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
     }
 
     setRequirement(initialPrompt || '');
+    setSelectedProjectIds([]);
     setContactName(defaultContactName || '');
     setContactCompany('');
     setContactPhone(defaultContactPhone || '');
@@ -66,14 +69,27 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
 
   if (!isOpen || !targetExpert) return null;
 
+  const catalogProjects = activeCustomProjects(selectedAgent?.customProjects || []);
+  const selectedProjects = catalogProjects.filter((item) => selectedProjectIds.includes(item.id));
+  const projectTotal = customProjectsTotalYuan(selectedProjects);
+  const canSubmit =
+    Boolean(contactName.trim() && contactPhone.trim()) &&
+    (catalogProjects.length ? selectedProjects.length > 0 : Boolean(requirement.trim()));
+
   const handleSelectAgent = (agent: AgentSolution) => {
     setSelectedAgent(agent);
+    setSelectedProjectIds([]);
     setStep('form');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!requirement.trim()) return;
+    if (!canSubmit) return;
+    if (catalogProjects.length && selectedProjects.length === 0) return;
+    const problem =
+      requirement.trim() ||
+      (selectedProjects.length ? `已选择定制项目：${selectedProjects.map((item) => item.title).join('、')}` : '');
+    if (!problem) return;
     if (!contactName.trim() || !contactPhone.trim()) return;
 
     setIsSubmitting(true);
@@ -85,19 +101,27 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
       const data: ConsultationFormState = {
         expertId: targetExpert.id,
         agentId: selectedAgent?.id,
-        businessProblem: requirement.trim(),
+        businessProblem: problem,
         referenceAgentTitle: selectedAgent?.title,
         standardVersionAtRequest: standardVersion,
         demandScenario: selectedAgent ? 'based_on_existing' : 'fully_independent',
         customizationSpec: selectedAgent
           ? {
-              unsatisfiedAreas: requirement.trim(),
+              unsatisfiedAreas: problem,
               pagesToModify: [],
               flowsToModify: [],
               additionalInputsOutputs: '',
               needsCustomerData: false,
               needsThirdPartyIntegration: false,
-              audienceType: 'enterprise_members'
+              audienceType: 'enterprise_members',
+              selectedProjectIds: selectedProjects.map((item) => item.id),
+              selectedProjects: selectedProjects.map((item) => ({
+                id: item.id,
+                title: item.title,
+                description: item.description,
+                price: item.price,
+                priceCents: item.price * 100
+              }))
             }
           : undefined,
         expectedTimeline: '',
@@ -105,7 +129,8 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
         contactName: contactName.trim(),
         contactCompany: contactCompany.trim(),
         contactPhone: contactPhone.trim(),
-        additionalNotes: ''
+        additionalNotes: '',
+        priceCents: projectTotal * 100
       };
       setIsSubmitting(false);
       onSubmitSuccess(data, targetExpert);
@@ -236,17 +261,70 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
               </div>
             ) : null}
 
+            {catalogProjects.length > 0 && (
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  选择定制项目
+                </label>
+                <p className="text-[11px] text-slate-500">
+                  价格由该智能体作者设定，提交后仍走咨询与平台托管。
+                </p>
+                <div className="space-y-2">
+                  {catalogProjects.map((item) => {
+                    const checked = selectedProjectIds.includes(item.id);
+                    return (
+                      <label
+                        key={item.id}
+                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer ${
+                          checked ? 'border-indigo-300 bg-indigo-50/70' : 'border-slate-200 bg-white'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={checked}
+                          onChange={() =>
+                            setSelectedProjectIds((prev) =>
+                              prev.includes(item.id)
+                                ? prev.filter((id) => id !== item.id)
+                                : [...prev, item.id]
+                            )
+                          }
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-slate-900">{item.title}</span>
+                            <span className="text-xs font-black text-amber-600 shrink-0">¥{item.price}</span>
+                          </span>
+                          {item.description ? (
+                            <span className="block text-[11px] text-slate-500 mt-0.5">{item.description}</span>
+                          ) : null}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="text-right text-xs font-bold text-slate-800">
+                  合计 ¥{projectTotal}
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                填写需求
+                {catalogProjects.length ? '补充说明（选填）' : '填写需求'}
               </label>
               <textarea
                 id="consult-requirement"
-                required
-                rows={5}
+                required={!catalogProjects.length}
+                rows={catalogProjects.length ? 3 : 5}
                 value={requirement}
                 onChange={(e) => setRequirement(e.target.value)}
-                placeholder="请描述你的定制需求、业务场景或希望专家协助的内容…"
+                placeholder={
+                  catalogProjects.length
+                    ? '如有额外要求可在这里补充…'
+                    : '请描述你的定制需求、业务场景或希望专家协助的内容…'
+                }
                 className="w-full p-3.5 bg-slate-50 hover:bg-white focus:bg-white text-sm text-slate-900 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all resize-none"
               />
             </div>
@@ -304,7 +382,7 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
                 <button
                   id="btn-submit-consultation"
                   type="submit"
-                  disabled={isSubmitting || !requirement.trim() || !contactName.trim() || !contactPhone.trim()}
+                  disabled={isSubmitting || !canSubmit}
                   className={`px-6 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 rounded-xl shadow-md transition-all ${
                     isSubmitting ? 'opacity-70 cursor-wait' : 'cursor-pointer'
                   }`}

@@ -1,5 +1,6 @@
 import { FDEExpert, AgentSolution, FDEServicePackage, CaseStudy, ClientReview, AgentPricingPlans } from '../types';
 import type { AgentAdapterPackage } from '../../shared/adapterPackages';
+import type { AgentCustomProject } from '../../shared/customProjects';
 
 export type { AgentAdapterPackage };
 
@@ -27,6 +28,8 @@ export interface HellomeAgentItem {
   rating?: number;
   /** 外部工具适配分发包，平台名由创作者自定义 */
   adapterPackages?: AgentAdapterPackage[];
+  /** FDE 标准定制项目 */
+  customProjects?: AgentCustomProject[];
 }
 
 export const mockHellomeHomeAgents: HellomeAgentItem[] = [
@@ -57,21 +60,45 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
         platformName: 'WorkBuddy',
         fileName: 'hz-canvas-workbuddy.zip',
         size: '1 KB',
-        url: '/uploads/hz-canvas-workbuddy.zip'
+        url: '/uploads/hz-canvas-workbuddy.zip',
+        isFree: false,
+        price: 29
       },
       {
         id: 'adp_hz_codex',
         platformName: 'Codex',
         fileName: 'hz-canvas-codex.zip',
         size: '1 KB',
-        url: '/uploads/hz-canvas-codex.zip'
+        url: '/uploads/hz-canvas-codex.zip',
+        isFree: true,
+        price: 0
       },
       {
         id: 'adp_hz_enterprise',
         platformName: '企业内部工具',
         fileName: 'hz-canvas-enterprise.zip',
         size: '1 KB',
-        url: '/uploads/hz-canvas-enterprise.zip'
+        url: '/uploads/hz-canvas-enterprise.zip',
+        isFree: true,
+        price: 0
+      }
+    ],
+    customProjects: [
+      {
+        id: 'cprj_hz_flow',
+        title: '流程修改、界面调整',
+        description: '按你的业务路径改提示词、SOP 和关键界面。',
+        price: 200,
+        active: true,
+        sortOrder: 0
+      },
+      {
+        id: 'cprj_hz_feishu',
+        title: '同步到飞书文档',
+        description: '把画布产出同步到指定飞书知识库/文档。',
+        price: 100,
+        active: true,
+        sortOrder: 1
       }
     ],
     rating: 4.9
@@ -211,7 +238,25 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     favoritesCount: '1.2k',
     commentsCount: 198,
     usageCount: '6.4k',
-    rating: 4.9
+    rating: 4.9,
+    customProjects: [
+      {
+        id: 'cprj_ecom_flow',
+        title: '流程修改、界面调整',
+        description: '按店铺售后路径改工单分流、回复话术和客服工作台。',
+        price: 200,
+        active: true,
+        sortOrder: 0
+      },
+      {
+        id: 'cprj_ecom_feishu',
+        title: '同步到飞书文档',
+        description: '售后记录与质检结果同步到飞书文档/多维表格。',
+        price: 100,
+        active: true,
+        sortOrder: 1
+      }
+    ]
   },
   {
     id: 'industry-offline-rag',

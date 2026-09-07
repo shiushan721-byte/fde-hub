@@ -14,11 +14,23 @@ import {
 } from '../services/certification';
 import { validateActiveDomainTags } from '../services/expertTags';
 import { validateActiveExpertTitle } from '../services/expertTitles';
-import { creatorDeleteAgent, creatorUpdatePricing, findExpertForUser, listMyAgents } from '../services/creatorAgents';
+import {
+  creatorDeleteAgent,
+  creatorSubmitPublic,
+  creatorUnpublishAgent,
+  creatorUpdateCustomProjects,
+  creatorUpdatePricing,
+  creatorUpsertAgent,
+  findExpertForUser,
+  listMyAgents,
+  toCreatorAgentItem
+} from '../services/creatorAgents';
 import {
   confirmCatalogPurchase,
+  createAdapterCheckout,
   createCatalogCheckout,
   getActiveLicense,
+  listAdapterEntitlements,
   listMyPurchases,
   mapPurchase,
   payCatalogPurchase
@@ -29,8 +41,10 @@ import {
   moderateAgentShowcase
 } from '../services/agentShowcases';
 import { localStorageAdapter } from '../adapters/storage';
-import { normalizeAdapterPackages } from '../../shared/adapterPackages';
+import { normalizeAdapterPackages, validateAdapterPackagePricing } from '../../shared/adapterPackages';
 import { normalizePricingPlans, validatePaidPlans } from '../../shared/pricingPlans';
+import { normalizeCustomProjects } from '../../shared/customProjects';
+import { resolveAdapterDownload, sendAdapterFile } from '../services/adapterDownload';
 
 export const meRouter = Router();
 meRouter.use(requireAuth);
@@ -400,9 +414,84 @@ meRouter.get('/notifications', async (req, res) => {
   );
 });
 
+const upsertAgentSchema = z.object({
+  title: z.string().trim().min(1, '请填写智能体名称').max(80),
+  desc: z.string().trim().min(1, '请填写功能描述').max(2000),
+  visibility: z.enum(['private', 'public', 'draft']),
+  coverImage: z.string().optional(),
+  version: z.string().max(40).optional(),
+  platformSupport: z.enum(['mac', 'windows', 'both']).optional(),
+  isFree: z.boolean().optional(),
+  price: z.coerce.number().optional(),
+  enableEnterpriseCustomization: z.boolean().optional(),
+  customProjects: z.unknown().optional(),
+  adapterPackages: z.unknown().optional(),
+  skillFileName: z.string().max(200).optional()
+});
+
 meRouter.get('/agents', async (req, res) => {
   const items = await listMyAgents(req.user!.id);
-  return ok(res, items);
+  return ok(res, items.map(toCreatorAgentItem));
+});
+
+meRouter.post('/agents', async (req, res) => {
+  const parsed = upsertAgentSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, parsed.error.issues[0]?.message || '参数不合法');
+  try {
+    const item = await creatorUpsertAgent(req.user!.id, parsed.data);
+    return ok(res, item, 201);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '发布失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
+meRouter.put('/agents/:id', async (req, res) => {
+  const parsed = upsertAgentSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, parsed.error.issues[0]?.message || '参数不合法');
+  try {
+    const item = await creatorUpsertAgent(req.user!.id, { ...parsed.data, id: req.params.id });
+    return ok(res, item);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '更新失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
+meRouter.post('/agents/:id/unpublish', async (req, res) => {
+  try {
+    const item = await creatorUnpublishAgent(req.user!.id, req.params.id);
+    return ok(res, item);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '下架失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
+meRouter.post('/agents/:id/submit-public', async (req, res) => {
+  try {
+    const item = await creatorSubmitPublic(req.user!.id, req.params.id);
+    return ok(res, item);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '提交审核失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
 });
 
 function formatUploadSize(n: number) {
@@ -498,8 +587,7 @@ meRouter.post('/agents/:id/showcases', async (req, res) => {
 meRouter.patch('/agents/:agentId/showcases/:id', async (req, res) => {
   const parsed = z
     .object({
-      featured: z.boolean().optional(),
-      hidden: z.boolean().optional()
+      featured: z.boolean().optional()
     })
     .safeParse(req.body);
   if (!parsed.success) return fail(res, '参数不合法');
@@ -508,8 +596,7 @@ meRouter.patch('/agents/:agentId/showcases/:id', async (req, res) => {
       agentId: req.params.agentId,
       showcaseId: req.params.id,
       actorUserId: req.user!.id,
-      featured: parsed.data.featured,
-      hidden: parsed.data.hidden
+      featured: parsed.data.featured
     });
     return ok(res, item);
   } catch (error) {
@@ -561,6 +648,27 @@ meRouter.put('/agents/:id/pricing', async (req, res) => {
   }
 });
 
+meRouter.put('/agents/:id/custom-projects', async (req, res) => {
+  try {
+    const agent = await creatorUpdateCustomProjects(req.user!.id, req.params.id, {
+      enabled: req.body?.enabled,
+      projects: req.body?.projects
+    });
+    return ok(res, {
+      id: agent.id,
+      canFDECustom: agent.canFDECustom,
+      customProjects: normalizeCustomProjects(parseJson(agent.customProjects, []))
+    });
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '定制项目更新失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
 meRouter.get('/purchases', async (req, res) => {
   const items = await listMyPurchases(req.user!.id);
   return ok(res, items);
@@ -569,6 +677,43 @@ meRouter.get('/purchases', async (req, res) => {
 meRouter.get('/agents/:id/license', async (req, res) => {
   const license = await getActiveLicense(req.user!.id, req.params.id);
   return ok(res, license ? mapPurchase(license) : null);
+});
+
+meRouter.get('/agents/:id/adapter-licenses', async (req, res) => {
+  const items = await listAdapterEntitlements(req.user!.id, req.params.id);
+  return ok(res, items);
+});
+
+meRouter.post('/agents/:id/adapters/:packageId/checkout', async (req, res) => {
+  try {
+    const channel = req.body?.channel === 'alipay' ? 'alipay' : 'wechat';
+    const { purchase } = await createAdapterCheckout({
+      userId: req.user!.id,
+      agentId: req.params.id,
+      packageId: req.params.packageId,
+      channel
+    });
+    return ok(res, mapPurchase(purchase));
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '无法创建支付单',
+      status === 403 || status === 404 || status === 409 ? status : 400
+    );
+  }
+});
+
+meRouter.get('/agents/:id/adapters/:packageId/file', async (req, res) => {
+  const result = await resolveAdapterDownload({
+    agentId: req.params.id,
+    packageId: req.params.packageId,
+    userId: req.user!.id
+  });
+  if (result.error || !result.pack) {
+    return fail(res, result.error || '无法下载', result.status, result.status === 401 ? 'UNAUTHENTICATED' : 'FORBIDDEN');
+  }
+  return sendAdapterFile(res, result.pack);
 });
 
 meRouter.post('/agents/:id/checkout', async (req, res) => {
@@ -635,7 +780,23 @@ meRouter.put('/agents/:id/adapter-packages', async (req, res) => {
     where: { id: req.params.id, authorId: expert.id, creatorDeletedAt: null }
   });
   if (!agent) return fail(res, '智能体不存在或无权操作', 404, 'NOT_FOUND');
-  const packages = normalizeAdapterPackages(req.body?.packages);
+  const current = normalizeAdapterPackages(parseJson(agent.adapterPackages, []));
+  const currentById = new Map(current.map((pack) => [pack.id, pack]));
+  const incoming = Array.isArray(req.body?.packages) ? req.body.packages : [];
+  const merged = incoming.map((item: Record<string, unknown>) => {
+    const prev = typeof item?.id === 'string' ? currentById.get(item.id) : undefined;
+    return {
+      ...prev,
+      ...item,
+      url: String(item?.url || prev?.url || ''),
+      fileKey: item?.fileKey || prev?.fileKey
+    };
+  });
+  const packages = normalizeAdapterPackages(merged);
+  for (const pack of packages) {
+    const invalid = validateAdapterPackagePricing(pack);
+    if (invalid) return fail(res, invalid, 400);
+  }
   const updated = await prisma.agent.update({
     where: { id: agent.id },
     data: { adapterPackages: toJson(packages) }

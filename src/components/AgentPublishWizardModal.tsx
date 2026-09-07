@@ -35,7 +35,8 @@ import {
   CheckCheck,
   Download,
   Plus,
-  Trash2
+  Trash2,
+  Globe
 } from 'lucide-react';
 import {
   SkillPackageManifest,
@@ -48,15 +49,24 @@ import {
   CreatorAgentItem
 } from '../types/creator';
 import type { AgentAdapterPackage } from '../../shared/adapterPackages';
-import { adapterDisplayName } from '../../shared/adapterPackages';
+import { adapterDisplayName, adapterPackageIsFree, adapterPackagePriceYuan } from '../../shared/adapterPackages';
 import {
   mockSkillPresets,
   SkillPackagePreset,
   initialValidationHistory
 } from '../data/skillValidationPresets';
-import { AGENT_LIFECYCLE_NOTICE, AGENT_PRICE_CHANGE_NOTICE } from '../lib/agentLifecycle';
+import {
+  AGENT_LIFECYCLE_NOTICE,
+  AGENT_PRICE_CHANGE_NOTICE,
+  AGENT_PRIVATE_PUBLISH_HINT,
+  AGENT_PUBLIC_PUBLISH_HINT,
+  visibilityFromCreatorStatus
+} from '../lib/agentLifecycle';
+import { api, ApiError } from '../lib/api';
 import { AgentPricingFields } from './AgentPricingFields';
+import { AgentCustomProjectsFields } from './AgentCustomProjectsFields';
 import { normalizePricingPlans, validatePaidPlans } from '../../shared/pricingPlans';
+import { normalizeCustomProjects, validateCustomProjects, type AgentCustomProject } from '../../shared/customProjects';
 
 interface AgentPublishWizardModalProps {
   isOpen: boolean;
@@ -300,6 +310,8 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
   const [adapterPlatformName, setAdapterPlatformName] = useState('');
   const [adapterZipFile, setAdapterZipFile] = useState<File | null>(null);
   const [adapterSaving, setAdapterSaving] = useState(false);
+  const [adapterPackIsFree, setAdapterPackIsFree] = useState(true);
+  const [adapterPackPrice, setAdapterPackPrice] = useState(29);
   const adapterZipInputRef = useRef<HTMLInputElement>(null);
 
   const platformSupportOptions: Array<{ value: 'mac' | 'windows' | 'both'; label: string }> = [
@@ -340,9 +352,15 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
   const [enableEnterpriseCustomization, setEnableEnterpriseCustomization] = useState(
     agentToUpdate?.fdeCustomEnabled ?? true
   );
+  const [customProjects, setCustomProjects] = useState<AgentCustomProject[]>(
+    normalizeCustomProjects(agentToUpdate?.customProjects || [])
+  );
   const [isSubmittingAudit, setIsSubmittingAudit] = useState(false);
   const [isAuditPassed, setIsAuditPassed] = useState(false);
   const [lifecycleAck, setLifecycleAck] = useState(false);
+  const [publishVisibility, setPublishVisibility] = useState<'private' | 'public'>(
+    visibilityFromCreatorStatus(agentToUpdate?.status)
+  );
   const [showSkillDocModal, setShowSkillDocModal] = useState(false);
   const [hostPrecheck, setHostPrecheck] = useState<HostPrecheckStatus>('idle');
   const [hostDebugOutcome, setHostDebugOutcome] = useState<'passed' | 'failed'>('passed');
@@ -357,8 +375,9 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       setHostDebugOutcome('passed');
       setLifecycleAck(false);
       setIsAuditPassed(false);
+      setPublishVisibility(visibilityFromCreatorStatus(agentToUpdate?.status));
     }
-  }, [isOpen]);
+  }, [isOpen, agentToUpdate?.status]);
 
   useEffect(() => {
     if (agentToUpdate) {
@@ -372,6 +391,8 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
         setUploadedFileSize(agentToUpdate.skillPackage.size);
       }
       setAdapterPackages(agentToUpdate.adapterPackages || []);
+      setEnableEnterpriseCustomization(agentToUpdate.fdeCustomEnabled ?? true);
+      setCustomProjects(normalizeCustomProjects(agentToUpdate.customProjects || []));
       setPricingModel(
         agentToUpdate.pricingType === 'free' || agentToUpdate.pricingPlans?.isFree ? 'free' : 'paid'
       );
@@ -473,19 +494,25 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
               fileName: json.data.fileName,
               size: json.data.size,
               url: json.data.url,
-              fileKey: json.data.fileKey
+              fileKey: json.data.fileKey,
+              isFree: adapterPackIsFree,
+              price: adapterPackIsFree ? 0 : adapterPackPrice
             }
           : {
               id: `adp_${Date.now()}`,
               platformName: name,
               fileName: adapterZipFile.name,
               size: `${Math.max(1, adapterZipFile.size / 1024).toFixed(1)} KB`,
-              url: URL.createObjectURL(adapterZipFile)
+              url: URL.createObjectURL(adapterZipFile),
+              isFree: adapterPackIsFree,
+              price: adapterPackIsFree ? 0 : adapterPackPrice
             };
       await persistAdapterPackages([...adapterPackages, pack]);
       setAdapterModalOpen(false);
       setAdapterPlatformName('');
       setAdapterZipFile(null);
+      setAdapterPackIsFree(true);
+      setAdapterPackPrice(29);
     } finally {
       setAdapterSaving(false);
     }
@@ -645,6 +672,7 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
     },
     tokenRebateEnabled: true,
     fdeCustomEnabled: enableEnterpriseCustomization,
+    customProjects,
     metrics: currentMetrics,
     version: agentVersion,
     rating: agentToUpdate?.rating || 5.0,
@@ -661,13 +689,62 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
     updatedAt: '刚刚'
   });
 
-  const handleSaveDraft = () => {
+  const persistVisibility = (): 'private' | 'public' | 'draft' => {
+    if (mode === 'custom_delivery') return 'public';
+    return publishVisibility;
+  };
+
+  const persistAgent = async (status: CreatorAgentItem['status']) => {
+    const payload = buildAgentPayload(status);
+    if (mode === 'custom_delivery') {
+      await Promise.resolve(onSuccessPublish(payload));
+      return;
+    }
+    const body = {
+      title: agentTitle.trim(),
+      desc: agentDesc.trim(),
+      visibility: persistVisibility() === 'draft' || status === 'draft' ? 'draft' : persistVisibility(),
+      coverImage: payload.coverImage,
+      version: agentVersion,
+      platformSupport,
+      isFree: pricingModel === 'free',
+      price: Number(price),
+      enableEnterpriseCustomization,
+      customProjects,
+      adapterPackages,
+      skillFileName: uploadedFileName
+    };
+    try {
+      const saved = agentToUpdate?.id
+        ? await api<CreatorAgentItem>(`/api/me/agents/${encodeURIComponent(agentToUpdate.id)}`, {
+            method: 'PUT',
+            body: JSON.stringify(body)
+          })
+        : await api<CreatorAgentItem>('/api/me/agents', {
+            method: 'POST',
+            body: JSON.stringify(body)
+          });
+      await Promise.resolve(onSuccessPublish({ ...payload, ...saved }));
+    } catch (err) {
+      if (err instanceof ApiError && (err.status === 404 || err.code === 'NETWORK_ERROR')) {
+        await Promise.resolve(onSuccessPublish(payload));
+        return;
+      }
+      throw err;
+    }
+  };
+
+  const handleSaveDraft = async () => {
     if (!agentTitle.trim()) {
       alert('请先填写智能体名称');
       return;
     }
-    onSuccessPublish(buildAgentPayload('draft'));
-    onClose();
+    try {
+      await persistAgent('draft');
+      onClose();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '保存草稿失败');
+    }
   };
 
   // Handler: Submit Audit & Launch
@@ -686,27 +763,37 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
         alert(invalid);
         return;
       }
+      if (enableEnterpriseCustomization) {
+        const invalidProjects = validateCustomProjects(normalizeCustomProjects(customProjects));
+        if (invalidProjects) {
+          alert(invalidProjects);
+          return;
+        }
+      }
     }
     setIsSubmittingAudit(true);
-    if (mode === 'custom_delivery') {
-      try {
-        await Promise.resolve(onSuccessPublish(buildAgentPayload('published')));
+    const nextStatus: CreatorAgentItem['status'] =
+      mode === 'custom_delivery'
+        ? 'published'
+        : publishVisibility === 'public'
+          ? 'under_review'
+          : 'offline';
+    try {
+      if (mode === 'custom_delivery') {
+        await persistAgent(nextStatus);
         onClose();
-      } catch (err) {
-        alert(err instanceof Error ? err.message : '提交平台审核失败');
-      } finally {
-        setIsSubmittingAudit(false);
+        return;
       }
-      return;
-    }
-    setTimeout(() => {
-      setIsSubmittingAudit(false);
+      await persistAgent(nextStatus);
       setIsAuditPassed(true);
       setTimeout(() => {
-        onSuccessPublish(buildAgentPayload('published'));
         onClose();
-      }, 1200);
-    }, 1500);
+      }, 800);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '发布失败');
+    } finally {
+      setIsSubmittingAudit(false);
+    }
   };
 
   const handleDownloadStandardSkillDoc = () => {
@@ -866,6 +953,56 @@ your-skill-v1.0.0/
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 outline-none resize-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                   />
                 </div>
+
+                {mode !== 'custom_delivery' && (
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-800">发布范围</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPublishVisibility('private')}
+                        className={`p-3.5 rounded-2xl text-left border transition-all cursor-pointer ${
+                          publishVisibility === 'private'
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-400'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 text-xs font-bold">
+                          <Lock size={14} />
+                          私有发布
+                        </span>
+                        <p
+                          className={`text-[11px] leading-relaxed mt-1.5 ${
+                            publishVisibility === 'private' ? 'text-slate-300' : 'text-slate-500'
+                          }`}
+                        >
+                          无需平台审核，立即仅自己可用。之后若要进入市场，必须提审。
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPublishVisibility('public')}
+                        className={`p-3.5 rounded-2xl text-left border transition-all cursor-pointer ${
+                          publishVisibility === 'public'
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-blue-300 hover:text-blue-700'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 text-xs font-bold">
+                          <Globe size={14} />
+                          公开上架
+                        </span>
+                        <p
+                          className={`text-[11px] leading-relaxed mt-1.5 ${
+                            publishVisibility === 'public' ? 'text-blue-100' : 'text-slate-500'
+                          }`}
+                        >
+                          进入智能体市场，须通过平台审核后才会公开展示。
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-800">客户端平台适配</label>
@@ -1181,6 +1318,7 @@ your-skill-v1.0.0/
                           <div className="text-[11px] text-slate-500 truncate">
                             {pack.fileName}
                             {pack.size ? ` · ${pack.size}` : ''}
+                            {` · ${adapterPackageIsFree(pack) ? '免费下载' : `¥${adapterPackagePriceYuan(pack)}`}`}
                           </div>
                         </div>
                         <button
@@ -1673,7 +1811,12 @@ your-skill-v1.0.0/
                     </div>
                   </div>
                   <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-200">
-                    全项校验通过 · {mode === 'custom_delivery' ? '可提交平台审核' : '可直接发布'}
+                    全项校验通过 ·{' '}
+                    {mode === 'custom_delivery'
+                      ? '可提交平台审核'
+                      : publishVisibility === 'public'
+                        ? '可提交公开审核'
+                        : '可直接私有发布'}
                   </span>
                 </div>
 
@@ -1744,6 +1887,43 @@ your-skill-v1.0.0/
               </div>
               ) : (
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                    {publishVisibility === 'public' ? (
+                      <Globe size={15} className="text-blue-600" />
+                    ) : (
+                      <Lock size={15} className="text-slate-700" />
+                    )}
+                    <span>{publishVisibility === 'public' ? '公开上架审核' : '私有发布'}</span>
+                  </span>
+                  <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setPublishVisibility('private')}
+                      className={`px-2.5 py-1 text-[11px] font-bold cursor-pointer ${
+                        publishVisibility === 'private'
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-white text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      私有
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPublishVisibility('public')}
+                      className={`px-2.5 py-1 text-[11px] font-bold cursor-pointer ${
+                        publishVisibility === 'public'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white text-slate-500 hover:text-blue-700'
+                      }`}
+                    >
+                      公开
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  {publishVisibility === 'public' ? AGENT_PUBLIC_PUBLISH_HINT : AGENT_PRIVATE_PUBLISH_HINT}
+                </p>
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
                     <Sparkles size={15} className="text-blue-600" />
@@ -1767,27 +1947,12 @@ your-skill-v1.0.0/
                   {AGENT_PRICE_CHANGE_NOTICE}
                 </p>
 
-                {/* Enterprise FDE Customization Toggle */}
-                <div className="p-3.5 bg-indigo-50/70 rounded-xl border border-indigo-200 flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <div className="font-bold text-xs text-indigo-950 flex items-center gap-1.5">
-                      <ShieldCheck size={15} className="text-indigo-600" />
-                      <span>开启企业级 FDE 深度二次开发商机承接</span>
-                    </div>
-                    <div className="text-[11px] text-slate-600">
-                      允许企业用户直接向您发起定制咨询，平台 100% 资金托管，服务订单您享 85%~90% 高额收益。
-                    </div>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={enableEnterpriseCustomization}
-                      onChange={(e) => setEnableEnterpriseCustomization(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
-                  </label>
-                </div>
+                <AgentCustomProjectsFields
+                  enabled={enableEnterpriseCustomization}
+                  onEnabledChange={setEnableEnterpriseCustomization}
+                  projects={customProjects}
+                  onChange={setCustomProjects}
+                />
               </div>
               )}
 
@@ -1828,14 +1993,20 @@ your-skill-v1.0.0/
                       <span>
                         {mode === 'custom_delivery'
                           ? '正在提交平台审核…'
-                          : '正在向平台安全中心提交审核与签名...'}
+                          : publishVisibility === 'public'
+                            ? '正在提交公开审核…'
+                            : '正在发布为私有…'}
                       </span>
                     </>
                   ) : (
                     <>
                       <Send size={14} />
                       <span>
-                        {mode === 'custom_delivery' ? '确认提交平台审核' : '提交发布审核并正式上架'}
+                        {mode === 'custom_delivery'
+                          ? '确认提交平台审核'
+                          : publishVisibility === 'public'
+                            ? '提交公开审核'
+                            : '立即发布为私有'}
                       </span>
                     </>
                   )}
@@ -1977,6 +2148,42 @@ your-skill-v1.0.0/
                 )}
               </button>
             </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-slate-700">下载收费</span>
+              <div className="flex items-center gap-1 bg-slate-200 p-0.5 rounded-lg text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setAdapterPackIsFree(true)}
+                  className={`px-2 py-1 rounded-md font-bold cursor-pointer ${
+                    adapterPackIsFree ? 'bg-white text-slate-900' : 'text-slate-500'
+                  }`}
+                >
+                  免费
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdapterPackIsFree(false)}
+                  className={`px-2 py-1 rounded-md font-bold cursor-pointer ${
+                    !adapterPackIsFree ? 'bg-white text-slate-900' : 'text-slate-500'
+                  }`}
+                >
+                  收费
+                </button>
+              </div>
+            </div>
+            {!adapterPackIsFree && (
+              <label className="flex items-center gap-2 text-[11px] text-slate-600">
+                <span className="font-bold text-slate-700">售价</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={adapterPackPrice}
+                  onChange={(e) => setAdapterPackPrice(Number(e.target.value) || 0)}
+                  className="w-24 px-2 py-1 rounded-lg border border-slate-200 text-xs font-bold outline-none"
+                />
+                元
+              </label>
+            )}
             <div className="flex justify-end gap-2">
               <button
                 type="button"

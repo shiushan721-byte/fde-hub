@@ -2,8 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { fail, ok } from '../lib/http';
-import { toJson } from '../lib/json';
+import { parseJson, toJson } from '../lib/json';
 import { createCustomOrder, mapOrder } from '../services/customOrder';
+import { activeCustomProjects, customProjectsTotalYuan, snapshotCustomProjects } from '../../shared/customProjects';
 
 export const consultationRouter = Router();
 
@@ -71,6 +72,24 @@ consultationRouter.post('/', async (req, res) => {
 
   if (shouldCreateOrder && req.user?.id && data.agentId) {
     try {
+      const baseAgent = await prisma.agent.findUnique({ where: { id: data.agentId } });
+      const catalogProjects = activeCustomProjects(parseJson(baseAgent?.customProjects, []));
+      const spec =
+        data.customizationSpec && typeof data.customizationSpec === 'object'
+          ? (data.customizationSpec as Record<string, unknown>)
+          : {};
+      const selectedIds = Array.isArray(spec.selectedProjectIds)
+        ? spec.selectedProjectIds.map((id) => String(id))
+        : Array.isArray(spec.selectedProjects)
+          ? (spec.selectedProjects as Array<{ id?: string }>).map((row) => String(row.id || ''))
+          : [];
+      const selected = catalogProjects.filter((item) => selectedIds.includes(item.id));
+      const snapshot = snapshotCustomProjects(selected);
+      const priceCents = snapshot.length
+        ? customProjectsTotalYuan(selected) * 100
+        : data.priceCents;
+      const projectTitles = snapshot.map((item) => item.title).join('、');
+
       customOrder = await createCustomOrder({
         buyerUserId: req.user.id,
         expertId: data.expertId,
@@ -78,10 +97,14 @@ consultationRouter.post('/', async (req, res) => {
         baseAgentTitle: data.referenceAgentTitle || '定制智能体',
         baseAgentVersion: data.baseAgentVersion || 'v1.0.0',
         title: `定制 · ${data.referenceAgentTitle || data.agentId}`,
-        customizationSpec: data.customizationSpec || {},
-        priceCents: data.priceCents,
+        customizationSpec: {
+          ...spec,
+          selectedProjects: snapshot,
+          selectedProjectIds: snapshot.map((item) => item.id)
+        },
+        priceCents,
         deliveryDays: data.deliveryDays,
-        serviceScope: data.businessProblem || '',
+        serviceScope: [projectTitles, data.businessProblem].filter(Boolean).join(' · '),
         leadId: lead.id
       });
     } catch (error) {

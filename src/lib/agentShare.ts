@@ -64,6 +64,9 @@ export function toHellomeAgentItem(raw: Record<string, unknown>): HellomeAgentIt
     rating: typeof raw.rating === 'number' ? raw.rating : undefined,
     adapterPackages: Array.isArray(raw.adapterPackages)
       ? (raw.adapterPackages as HellomeAgentItem['adapterPackages'])
+      : undefined,
+    customProjects: Array.isArray(raw.customProjects)
+      ? (raw.customProjects as HellomeAgentItem['customProjects'])
       : undefined
   };
 }

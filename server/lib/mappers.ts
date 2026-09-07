@@ -1,8 +1,9 @@
 import type { Agent, Expert } from '@prisma/client';
 import { parseJson } from './json';
 import { engagementTotals, formatEngagementCount } from './engagement';
-import { normalizeAdapterPackages } from '../../shared/adapterPackages';
+import { adapterPackagesForPublic } from '../../shared/adapterPackages';
 import { pricingFromAgent } from '../../shared/pricingPlans';
+import { activeCustomProjects } from '../../shared/customProjects';
 
 export function agentToCatalog(agent: Agent) {
   const eng = engagementTotals(agent);
@@ -29,13 +30,18 @@ export function agentToCatalog(agent: Agent) {
     sharesCount: formatEngagementCount(eng.sharesTotal),
     usageCount: agent.usageCount || undefined,
     rating: agent.rating ?? undefined,
-    adapterPackages: normalizeAdapterPackages(parseJson(agent.adapterPackages, []))
+    adapterPackages: adapterPackagesForPublic(parseJson(agent.adapterPackages, [])),
+    customProjects: activeCustomProjects(parseJson(agent.customProjects, []))
   };
 }
 
 export function agentToSolution(agent: Agent) {
   const payload = parseJson<Record<string, unknown>>(agent.solutionPayload, {});
-  if (payload && payload.id) return payload;
+  const extras = {
+    canFDECustom: agent.canFDECustom,
+    customProjects: activeCustomProjects(parseJson(agent.customProjects, []))
+  };
+  if (payload && payload.id) return { ...payload, ...extras };
   return {
     id: agent.id,
     title: agent.title,
@@ -61,6 +67,8 @@ export function agentToSolution(agent: Agent) {
       price: agent.price,
       pricingPlans: parseJson(agent.pricingPlans, {})
     }),
+    canFDECustom: agent.canFDECustom,
+    customProjects: activeCustomProjects(parseJson(agent.customProjects, [])),
     demoConversation: []
   };
 }

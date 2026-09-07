@@ -18,7 +18,7 @@ import {
   listExpertTags
 } from '../services/expertTags';
 import { listExpertTitles } from '../services/expertTitles';
-import { isAgentAuthor, listAgentShowcases, listPublicInspirations, getPublicInspiration } from '../services/agentShowcases';
+import { isAgentAuthor, listAgentShowcases, listPublicInspirations, getPublicInspiration, toggleShowcaseLike } from '../services/agentShowcases';
 import { createComment, listComments } from '../services/agentComments';
 import { recommendAgents } from '../services/agentRecommend';
 
@@ -121,6 +121,24 @@ publicRouter.post('/agents/recommend', async (req, res) => {
   } catch (error) {
     return fail(res, error instanceof Error ? error.message : '推荐失败，请稍后重试');
   }
+});
+
+publicRouter.get('/agents/:id/adapters/:packageId/file', async (req, res) => {
+  const { resolveAdapterDownload, sendAdapterFile } = await import('../services/adapterDownload');
+  const result = await resolveAdapterDownload({
+    agentId: req.params.id,
+    packageId: req.params.packageId,
+    userId: req.user?.id
+  });
+  if (result.error || !result.pack) {
+    return fail(
+      res,
+      result.error || '无法下载',
+      result.status,
+      result.status === 401 ? 'UNAUTHENTICATED' : result.status === 403 ? 'FORBIDDEN' : 'NOT_FOUND'
+    );
+  }
+  return sendAdapterFile(res, result.pack);
 });
 
 publicRouter.get('/agents/:id', async (req, res) => {
@@ -323,15 +341,29 @@ publicRouter.post('/agents/:id/comments', requireAuth, async (req, res) => {
   }
 });
 
-publicRouter.get('/inspirations', async (_req, res) => {
-  const items = await listPublicInspirations();
+publicRouter.get('/inspirations', async (req, res) => {
+  const items = await listPublicInspirations(req.user?.id);
   return ok(res, { items, total: items.length });
 });
 
 publicRouter.get('/inspirations/:id', async (req, res) => {
-  const item = await getPublicInspiration(req.params.id);
+  const item = await getPublicInspiration(req.params.id, req.user?.id);
   if (!item) return fail(res, '成果不存在或已隐藏', 404, 'NOT_FOUND');
   return ok(res, item);
+});
+
+publicRouter.post('/inspirations/:id/like', requireAuth, async (req, res) => {
+  try {
+    const result = await toggleShowcaseLike({
+      showcaseId: req.params.id,
+      userId: req.user!.id,
+      userName: req.user!.name
+    });
+    return ok(res, result);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status || 400;
+    return fail(res, error instanceof Error ? error.message : '点赞失败', status);
+  }
 });
 
 publicRouter.get('/inspirations/:id/comments', async (req, res) => {

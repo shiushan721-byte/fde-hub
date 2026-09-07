@@ -36,6 +36,7 @@ interface HellomeHomeViewProps {
   categories?: string[];
   sectionTitle?: string;
   creatorCountLabel?: string;
+  onToast?: (message: string) => void;
 }
 
 function platformSupportLabel(support?: HellomeAgentItem['platformSupport']) {
@@ -70,7 +71,8 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
   banners,
   categories,
   sectionTitle = '热门智能体',
-  creatorCountLabel = '已入驻 100+ 认证创作者与工作室'
+  creatorCountLabel = '已入驻 100+ 认证创作者与工作室',
+  onToast
 }) => {
   const catalogAgents = agents ?? mockHellomeHomeAgents;
   const homeBanners = banners ?? defaultHomeBanners;
@@ -647,6 +649,12 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
             items={filteredInspirations}
             loading={inspirationsLoading}
             onOpen={(item) => onOpenInspiration?.(item)}
+            onToast={onToast}
+            onLikeChange={(id, next) => {
+              setInspirations((prev) =>
+                prev.map((row) => (row.id === id ? { ...row, ...next } : row))
+              );
+            }}
           />
         </div>
         )}

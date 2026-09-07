@@ -33,6 +33,7 @@ model User {
   payments              PaymentRecord[]
   withdrawals           Withdrawal[]
   agentPurchases        AgentPurchase[]
+  showcaseLikes         AgentShowcaseLike[]
 }
 
 model Session {
@@ -99,8 +100,10 @@ model Agent {
   featured        Boolean  @default(false)
   sortOrder       Int      @default(0)
   solutionPayload String   @default("")
-  /** 外部工具适配分发包：[{ platformName, fileName, url, size }] */
+  /** 外部工具适配分发包：[{ platformName, fileName, url, size, isFree, price }] */
   adapterPackages String   @default("[]")
+  /** FDE 标准定制项目：[{ id, title, description, price, active }]，价格单位元 */
+  customProjects  String   @default("[]")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   comments        AgentComment[]
@@ -129,6 +132,10 @@ model AgentPurchase {
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   /** one_time（历史数据可能为 monthly / annual / buyout，展示时均视为一次性） */
   plan          String
+  /** catalog 智能体使用权 | adapter ZIP/Skill 下载 */
+  kind          String    @default("catalog")
+  /** kind=adapter 时为适配包 id */
+  packageId     String    @default("")
   priceCents    Int
   priceSnapshot String    @default("{}")
   /** pending | paid */
@@ -141,6 +148,7 @@ model AgentPurchase {
   updatedAt     DateTime  @updatedAt
 
   @@index([userId, agentId])
+  @@index([userId, agentId, kind])
   @@index([agentId])
 }
 
@@ -169,6 +177,20 @@ model AgentShowcase {
   @@index([userId])
   @@index([featured, inspireCategory])
   comments    AgentComment[]
+  likes       AgentShowcaseLike[]
+}
+
+/** 用户对成果的点赞 */
+model AgentShowcaseLike {
+  id         String        @id
+  showcaseId String
+  showcase   AgentShowcase @relation(fields: [showcaseId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime      @default(now())
+
+  @@unique([showcaseId, userId])
+  @@index([userId])
 }
 
 /** 评论：智能体详情或成果详情（source = agent | showcase） */

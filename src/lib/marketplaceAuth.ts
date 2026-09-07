@@ -19,7 +19,7 @@ export async function ensureMarketplaceSession(): Promise<MarketplaceUser> {
   return api<MarketplaceUser>('/api/auth/demo-user', { method: 'POST' });
 }
 
-/** 切到该智能体作者的专家会话，便于作者精选/隐藏用户成果 */
+/** 切到该智能体作者的专家会话，便于作者精选用户成果 */
 export async function ensureAgentAuthorSession(authorId?: string | null) {
   if (!authorId) return null;
   const email = `${authorId}@experts.hellome.art`;

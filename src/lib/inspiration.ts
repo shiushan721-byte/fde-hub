@@ -1,5 +1,7 @@
 import { featuredInspirationMocks } from '../../shared/inspirationMock';
 import { mockExperts, mockHellomeHomeAgents, type HellomeAgentItem } from '../data/mockData';
+import { api } from './api';
+import { ensureMarketplaceSession } from './marketplaceAuth';
 
 export type PublicInspiration = {
   id: string;
@@ -7,7 +9,8 @@ export type PublicInspiration = {
   description: string;
   imageUrl: string;
   fileName: string;
-    likesCount: number;
+  likesCount: number;
+  liked?: boolean;
   createdAt: string;
   updatedAt?: string;
   featured?: boolean;
@@ -65,6 +68,7 @@ export function getMockPublicInspirations(): PublicInspiration[] {
         imageUrl: item.imageUrl,
         fileName: item.fileName,
         likesCount: item.likesCount,
+        liked: false,
         createdAt: new Date(Date.now() - item.hoursAgo * 36e5).toISOString(),
         updatedAt: new Date(Date.now() - item.hoursAgo * 36e5).toISOString(),
         featured: item.featured,
@@ -136,6 +140,7 @@ export function showcaseToPublicInspiration(
     imageUrl: item.imageUrl,
     fileName: item.fileName || '',
     likesCount: item.likesCount || 0,
+    liked: false,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt || item.createdAt,
     featured: item.featured,
@@ -170,4 +175,12 @@ export function showcaseToPublicInspiration(
           }
         : null
   };
+}
+
+export async function togglePublicInspirationLike(id: string) {
+  await ensureMarketplaceSession();
+  return api<{ liked: boolean; likesCount: number }>(
+    `/api/public/inspirations/${encodeURIComponent(id)}/like`,
+    { method: 'POST' }
+  );
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Bell, Bot, CheckCircle2, MessageCircle, Sparkles, ShieldAlert } from 'lucide-react';
+import { X, Bell, Bot, CheckCircle2, Heart, MessageCircle, Sparkles, ShieldAlert } from 'lucide-react';
 import { CustomerLeadItem } from '../types/creator';
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
@@ -11,7 +11,7 @@ export interface UserNotificationItem {
   time: string;
   agentTitle?: string;
   unread?: boolean;
-  kind: 'submitted' | 'creator_reply' | 'status' | 'ops_review';
+  kind: 'submitted' | 'creator_reply' | 'status' | 'ops_review' | 'like';
 }
 
 export const mockUserNotifications: UserNotificationItem[] = [
@@ -51,6 +51,7 @@ interface ConsultationMessagesDrawerProps {
 }
 
 const kindIcon = (kind: UserNotificationItem['kind']) => {
+  if (kind === 'like') return <Heart size={14} className="text-rose-500" />;
   if (kind === 'creator_reply') return <MessageCircle size={14} className="text-blue-600" />;
   if (kind === 'ops_review') return <ShieldAlert size={14} className="text-violet-600" />;
   if (kind === 'status') return <Sparkles size={14} className="text-amber-600" />;
@@ -72,6 +73,7 @@ function formatRelativeTime(iso: string) {
 }
 
 function mapApiTypeToKind(type: string): UserNotificationItem['kind'] {
+  if (type.includes('like')) return 'like';
   if (type.includes('comment_report')) return 'submitted';
   if (
     type.includes('review') ||

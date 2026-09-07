@@ -132,7 +132,7 @@ const nav: NavEntry[] = [
     icon: Banknote,
     children: [
       { key: 'expert-accounts', label: '专家账户余额' },
-      { key: 'settlements', label: '订单结算' },
+      { key: 'settlements', label: '订单管理' },
       { key: 'finance-rules', label: '费率与结算规则' }
     ]
   },
@@ -162,7 +162,7 @@ const statusLabel: Record<string, string> = {
   draft: '草稿',
   in_review: '审核中',
   published: '已发布',
-  offline: '已下架',
+  offline: '私有 / 已下架',
   deleted: '创作者已删除',
   new: '新线索',
   contacted: '已联系',
@@ -1193,7 +1193,7 @@ const AgentsPage = ({
             <option value="">全部状态</option>
             <option value="published">已发布</option>
             <option value="in_review">审核中</option>
-            <option value="offline">已下架</option>
+            <option value="offline">私有 / 已下架</option>
             <option value="deleted">创作者已删除</option>
           </select>
           <input
@@ -2481,7 +2481,7 @@ const UniversalAgentsReviewPanel = () => {
         >
           <option value="in_review">待审核</option>
           <option value="published">已通过</option>
-          <option value="offline">已下架/驳回</option>
+          <option value="offline">私有 / 已下架 / 驳回</option>
           <option value="deleted">创作者已删除</option>
           <option value="">全部</option>
         </select>

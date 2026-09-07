@@ -108,6 +108,24 @@ export const mockCreatorAgentsList: CreatorAgentItem[] = [
     },
     tokenRebateEnabled: true,
     fdeCustomEnabled: true,
+    customProjects: [
+      {
+        id: 'cprj_ecom_flow',
+        title: '流程修改、界面调整',
+        description: '按店铺售后路径改工单分流、回复话术和客服工作台。',
+        price: 200,
+        active: true,
+        sortOrder: 0
+      },
+      {
+        id: 'cprj_ecom_feishu',
+        title: '同步到飞书文档',
+        description: '售后记录与质检结果同步到飞书文档/多维表格。',
+        price: 100,
+        active: true,
+        sortOrder: 1
+      }
+    ],
     status: 'published',
     version: '1.0.0',
     platformSupport: 'both',

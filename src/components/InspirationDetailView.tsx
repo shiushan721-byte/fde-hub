@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, Heart, Eye, Bot, User } from 'lucide-react';
-import type { PublicInspiration } from '../lib/inspiration';
+import { ChevronLeft, Heart, Bot, User } from 'lucide-react';
+import { togglePublicInspirationLike, type PublicInspiration } from '../lib/inspiration';
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
 import { getMockShowcaseComments } from '../data/agentSocialMock';
 import { CommentThread, type ThreadComment } from './CommentThread';
+import { pricingFromAgent } from '../../shared/pricingPlans';
+import { yuanAmount } from '../lib/customOrderLabels';
+import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
+import { useCatalog } from '../lib/catalog';
 
 function formatShortDate(iso?: string) {
   if (!iso) return '—';
@@ -65,6 +69,28 @@ function InspirationMedia({ item }: { item: PublicInspiration }) {
   );
 }
 
+type CatalogLicense = {
+  id: string;
+  plan: string;
+  priceCents: number;
+  status: string;
+  paidAt?: string | null;
+  expiresAt?: string | null;
+  active: boolean;
+};
+
+type CheckoutOrder = {
+  id: string;
+  priceCents: number;
+};
+
+type CatalogAgentPricing = {
+  id: string;
+  title: string;
+  price?: number;
+  pricingPlans?: { isFree?: boolean; price?: number; monthlyPrice?: number };
+};
+
 interface InspirationDetailViewProps {
   item: PublicInspiration;
   onBack: () => void;
@@ -72,6 +98,7 @@ interface InspirationDetailViewProps {
   onOpenAgentAuthor: (authorId: string) => void;
   backLabel?: string;
   onToast?: (message: string) => void;
+  onLikeChange?: (next: { liked: boolean; likesCount: number }) => void;
 }
 
 export const InspirationDetailView: React.FC<InspirationDetailViewProps> = ({
@@ -80,16 +107,28 @@ export const InspirationDetailView: React.FC<InspirationDetailViewProps> = ({
   onOpenAgent,
   onOpenAgentAuthor,
   backLabel = '返回发现灵感',
-  onToast
+  onToast,
+  onLikeChange
 }) => {
-  const [liked, setLiked] = useState(false);
+  const catalog = useCatalog();
+  const [liked, setLiked] = useState(Boolean(item.liked));
+  const [likesCount, setLikesCount] = useState(item.likesCount);
+  const [likeBusy, setLikeBusy] = useState(false);
   const [comments, setComments] = useState<ThreadComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [commentDraft, setCommentDraft] = useState('');
   const [commentBusy, setCommentBusy] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
-  const likes = item.likesCount + (liked ? 1 : 0);
-  const views = Math.max(item.likesCount * 8, 12);
+  const [catalogAgent, setCatalogAgent] = useState<CatalogAgentPricing | null>(null);
+  const [license, setLicense] = useState<CatalogLicense | null>(null);
+  const [checkout, setCheckout] = useState<CheckoutOrder | null>(null);
+  const [buyBusy, setBuyBusy] = useState(false);
+  const likes = likesCount;
+  const fallbackAgent = catalog.homeAgents.find((row) => row.id === item.agent.id) || null;
+  const pricedAgent = catalogAgent || fallbackAgent;
+  const pricing = pricingFromAgent(pricedAgent || {});
+  const saleYuan = pricing.price;
+  const owned = Boolean(license?.active);
   const tags = [
     item.inspireCategory,
     item.agent.category,
@@ -113,8 +152,87 @@ export const InspirationDetailView: React.FC<InspirationDetailViewProps> = ({
   };
 
   useEffect(() => {
+    setLiked(Boolean(item.liked));
+    setLikesCount(item.likesCount);
     void loadComments();
   }, [item.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCheckout(null);
+    setLicense(null);
+    (async () => {
+      try {
+        const agent = await api<CatalogAgentPricing>(
+          `/api/public/agents/${encodeURIComponent(item.agent.id)}`
+        );
+        if (!cancelled) setCatalogAgent(agent);
+      } catch {
+        if (!cancelled) setCatalogAgent(null);
+      }
+      try {
+        await ensureMarketplaceSession();
+        const itemLicense = await api<CatalogLicense | null>(
+          `/api/me/agents/${encodeURIComponent(item.agent.id)}/license`
+        );
+        if (!cancelled) setLicense(itemLicense);
+      } catch {
+        if (!cancelled) setLicense(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [item.agent.id]);
+
+  const toggleLike = async () => {
+    if (likeBusy) return;
+    setLikeBusy(true);
+    const prev = { liked, likesCount };
+    const optimistic = {
+      liked: !liked,
+      likesCount: Math.max(0, likesCount + (liked ? -1 : 1))
+    };
+    setLiked(optimistic.liked);
+    setLikesCount(optimistic.likesCount);
+    onLikeChange?.(optimistic);
+    try {
+      const next = await togglePublicInspirationLike(item.id);
+      setLiked(next.liked);
+      setLikesCount(next.likesCount);
+      onLikeChange?.(next);
+    } catch (err) {
+      setLiked(prev.liked);
+      setLikesCount(prev.likesCount);
+      onLikeChange?.(prev);
+      onToast?.(err instanceof Error ? err.message : '点赞失败，请先登录后重试');
+    } finally {
+      setLikeBusy(false);
+    }
+  };
+
+  const startCheckout = async () => {
+    if (pricing.isFree || owned || saleYuan < 1) {
+      onOpenAgent(item.agent.id);
+      return;
+    }
+    setBuyBusy(true);
+    try {
+      await ensureMarketplaceSession();
+      const order = await api<{ id: string; priceCents: number }>(
+        `/api/me/agents/${item.agent.id}/checkout`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ channel: 'wechat' })
+        }
+      );
+      setCheckout({ id: order.id, priceCents: order.priceCents });
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : '无法发起支付');
+    } finally {
+      setBuyBusy(false);
+    }
+  };
 
   const submitComment = async () => {
     const content = commentDraft.trim();
@@ -189,19 +307,16 @@ export const InspirationDetailView: React.FC<InspirationDetailViewProps> = ({
                   ))}
                 </div>
                 <div className="flex items-center gap-3 text-[12px] text-slate-400">
-                  <span className="inline-flex items-center gap-1">
-                    <Eye size={13} />
-                    {views}
-                  </span>
                   <button
                     type="button"
-                    onClick={() => setLiked((v) => !v)}
-                    className={`inline-flex items-center gap-1 cursor-pointer ${
+                    disabled={likeBusy}
+                    onClick={() => void toggleLike()}
+                    className={`inline-flex items-center gap-1 cursor-pointer disabled:opacity-60 ${
                       liked ? 'text-rose-500' : 'hover:text-rose-500'
                     }`}
                   >
                     <Heart size={13} className={liked ? 'fill-rose-500' : ''} />
-                    {likes}
+                    {likes > 0 ? likes : '点赞'}
                   </button>
                 </div>
               </div>
@@ -287,7 +402,14 @@ export const InspirationDetailView: React.FC<InspirationDetailViewProps> = ({
                   <p className="text-[13px] font-semibold text-slate-900 line-clamp-2">
                     {item.agent.title}
                   </p>
-                  <p className="text-[11px] text-slate-400">{item.agent.category}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {item.agent.category}
+                    {pricedAgent
+                      ? pricing.isFree
+                        ? ' · 免费'
+                        : ` · ￥${saleYuan} 一次性`
+                      : ''}
+                  </p>
                 </div>
               </button>
 
@@ -321,15 +443,49 @@ export const InspirationDetailView: React.FC<InspirationDetailViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => onOpenAgent(item.agent.id)}
-                className="w-full h-10 rounded-xl bg-slate-900 text-white text-[13px] font-bold cursor-pointer hover:bg-slate-800"
+                disabled={buyBusy}
+                onClick={() => void startCheckout()}
+                className="w-full h-10 rounded-xl bg-slate-900 text-white text-[13px] font-bold cursor-pointer hover:bg-slate-800 disabled:opacity-60"
               >
-                使用同款智能体
+                {buyBusy
+                  ? '正在创建订单…'
+                  : owned
+                    ? '已购买，去使用'
+                    : !pricing.isFree && saleYuan >= 1
+                      ? `购买同款 ${yuanAmount(saleYuan * 100)}`
+                      : '使用同款智能体'}
               </button>
             </div>
           </aside>
         </div>
       </div>
+
+      {checkout && (
+        <PaymentCheckoutDrawer
+          orderId={checkout.id}
+          title={item.agent.title}
+          amountCents={checkout.priceCents}
+          heading="购买智能体"
+          amountLabel="应付金额"
+          successTitle="购买成功"
+          successHint="支付成功后按购买时价格开通，可长期使用；后续改价不影响已购使用权。"
+          escrowNote="演示环境：扫码不会真实扣款。支付成功后按购买时价格开通，已购用户不受后续改价影响。"
+          payUrl={`/api/me/purchases/${checkout.id}/pay`}
+          confirmUrl={`/api/me/purchases/${checkout.id}/confirm`}
+          onClose={() => setCheckout(null)}
+          onPaid={() => {
+            setLicense({
+              id: checkout.id,
+              plan: 'one_time',
+              priceCents: checkout.priceCents,
+              status: 'paid',
+              active: true
+            });
+            setCheckout(null);
+            onToast?.('支付成功，已开通使用权');
+          }}
+        />
+      )}
     </div>
   );
 };

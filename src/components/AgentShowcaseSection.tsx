@@ -147,20 +147,10 @@ export const AgentShowcaseSection: React.FC<AgentShowcaseSectionProps> = ({
     }
   };
 
-  const moderate = async (item: AgentShowcaseItem, patch: { featured?: boolean; hidden?: boolean }) => {
+  const moderate = async (item: AgentShowcaseItem, featured: boolean) => {
     if (item.id.startsWith('mock_')) {
-      setItems((prev) =>
-        prev.map((row) =>
-          row.id === item.id
-            ? {
-                ...row,
-                featured: patch.featured ?? row.featured,
-                hidden: patch.hidden ?? row.hidden
-              }
-            : row
-        )
-      );
-      onToast?.(patch.featured ? '已设为精选' : patch.featured === false ? '已取消精选' : '已更新');
+      setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, featured } : row)));
+      onToast?.(featured ? '已设为精选' : '已取消精选');
       return;
     }
     setBusyId(item.id);
@@ -172,12 +162,10 @@ export const AgentShowcaseSection: React.FC<AgentShowcaseSectionProps> = ({
       }
       await api(`/api/me/agents/${agentId}/showcases/${item.id}`, {
         method: 'PATCH',
-        body: JSON.stringify(patch)
+        body: JSON.stringify({ featured })
       });
       await load();
-      onToast?.(
-        patch.featured ? '已精选该成果' : patch.featured === false ? '已取消精选' : '已更新成果'
-      );
+      onToast?.(featured ? '已精选该成果' : '已取消精选');
     } catch (err) {
       onToast?.(err instanceof Error ? err.message : '操作失败');
     } finally {
@@ -225,7 +213,7 @@ export const AgentShowcaseSection: React.FC<AgentShowcaseSectionProps> = ({
 
       {canModerate && (
         <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-          你是作者，可精选或隐藏用户上传的成果。精选后会优先展示在前台。
+          你是作者，可精选用户上传的成果。精选后会优先展示在前台。
         </p>
       )}
 
@@ -235,15 +223,12 @@ export const AgentShowcaseSection: React.FC<AgentShowcaseSectionProps> = ({
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        {items.map((item) => {
+        {items
+          .filter((item) => !item.hidden)
+          .map((item) => {
           const own = viewerUserId === item.userId;
           return (
-            <article
-              key={item.id}
-              className={`rounded-xl border overflow-hidden bg-white ${
-                item.hidden ? 'border-dashed border-slate-200 opacity-70' : 'border-slate-200'
-              }`}
-            >
+            <article key={item.id} className="rounded-xl border overflow-hidden bg-white border-slate-200">
               <div className="relative aspect-[4/3] bg-slate-100">
                 <button
                   type="button"
@@ -263,16 +248,11 @@ export const AgentShowcaseSection: React.FC<AgentShowcaseSectionProps> = ({
                     精选
                   </span>
                 )}
-                {item.hidden && (
-                  <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-slate-900/70 text-white text-[10px] font-bold pointer-events-none">
-                    已隐藏
-                  </span>
-                )}
                 {canModerate && (
                   <button
                     type="button"
                     disabled={busyId === item.id}
-                    onClick={() => void moderate(item, { featured: !item.featured })}
+                    onClick={() => void moderate(item, !item.featured)}
                     className={`absolute bottom-2 right-2 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer disabled:opacity-60 ${
                       item.featured
                         ? 'bg-white text-amber-700'
@@ -301,24 +281,14 @@ export const AgentShowcaseSection: React.FC<AgentShowcaseSectionProps> = ({
                 {(canModerate || own) && (
                   <div className="flex flex-wrap gap-1">
                     {canModerate && (
-                      <>
-                        <button
-                          type="button"
-                          disabled={busyId === item.id}
-                          onClick={() => void moderate(item, { featured: !item.featured })}
-                          className="px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-60"
-                        >
-                          {item.featured ? '取消精选' : '精选'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busyId === item.id}
-                          onClick={() => void moderate(item, { hidden: !item.hidden })}
-                          className="px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer bg-slate-50 text-slate-600 hover:bg-slate-100 disabled:opacity-60"
-                        >
-                          {item.hidden ? '显示' : '隐藏'}
-                        </button>
-                      </>
+                      <button
+                        type="button"
+                        disabled={busyId === item.id}
+                        onClick={() => void moderate(item, !item.featured)}
+                        className="px-2 py-1 rounded-md text-[10px] font-bold cursor-pointer bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-60"
+                      >
+                        {item.featured ? '取消精选' : '精选'}
+                      </button>
                     )}
                     {own && (
                       <button

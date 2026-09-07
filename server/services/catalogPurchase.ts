@@ -1,6 +1,13 @@
 import { prisma } from '../lib/prisma';
 import { parseJson, toJson } from '../lib/json';
 import { pricingFromAgent, type CatalogPlan } from '../../shared/pricingPlans';
+import {
+  adapterDisplayName,
+  adapterPackageIsFree,
+  adapterPackagePriceYuan,
+  findAdapterPackage,
+  normalizeAdapterPackages
+} from '../../shared/adapterPackages';
 import { createPendingPayment, markPaymentPaid } from './payments';
 import { creatorPayoutCents, getOrCreateWallet, newWalletId } from './wallet';
 import type { PayChannel } from './wallet';
@@ -24,17 +31,24 @@ export function mapPurchase(row: {
   id: string;
   agentId: string;
   plan: string;
+  kind?: string;
+  packageId?: string;
   priceCents: number;
   status: string;
   channel: string;
   paidAt: Date | null;
   expiresAt: Date | null;
   createdAt?: Date;
+  priceSnapshot?: string;
 }) {
+  const snapshot = parseJson<Record<string, unknown>>(row.priceSnapshot || '{}', {});
   return {
     id: row.id,
     agentId: row.agentId,
     plan: row.plan,
+    kind: row.kind || 'catalog',
+    packageId: row.packageId || '',
+    packageName: typeof snapshot.packageName === 'string' ? snapshot.packageName : '',
     priceCents: row.priceCents,
     status: row.status,
     channel: row.channel,
@@ -47,7 +61,7 @@ export function mapPurchase(row: {
 
 export async function getActiveLicense(userId: string, agentId: string) {
   const rows = await prisma.agentPurchase.findMany({
-    where: { userId, agentId, status: 'paid' },
+    where: { userId, agentId, status: 'paid', kind: 'catalog' },
     orderBy: { paidAt: 'desc' }
   });
   return rows.find((row) => licenseActive(row)) || null;
@@ -105,7 +119,9 @@ export async function creditCatalogSale(purchaseId: string) {
       amountCents: payoutCents,
       feeCents: purchase.priceCents - payoutCents,
       balanceAfterCents: wallet.pendingCents + wallet.availableCents + payoutCents,
-      title: `标准版购买 · ${purchase.agent.title}`,
+      title: purchase.kind === 'adapter'
+        ? `适配下载 · ${purchase.agent.title}`
+        : `标准版购买 · ${purchase.agent.title}`,
       sourceKind: 'agent',
       sourceOrderNo: purchase.id,
       sourceBuyer: purchase.user.name,
@@ -144,7 +160,8 @@ export async function createCatalogCheckout(input: {
     where: {
       userId: input.userId,
       agentId: agent.id,
-      status: 'pending'
+      status: 'pending',
+      kind: 'catalog'
     },
     orderBy: { createdAt: 'desc' }
   });
@@ -168,6 +185,8 @@ export async function createCatalogCheckout(input: {
       agentId: agent.id,
       userId: input.userId,
       plan: ONE_TIME_PLAN,
+      kind: 'catalog',
+      packageId: '',
       priceCents: yuan * 100,
       priceSnapshot: toJson({ ...plans, plan: ONE_TIME_PLAN }),
       status: 'pending',
@@ -241,8 +260,7 @@ export async function confirmCatalogPurchase(input: {
       channel: input.channel || purchase.channel,
       paymentId,
       paidAt,
-      expiresAt: null,
-      plan: ONE_TIME_PLAN
+      expiresAt: null
     }
   });
   await creditCatalogSale(updated.id).catch((err) =>
@@ -250,3 +268,132 @@ export async function confirmCatalogPurchase(input: {
   );
   return updated;
 }
+
+export async function getAdapterEntitlement(userId: string, agentId: string, packageId: string) {
+  const row = await prisma.agentPurchase.findFirst({
+    where: {
+      userId,
+      agentId,
+      packageId,
+      kind: 'adapter',
+      status: 'paid'
+    },
+    orderBy: { paidAt: 'desc' }
+  });
+  return row && licenseActive(row) ? row : null;
+}
+
+export async function listAdapterEntitlements(userId: string, agentId: string) {
+  const agent = await prisma.agent.findFirst({
+    where: { id: agentId, creatorDeletedAt: null }
+  });
+  if (!agent) return [];
+  const packs = normalizeAdapterPackages(parseJson(agent.adapterPackages, []));
+  const paid = await prisma.agentPurchase.findMany({
+    where: { userId, agentId, kind: 'adapter', status: 'paid' },
+    orderBy: { paidAt: 'desc' }
+  });
+  const paidByPackage = new Map<string, (typeof paid)[number]>();
+  for (const row of paid) {
+    if (!paidByPackage.has(row.packageId) && licenseActive(row)) {
+      paidByPackage.set(row.packageId, row);
+    }
+  }
+  return packs.map((pack) => {
+    const free = adapterPackageIsFree(pack);
+    const owned = free || Boolean(paidByPackage.get(pack.id));
+    return {
+      packageId: pack.id,
+      platformName: pack.platformName,
+      fileName: pack.fileName,
+      isFree: free,
+      price: adapterPackagePriceYuan(pack),
+      owned,
+      url: owned ? pack.url : ''
+    };
+  });
+}
+
+export async function createAdapterCheckout(input: {
+  userId: string;
+  agentId: string;
+  packageId: string;
+  channel: PayChannel;
+}) {
+  const agent = await prisma.agent.findFirst({
+    where: { id: input.agentId, creatorDeletedAt: null }
+  });
+  if (!agent) throw httpError('智能体不存在', 404);
+  const pack = findAdapterPackage(parseJson(agent.adapterPackages, []), input.packageId);
+  if (!pack) throw httpError('适配包不存在', 404);
+  if (adapterPackageIsFree(pack)) throw httpError('该适配包免费，无需购买', 400);
+  const yuan = adapterPackagePriceYuan(pack);
+  if (yuan < 1) throw httpError('售价无效', 400);
+
+  const owned = await getAdapterEntitlement(input.userId, agent.id, pack.id);
+  if (owned) throw httpError('已购买该适配包，无需重复购买', 409);
+
+  const pending = await prisma.agentPurchase.findFirst({
+    where: {
+      userId: input.userId,
+      agentId: agent.id,
+      packageId: pack.id,
+      kind: 'adapter',
+      status: 'pending'
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+  const snapshot = {
+    kind: 'adapter',
+    packageId: pack.id,
+    packageName: adapterDisplayName(pack.platformName),
+    isFree: false,
+    price: yuan
+  };
+  if (pending && pending.priceCents === yuan * 100) {
+    const payment = await createPendingPayment({
+      orderId: pending.id,
+      userId: input.userId,
+      amountCents: pending.priceCents,
+      channel: input.channel
+    });
+    const updated = await prisma.agentPurchase.update({
+      where: { id: pending.id },
+      data: {
+        channel: input.channel,
+        paymentId: payment.id,
+        kind: 'adapter',
+        packageId: pack.id,
+        priceSnapshot: toJson(snapshot)
+      }
+    });
+    return { purchase: updated, payment };
+  }
+
+  const purchase = await prisma.agentPurchase.create({
+    data: {
+      id: newWalletId('ap'),
+      agentId: agent.id,
+      userId: input.userId,
+      plan: 'adapter',
+      kind: 'adapter',
+      packageId: pack.id,
+      priceCents: yuan * 100,
+      priceSnapshot: toJson(snapshot),
+      status: 'pending',
+      channel: input.channel
+    }
+  });
+  const payment = await createPendingPayment({
+    orderId: purchase.id,
+    userId: input.userId,
+    amountCents: purchase.priceCents,
+    channel: input.channel
+  });
+  const withPay = await prisma.agentPurchase.update({
+    where: { id: purchase.id },
+    data: { paymentId: payment.id }
+  });
+  return { purchase: withPay, payment };
+}
+

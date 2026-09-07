@@ -4,6 +4,52 @@ export const AGENT_LIFECYCLE_NOTICE =
 export const AGENT_PRICE_CHANGE_NOTICE =
   '新价格仅对后续购买生效，已购用户仍按原价使用。';
 
+export const AGENT_PRIVATE_PUBLISH_HINT =
+  '私有发布无需平台审核，仅你自己可使用，也可用分享链接发给指定的人。之后若要进入市场，必须提交公开审核。';
+
+export const AGENT_PUBLIC_PUBLISH_HINT =
+  '公开上架会进入智能体市场，须先通过平台审核。审核通过前不会出现在市场列表中。';
+
+export type CreatorListingStatus = 'published' | 'draft' | 'under_review' | 'offline';
+
+export function creatorListingLabel(status: string): string {
+  switch (status) {
+    case 'published':
+      return '公开上架';
+    case 'under_review':
+    case 'in_review':
+      return '公开审核中';
+    case 'offline':
+      return '私有';
+    case 'draft':
+      return '草稿';
+    default:
+      return '未上架';
+  }
+}
+
+export function creatorListingBadgeClass(status: string): string {
+  switch (status) {
+    case 'published':
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    case 'under_review':
+    case 'in_review':
+      return 'bg-amber-50 text-amber-800 border-amber-200';
+    case 'offline':
+      return 'bg-slate-100 text-slate-600 border-slate-200';
+    case 'draft':
+      return 'bg-slate-50 text-slate-500 border-slate-200';
+    default:
+      return 'bg-slate-50 text-slate-500 border-slate-200';
+  }
+}
+
+export function visibilityFromCreatorStatus(status?: string): 'private' | 'public' {
+  return status === 'published' || status === 'under_review' || status === 'in_review'
+    ? 'public'
+    : 'private';
+}
+
 /** 创作者侧：是否已有真实用户使用过，用过则禁止删除 */
 export function creatorAgentHasBeenUsed(agent: {
   status?: string;
