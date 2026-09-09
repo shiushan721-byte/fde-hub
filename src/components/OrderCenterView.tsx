@@ -29,7 +29,10 @@ import { CustomServiceDeal, CustomServiceOrder } from '../types/customService';
 import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
 
 /** 买家视角：我的定制（咨询 → 方案 → 支付 → 交付 → 验收） */
-export const OrderCenterView: React.FC = () => {
+export const OrderCenterView: React.FC<{
+  focusOrderId?: string;
+  onFocusConsumed?: () => void;
+}> = ({ focusOrderId, onFocusConsumed }) => {
   const [deals, setDeals] = useState<CustomServiceDeal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -71,6 +74,16 @@ export const OrderCenterView: React.FC = () => {
   useEffect(() => {
     reload();
   }, []);
+
+  useEffect(() => {
+    if (!focusOrderId || loading) return;
+    const deal = deals.find(
+      (d) => d.orderId === focusOrderId || d.order?.id === focusOrderId || d.dealId === focusOrderId
+    );
+    if (!deal) return;
+    setDetailDeal(deal);
+    onFocusConsumed?.();
+  }, [focusOrderId, loading, deals, onFocusConsumed]);
 
   useEffect(() => {
     if (!detailDeal) return;
@@ -261,7 +274,18 @@ export const OrderCenterView: React.FC = () => {
                     !isConsulting && hasViewableProposal(o?.deliveryProposal as DeliveryProposal);
                   const needsConfirm = status === 'awaiting_proposal_confirm' && canViewProposal;
                   return (
-                    <tr key={deal.dealId} className="hover:bg-slate-50/80 transition-colors">
+                    <tr
+                      key={deal.dealId}
+                      id={deal.order?.id ? `order-row-${deal.order.id}` : undefined}
+                      className={`hover:bg-slate-50/80 transition-colors ${
+                        focusOrderId &&
+                        (deal.orderId === focusOrderId ||
+                          deal.order?.id === focusOrderId ||
+                          deal.dealId === focusOrderId)
+                          ? 'bg-blue-50/80 ring-1 ring-inset ring-blue-200'
+                          : ''
+                      }`}
+                    >
                       <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">
                         {formatOrderTime(o?.createdAt || deal.consultedAt)}
                       </td>

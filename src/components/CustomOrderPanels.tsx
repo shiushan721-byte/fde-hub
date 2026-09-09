@@ -35,9 +35,11 @@ function selectedProjectsFromOrder(order?: OrderRow | null) {
 }
 
 /** 创作者：定制服务（咨询线索与订单同一条流程） */
-export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadItem[] }> = ({
-  sessionLeads = []
-}) => {
+export const CreatorCustomOrdersPanel: React.FC<{
+  sessionLeads?: CustomerLeadItem[];
+  focusOrderId?: string;
+  onFocusConsumed?: () => void;
+}> = ({ sessionLeads = [], focusOrderId, onFocusConsumed }) => {
   const [deals, setDeals] = useState<CustomServiceDeal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -96,6 +98,25 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
   useEffect(() => {
     reload();
   }, [sessionLeads]);
+
+  useEffect(() => {
+    if (!focusOrderId || loading) return;
+    const deal = deals.find(
+      (d) => d.orderId === focusOrderId || d.order?.id === focusOrderId || d.dealId === focusOrderId
+    );
+    if (!deal) return;
+    if (deal.order && hasViewableProposal(deal.order.deliveryProposal as DeliveryProposal)) {
+      setViewProposalDeal(deal);
+    }
+    requestAnimationFrame(() => {
+      const scrollId = deal.order?.id || focusOrderId;
+      document.getElementById(`creator-order-${scrollId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    });
+    onFocusConsumed?.();
+  }, [focusOrderId, loading, deals, onFocusConsumed]);
 
   const filtered = useMemo(
     () => deals.filter((d) => matchesCustomServiceFilter(d.stageKey, filter)),
@@ -259,8 +280,19 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
         const canCloseConsulting = isConsulting;
         const canViewProposal =
           !isConsulting && hasViewableProposal(proposal);
+        const isFocused =
+          focusOrderId &&
+          (deal.orderId === focusOrderId ||
+            deal.order?.id === focusOrderId ||
+            deal.dealId === focusOrderId);
         return (
-          <div key={deal.dealId} className="p-3.5 rounded-2xl border border-slate-200 bg-white space-y-3">
+          <div
+            key={deal.dealId}
+            id={deal.order?.id ? `creator-order-${deal.order.id}` : undefined}
+            className={`p-3.5 rounded-2xl border bg-white space-y-3 ${
+              isFocused ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'
+            }`}
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold text-slate-900">
@@ -424,7 +456,10 @@ export const CreatorCustomOrdersPanel: React.FC<{ sessionLeads?: CustomerLeadIte
 };
 
 /** 用户侧：已推送的专属智能体（进度见「我的定制」） */
-export const BuyerExclusiveAgentsPanel: React.FC = () => {
+export const BuyerExclusiveAgentsPanel: React.FC<{
+  focusInstanceId?: string;
+  onFocusConsumed?: () => void;
+}> = ({ focusInstanceId, onFocusConsumed }) => {
   const [items, setItems] = useState<
     Array<{
       id: string;
@@ -455,6 +490,17 @@ export const BuyerExclusiveAgentsPanel: React.FC = () => {
     })();
   }, []);
 
+  useEffect(() => {
+    if (!focusInstanceId || loading || items.length === 0) return;
+    requestAnimationFrame(() => {
+      document.getElementById(`workspace-instance-${focusInstanceId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    });
+    onFocusConsumed?.();
+  }, [focusInstanceId, loading, items.length, onFocusConsumed]);
+
   return (
     <div className="space-y-3">
       {loading && <p className="text-xs text-slate-500">加载中…</p>}
@@ -462,7 +508,15 @@ export const BuyerExclusiveAgentsPanel: React.FC = () => {
         <p className="text-xs text-slate-500">暂无已推送的专属智能体。</p>
       )}
       {items.map((item) => (
-        <div key={item.id} className="p-3 rounded-xl border border-blue-100 bg-blue-50/40 text-xs">
+        <div
+          key={item.id}
+          id={`workspace-instance-${item.id}`}
+          className={`p-3 rounded-xl border text-xs ${
+            focusInstanceId === item.id
+              ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100'
+              : 'border-blue-100 bg-blue-50/40'
+          }`}
+        >
           <div className="font-bold text-slate-900">{item.title}</div>
           <div className="text-slate-600 mt-0.5">
             {item.currentVersion} · 基于 {item.baseAgentTitle} {item.baseAgentVersion} · 仅您可用

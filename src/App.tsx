@@ -11,7 +11,8 @@ import { AgentTestDrawer } from './components/AgentTestDrawer';
 import { ConsultationModal } from './components/ConsultationModal';
 import { ConsultationMessagesDrawer, mockUserNotifications } from './components/ConsultationMessagesDrawer';
 import { RechargeModal } from './components/RechargeModal';
-import { CreatorCenterView, CreatorCenterTab } from './components/CreatorCenterView';
+import { CreatorCenterTab } from './components/CreatorCenterView';
+import { PersonalCenterView } from './components/PersonalCenterView';
 import { CreatorOnboardingModal } from './components/CreatorOnboardingModal';
 import { CreatorDebugPanelModal } from './components/CreatorDebugPanelModal';
 import { UserIdentityRole, CustomerLeadItem, ConsultationMessage } from './types/creator';
@@ -45,6 +46,10 @@ import {
   type PublicInspiration,
   getMockPublicInspiration
 } from './lib/inspiration';
+import {
+  type NavigationFocus,
+  type NotificationNavigationTarget
+} from './lib/notificationNavigation';
 
 export default function App() {
   const catalog = useCatalog();
@@ -55,6 +60,7 @@ export default function App() {
     MainNavRoute | 'author-profile' | 'agent-detail' | 'inspiration-detail'
   >('hellome-home');
   const [creatorCenterTab, setCreatorCenterTab] = useState<CreatorCenterTab>('my-agents');
+  const [navigationFocus, setNavigationFocus] = useState<NavigationFocus | null>(null);
   const [activeAuthorId, setActiveAuthorId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -274,6 +280,71 @@ export default function App() {
     leaveAgentDetailRoute();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  const handleNotificationNavigate = async (target: NotificationNavigationTarget) => {
+    setIsMessagesDrawerOpen(false);
+    leaveAgentDetailRoute();
+    leaveInspirationRoute();
+
+    switch (target.route) {
+      case 'orders':
+        setNavigationFocus({ orderId: target.orderId });
+        setCurrentRoute('orders');
+        break;
+      case 'order-center':
+        setNavigationFocus(null);
+        setCurrentRoute('order-center');
+        break;
+      case 'workspace':
+        setNavigationFocus({ instanceId: target.instanceId });
+        setCurrentRoute('workspace');
+        break;
+      case 'creator-center':
+        if (!isExpertRole(userRole)) {
+          showToast('请切换到 AI 专家身份后查看创作者中心');
+          return;
+        }
+        setCreatorCenterTab(target.tab);
+        setNavigationFocus({ orderId: target.orderId });
+        setCurrentRoute('creator-center');
+        break;
+      case 'inspiration':
+        try {
+          const data = await api<PublicInspiration>(
+            `/api/public/inspirations/${encodeURIComponent(target.showcaseId)}`
+          );
+          handleOpenInspiration(data);
+        } catch {
+          const local = getMockPublicInspiration(target.showcaseId);
+          if (local) handleOpenInspiration(local);
+          else showToast('成果不存在或已下线');
+        }
+        return;
+      case 'agent': {
+        const local = catalog.homeAgents.find((item) => item.id === target.agentId);
+        if (local) {
+          handleOpenAgentDetail(local, target.share);
+        } else {
+          try {
+            const qs = target.share ? `?share=${encodeURIComponent(target.share)}` : '';
+            const data = await api<Record<string, unknown>>(
+              `/api/public/agents/${encodeURIComponent(target.agentId)}${qs}`
+            );
+            handleOpenAgentDetail(toHellomeAgentItem(data), target.share);
+          } catch {
+            showToast('智能体不存在或不可访问');
+            return;
+          }
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const clearNavigationFocus = () => setNavigationFocus(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -683,8 +754,7 @@ export default function App() {
           )}
 
           {/* ROUTE: FDE 专属介绍页 (了解 FDE 是什么、收益与准入、转化成为创作者/申请 FDE) */}
-          {(currentRoute === 'fde-intro' ||
-            (currentRoute === 'creator-center' && !isExpertRole(userRole))) && (
+          {currentRoute === 'fde-intro' && (
             <FDEIntroView
               userRole={userRole}
               onBack={() => {
@@ -779,32 +849,13 @@ export default function App() {
             />
           )}
 
-          {/* ROUTE 3: Creator Center（仅 AI 专家；普通用户走入驻介绍页） */}
-          {currentRoute === 'creator-center' && isExpertRole(userRole) && (
+          {/* ROUTE 3: Personal Center（普通用户与 AI-FDE 专家共用） */}
+          {currentRoute === 'creator-center' && (
             <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-              <CreatorCenterView
-                key={creatorCenterTab}
-                initialTab={creatorCenterTab}
-                onOpenOnboardingModal={() => setIsCreatorOnboardingOpen(true)}
-                onOpenBecomeCreator={() => setIsCreatorOnboardingOpen(true)}
-                onNavigateToFDE={() => {
-                  handleOpenAuthorProfile('fde-linran');
-                }}
+              <PersonalCenterView
                 userRole={userRole}
-                sessionLeads={sessionConsultationLeads}
+                onOpenBecomeExpert={() => setIsCreatorOnboardingOpen(true)}
                 onOpenRecharge={() => setIsRechargeOpen(true)}
-                onBack={
-                  creatorCenterBackRoute
-                    ? () => {
-                        setCurrentRoute(creatorCenterBackRoute);
-                        setCreatorCenterBackRoute(null);
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                      }
-                    : undefined
-                }
-                backLabel={
-                  creatorCenterBackRoute === 'fde-experts' ? '返回 AI 专家库' : '返回'
-                }
               />
             </div>
           )}
@@ -812,7 +863,10 @@ export default function App() {
           {/* ROUTE: 买家「我的定制」（履约流程） */}
           {currentRoute === 'orders' && (
             <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-              <OrderCenterView />
+              <OrderCenterView
+                focusOrderId={navigationFocus?.orderId}
+                onFocusConsumed={clearNavigationFocus}
+              />
             </div>
           )}
 
@@ -827,6 +881,8 @@ export default function App() {
           {currentRoute === 'workspace' && (
             <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
               <WorkspaceView
+                focusInstanceId={navigationFocus?.instanceId}
+                onFocusConsumed={clearNavigationFocus}
                 onNavigateToHome={() => {
                   setCurrentRoute('hellome-home');
                   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -888,6 +944,7 @@ export default function App() {
           void refreshUnreadCount();
         }}
         leads={sessionConsultationLeads}
+        onNavigate={handleNotificationNavigate}
       />
       <CreatorOnboardingModal
         isOpen={isCreatorOnboardingOpen}

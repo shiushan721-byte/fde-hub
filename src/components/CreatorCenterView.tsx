@@ -132,6 +132,8 @@ interface CreatorCenterViewProps {
   onBack?: () => void;
   backLabel?: string;
   onOpenRecharge?: () => void;
+  focusOrderId?: string;
+  onFocusConsumed?: () => void;
 }
 
 export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
@@ -145,7 +147,9 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
   sessionLeads = [],
   onBack,
   backLabel = '返回',
-  onOpenRecharge
+  onOpenRecharge,
+  focusOrderId,
+  onFocusConsumed
 }) => {
   const [activeTab, setActiveTab] = useState<CreatorCenterTab>(() => {
     if (initialTab === 'realname-verify' || initialTab === 'customer-instances') return 'my-agents';
@@ -1095,7 +1099,11 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       {/* ========================================================= */}
       {activeTab === 'custom-services' && (
         <div className="space-y-6">
-          <CreatorCustomOrdersPanel sessionLeads={sessionLeads} />
+          <CreatorCustomOrdersPanel
+            sessionLeads={sessionLeads}
+            focusOrderId={focusOrderId}
+            onFocusConsumed={onFocusConsumed}
+          />
         </div>
       )}
 

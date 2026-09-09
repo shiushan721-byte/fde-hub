@@ -95,13 +95,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   ];
 
-  if (isExpert) {
-    menuItems.push({
-      key: 'creator-center',
-      label: '我的专家主页',
-      icon: Crown
-    });
-  }
+  menuItems.push({
+    key: 'creator-center',
+    label: '个人中心',
+    icon: Crown
+  });
 
   return (
     <aside

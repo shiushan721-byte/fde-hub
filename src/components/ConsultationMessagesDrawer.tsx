@@ -1,8 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Bell, Bot, CheckCircle2, Heart, MessageCircle, Sparkles, ShieldAlert } from 'lucide-react';
+import { X, Bell, Bot, CheckCircle2, ChevronRight, Heart, MessageCircle, Sparkles, ShieldAlert } from 'lucide-react';
 import { CustomerLeadItem } from '../types/creator';
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
+import {
+  defaultLeadNavigationTarget,
+  parseNotificationLink,
+  type NotificationNavigationTarget
+} from '../lib/notificationNavigation';
 
 export interface UserNotificationItem {
   id: string;
@@ -12,6 +17,10 @@ export interface UserNotificationItem {
   agentTitle?: string;
   unread?: boolean;
   kind: 'submitted' | 'creator_reply' | 'status' | 'ops_review' | 'like';
+  link?: string;
+  type?: string;
+  payload?: Record<string, unknown>;
+  navigationTarget?: NotificationNavigationTarget | null;
 }
 
 export const mockUserNotifications: UserNotificationItem[] = [
@@ -22,7 +31,8 @@ export const mockUserNotifications: UserNotificationItem[] = [
     body: 'Maya：专属 GEO 看板本周可出初版，先按你们的美妆品类词包跑一轮。',
     time: '12 分钟前',
     agentTitle: 'GEO 助手',
-    unread: true
+    unread: true,
+    navigationTarget: defaultLeadNavigationTarget()
   },
   {
     id: 'ntf_status_cs',
@@ -31,7 +41,8 @@ export const mockUserNotifications: UserNotificationItem[] = [
     body: '林然已开始评估聚水潭 ERP 与钉钉售后群对接，预计本周给出联调清单。',
     time: '1 小时前',
     agentTitle: '电商全渠道客服自愈智能体',
-    unread: true
+    unread: true,
+    navigationTarget: defaultLeadNavigationTarget()
   },
   {
     id: 'ntf_saved_qa',
@@ -40,7 +51,8 @@ export const mockUserNotifications: UserNotificationItem[] = [
     body: '「制造行业设备维修与故障诊断智能体」已提交。有进展时会在此提醒，无需留言跟进。',
     time: '昨天',
     agentTitle: '制造行业设备维修与故障诊断智能体',
-    unread: false
+    unread: false,
+    navigationTarget: defaultLeadNavigationTarget()
   }
 ];
 
@@ -48,6 +60,7 @@ interface ConsultationMessagesDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   leads: CustomerLeadItem[];
+  onNavigate?: (target: NotificationNavigationTarget) => void;
 }
 
 const kindIcon = (kind: UserNotificationItem['kind']) => {
@@ -81,7 +94,8 @@ function mapApiTypeToKind(type: string): UserNotificationItem['kind'] {
     type.includes('agent_review') ||
     type.includes('rejected') ||
     type.includes('approved') ||
-    type.includes('offline')
+    type.includes('offline') ||
+    type.includes('intervention')
   ) {
     return 'ops_review';
   }
@@ -93,7 +107,8 @@ function mapApiTypeToKind(type: string): UserNotificationItem['kind'] {
 export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProps> = ({
   isOpen,
   onClose,
-  leads
+  leads,
+  onNavigate
 }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [apiNotifications, setApiNotifications] = useState<UserNotificationItem[]>([]);
@@ -110,23 +125,35 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
             type: string;
             title: string;
             body: string;
+            link: string;
             read: boolean;
             createdAt: string;
-            payload?: { agentTitle?: string; reason?: string };
+            payload?: Record<string, unknown>;
           }>
         >('/api/me/notifications');
         if (cancelled) return;
         setApiNotifications(
-          items.map((n) => ({
-            id: n.id,
-            kind: mapApiTypeToKind(n.type),
-            title: n.title,
-            body: n.body,
-            time: formatRelativeTime(n.createdAt),
-            agentTitle:
-              typeof n.payload?.agentTitle === 'string' ? n.payload.agentTitle : undefined,
-            unread: !n.read
-          }))
+          items.map((n) => {
+            const payload = n.payload && typeof n.payload === 'object' ? n.payload : {};
+            const navigationTarget = parseNotificationLink(n.link || '', {
+              type: n.type,
+              payload
+            });
+            return {
+              id: n.id,
+              kind: mapApiTypeToKind(n.type),
+              title: n.title,
+              body: n.body,
+              time: formatRelativeTime(n.createdAt),
+              agentTitle:
+                typeof payload.agentTitle === 'string' ? payload.agentTitle : undefined,
+              unread: !n.read,
+              link: n.link,
+              type: n.type,
+              payload,
+              navigationTarget
+            };
+          })
         );
         const hasUnread = items.some((n) => !n.read);
         if (hasUnread) {
@@ -153,7 +180,8 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
             : '已向专家提交咨询需求。有进展时会在此提醒你。',
           time: lead.lastActivity,
           agentTitle: lead.agentTitle,
-          unread: true
+          unread: true,
+          navigationTarget: defaultLeadNavigationTarget()
         }
       ];
       (lead.messages || [])
@@ -166,7 +194,8 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
             body: msg.text,
             time: msg.time,
             agentTitle: lead.agentTitle,
-            unread: true
+            unread: true,
+            navigationTarget: defaultLeadNavigationTarget()
           });
         });
       return items;
@@ -175,6 +204,15 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
     const mocks = mockUserNotifications.filter((n) => !apiIds.has(n.id));
     return [...apiNotifications, ...fromLeads, ...mocks];
   }, [leads, apiNotifications]);
+
+  const handleItemClick = (item: UserNotificationItem) => {
+    if (item.navigationTarget && onNavigate) {
+      onNavigate(item.navigationTarget);
+      onClose();
+      return;
+    }
+    setExpandedId((prev) => (prev === item.id ? null : item.id));
+  };
 
   if (!isOpen) return null;
 
@@ -189,7 +227,7 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900">消息提醒</h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">含平台智能体审核、下架与驳回通知</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">点击消息可跳转到对应页面</p>
             </div>
           </div>
           <button
@@ -210,14 +248,15 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
           <div className="flex-1 overflow-y-auto">
             {notifications.map((item) => {
               const expanded = expandedId === item.id;
+              const clickable = Boolean(item.navigationTarget && onNavigate);
               return (
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setExpandedId(expanded ? null : item.id)}
+                  onClick={() => handleItemClick(item)}
                   className={`w-full text-left px-5 py-4 border-b border-slate-100 cursor-pointer transition-colors ${
                     item.unread ? 'bg-blue-50/40' : 'bg-white hover:bg-slate-50'
-                  }`}
+                  } ${clickable ? 'hover:bg-blue-50/70' : ''}`}
                 >
                   <div className="flex items-start gap-3">
                     <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0 mt-0.5">
@@ -236,15 +275,23 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
                       )}
                       <p
                         className={`text-[11px] text-slate-600 mt-1 leading-relaxed whitespace-pre-line ${
-                          expanded ? '' : 'line-clamp-2'
+                          expanded || clickable ? '' : 'line-clamp-2'
                         }`}
                       >
                         {item.body}
                       </p>
+                      {clickable && (
+                        <p className="text-[10px] text-blue-600 font-bold mt-1.5 flex items-center gap-0.5">
+                          查看详情
+                          <ChevronRight size={12} />
+                        </p>
+                      )}
                     </div>
-                    {item.unread && (
+                    {item.unread ? (
                       <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0 mt-1.5" />
-                    )}
+                    ) : clickable ? (
+                      <ChevronRight size={14} className="text-slate-300 shrink-0 mt-1" />
+                    ) : null}
                   </div>
                 </button>
               );

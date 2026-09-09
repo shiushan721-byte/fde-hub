@@ -13,6 +13,8 @@ interface WorkspaceViewProps {
   onRunExclusiveAgent?: (instance: CustomerAgentInstance) => void;
   favoriteAgentIds?: string[];
   likedAgentIds?: string[];
+  focusInstanceId?: string;
+  onFocusConsumed?: () => void;
 }
 
 const AgentShelfCard: React.FC<{
@@ -82,7 +84,9 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
   onOpenAgentDetail,
   onRunExclusiveAgent,
   favoriteAgentIds = [],
-  likedAgentIds = []
+  likedAgentIds = [],
+  focusInstanceId,
+  onFocusConsumed
 }) => {
   const recentAgents = mockHellomeHomeAgents.slice(0, 4);
   const favoritedAgents = mockHellomeHomeAgents.filter((agent) =>
@@ -106,7 +110,10 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             运营审核通过并推送后才会出现在此；进度请前往侧边栏「我的定制」
           </p>
         </div>
-        <BuyerExclusiveAgentsPanel />
+        <BuyerExclusiveAgentsPanel
+          focusInstanceId={focusInstanceId}
+          onFocusConsumed={onFocusConsumed}
+        />
         <MyExclusiveAgentsSection
           instances={mockUserExclusiveAgents}
           onRunInstance={onRunExclusiveAgent}
