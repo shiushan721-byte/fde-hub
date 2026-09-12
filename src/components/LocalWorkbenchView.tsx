@@ -13,11 +13,11 @@ import {
 import type { HellomeAgentItem } from '../data/mockData';
 import { mockExperts } from '../data/mockData';
 import { activeCustomProjects } from '../../shared/customProjects';
-import { pricingFromAgent, pricingLabel } from '../../shared/pricingPlans';
 import { useCatalog } from '../lib/catalog';
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
 import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
+import { CreatorContactModal } from './CreatorContactModal';
 
 export type WorkbenchTab = HellomeAgentItem;
 
@@ -305,6 +305,7 @@ const WorkbenchAgentInfoCard: React.FC<{
     title: string;
   } | null>(null);
   const [payBusy, setPayBusy] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
   const expert =
     catalog.experts.find((item) => item.id === agent.authorId) ||
     mockExperts.find((item) => item.id === agent.authorId) ||
@@ -312,8 +313,6 @@ const WorkbenchAgentInfoCard: React.FC<{
     mockExperts[0];
   const projects = agent.canFDECustom === false ? [] : activeCustomProjects(agent.customProjects || []);
   const canCustomize = agent.canFDECustom !== false && Boolean(onCustomize);
-  const pricing = pricingFromAgent(agent);
-  const priceText = pricingLabel(pricing);
 
   const startCustomProjectCheckout = async (projectId: string, title: string, priceYuan: number) => {
     setPayBusy(true);
@@ -372,11 +371,7 @@ const WorkbenchAgentInfoCard: React.FC<{
           <p className="text-[11px] text-slate-400">{agent.category}</p>
           <div className="flex items-start justify-between gap-2 mt-0.5">
             <h3 className="text-[13px] font-extrabold text-slate-900 leading-snug">{agent.title}</h3>
-            <span
-              className={`shrink-0 text-[13px] font-bold ${pricing.isFree ? 'text-emerald-600' : 'text-slate-900'}`}
-            >
-              {priceText}
-            </span>
+            <span className="shrink-0 text-[13px] font-bold text-emerald-600">已安装</span>
           </div>
           <p className="mt-1.5 text-[12px] text-slate-500 leading-5">{agent.desc}</p>
         </div>
@@ -411,13 +406,22 @@ const WorkbenchAgentInfoCard: React.FC<{
                   </span>
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={() => onOpenAuthor?.(agent.authorId || expert.id)}
-                className="shrink-0 h-6 px-1.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 rounded-md cursor-pointer"
-              >
-                查看主页
-              </button>
+              <div className="shrink-0 flex flex-col items-end gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => onOpenAuthor?.(agent.authorId || expert.id)}
+                  className="h-6 px-1.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 rounded-md cursor-pointer"
+                >
+                  查看主页
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setContactOpen(true)}
+                  className="h-6 px-1.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 rounded-md cursor-pointer"
+                >
+                  联系方式
+                </button>
+              </div>
             </div>
 
             <p className="text-[11px] text-slate-500">以下服务由 {expertName} 提供</p>
@@ -475,6 +479,9 @@ const WorkbenchAgentInfoCard: React.FC<{
           </button>
         )}
       </div>
+      {contactOpen && (
+        <CreatorContactModal expert={expert} onClose={() => setContactOpen(false)} />
+      )}
       {checkout && (
         <PaymentCheckoutDrawer
           orderId={checkout.id}

@@ -23,6 +23,7 @@ import { AgentShareModal } from './AgentShareModal';
 import { adapterDisplayName, adapterPackageIsFree, adapterPackagePriceYuan, adapterZipAbsoluteUrl, buildAdapterSkillPrompt } from '../../shared/adapterPackages';
 import { pricingFromAgent, pricingLabel } from '../../shared/pricingPlans';
 import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
+import { CreatorContactModal } from './CreatorContactModal';
 import { AgentShowcaseSection } from './AgentShowcaseSection';
 import { CommentThread, type ThreadComment } from './CommentThread';
 import { showcaseToPublicInspiration, type PublicInspiration } from '../lib/inspiration';
@@ -106,6 +107,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const [adapterEntitlements, setAdapterEntitlements] = useState<AdapterEntitlement[]>([]);
   const [checkout, setCheckout] = useState<CheckoutOrder | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
   const catalog = useCatalog();
 
   const authorExpert =
@@ -501,6 +503,13 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                     <span>粉丝 {Math.max(12, Math.round((authorExpert.ordersCount || 1) * 3))}</span>
                   </div>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setContactOpen(true)}
+                  className="mt-1.5 text-[12px] font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
+                >
+                  联系方式
+                </button>
               </div>
               <button
                 type="button"
@@ -783,6 +792,9 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
         </div>
       </div>
 
+      {contactOpen && (
+        <CreatorContactModal expert={authorExpert} onClose={() => setContactOpen(false)} />
+      )}
       {checkout && (
         <PaymentCheckoutDrawer
           orderId={checkout.id}

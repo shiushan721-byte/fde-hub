@@ -1,55 +1,74 @@
 import { prisma } from '../lib/prisma';
 import { toJson, parseJson } from '../lib/json';
 import { normalizeCustomProjects } from '../../shared/customProjects';
+import { mockHellomeHomeAgents, type HellomeAgentItem } from '../../src/data/mockData';
 
-const SAMPLE_CUSTOM_PROJECTS: Record<string, unknown[]> = {
-  'ecommerce-ai-cs': [
-    {
-      id: 'cprj_ecom_flow',
-      title: '流程修改、界面调整',
-      description: '按店铺售后路径改工单分流、回复话术和客服工作台。',
-      price: 200,
-      active: true,
-      sortOrder: 0
-    },
-    {
-      id: 'cprj_ecom_feishu',
-      title: '同步到飞书文档',
-      description: '售后记录与质检结果同步到飞书文档/多维表格。',
-      price: 100,
-      active: true,
-      sortOrder: 1
-    }
-  ],
-  'hz-canvas': [
-    {
-      id: 'cprj_hz_flow',
-      title: '流程修改、界面调整',
-      description: '按你的业务路径改提示词、SOP 和关键界面。',
-      price: 200,
-      active: true,
-      sortOrder: 0
-    },
-    {
-      id: 'cprj_hz_feishu',
-      title: '同步到飞书文档',
-      description: '把画布产出同步到指定飞书知识库/文档。',
-      price: 100,
-      active: true,
-      sortOrder: 1
-    }
-  ]
-};
+function catalogPricingPlans(agent: HellomeAgentItem) {
+  if (agent.pricingPlans) return agent.pricingPlans;
+  if (typeof agent.price === 'number' && agent.price > 0) return { price: agent.price };
+  return { isFree: true };
+}
 
+function catalogAgentData(agent: HellomeAgentItem, index: number) {
+  return {
+    id: agent.id,
+    kind: 'catalog' as const,
+    title: agent.title,
+    desc: agent.desc,
+    category: agent.category,
+    coverImage: agent.coverImage,
+    gradient: agent.gradient,
+    tagColor: agent.tagColor,
+    badge: agent.badge || null,
+    canFDECustom: agent.canFDECustom ?? true,
+    authorId: agent.authorId,
+    authorName: agent.authorName,
+    price: agent.price ?? null,
+    pricingPlans: toJson(catalogPricingPlans(agent)),
+    likesCount: String(agent.likesCount),
+    favoritesCount: String(agent.favoritesCount),
+    commentsCount: String(agent.commentsCount),
+    sharesCount: String(agent.sharesCount ?? '0'),
+    usageCount: agent.usageCount,
+    rating: agent.rating,
+    status: 'published',
+    showOnHome: true,
+    featured: index < 3,
+    sortOrder: index + 1,
+    customProjects: toJson(normalizeCustomProjects(agent.customProjects || [])),
+    adapterPackages: toJson(agent.adapterPackages || [])
+  };
+}
+
+/** 把首页演示目录的标价和标准定制项同步进已有库（缺的智能体会补建） */
 export async function ensureSampleCustomProjects() {
-  for (const [agentId, projects] of Object.entries(SAMPLE_CUSTOM_PROJECTS)) {
-    const agent = await prisma.agent.findUnique({ where: { id: agentId } });
-    if (!agent) continue;
-    const existing = normalizeCustomProjects(parseJson(agent.customProjects, []));
-    if (existing.length) continue;
+  for (const [index, agent] of mockHellomeHomeAgents.entries()) {
+    const row = await prisma.agent.findUnique({ where: { id: agent.id } });
+    const mockProjects = normalizeCustomProjects(agent.customProjects || []);
+
+    if (!row) {
+      await prisma.agent.create({ data: catalogAgentData(agent, index) });
+      continue;
+    }
+
+    if (row.creatorDeletedAt) continue;
+
+    const existing = normalizeCustomProjects(parseJson(row.customProjects, []));
+    const byId = new Map(existing.map((item) => [item.id, item]));
+    for (const item of mockProjects) {
+      byId.set(item.id, item);
+    }
+
     await prisma.agent.update({
-      where: { id: agentId },
-      data: { customProjects: toJson(projects), canFDECustom: true }
+      where: { id: agent.id },
+      data: {
+        canFDECustom: agent.canFDECustom ?? row.canFDECustom,
+        price: agent.price ?? null,
+        pricingPlans: toJson(catalogPricingPlans(agent)),
+        customProjects: toJson([...byId.values()]),
+        showOnHome: true,
+        sortOrder: index + 1
+      }
     });
   }
 }

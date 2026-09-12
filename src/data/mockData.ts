@@ -34,6 +34,31 @@ export interface HellomeAgentItem {
   customProjects?: AgentCustomProject[];
 }
 
+function listedCustomProjects(
+  flowId: string,
+  flowDescription: string,
+  extra: { id: string; title: string; description: string; price: number }
+): AgentCustomProject[] {
+  return [
+    {
+      id: flowId,
+      title: '流程修改、界面调整',
+      description: flowDescription,
+      price: 200,
+      active: true,
+      sortOrder: 0
+    },
+    {
+      id: extra.id,
+      title: extra.title,
+      description: extra.description,
+      price: extra.price,
+      active: true,
+      sortOrder: 1
+    }
+  ];
+}
+
 export const mockHellomeHomeAgents: HellomeAgentItem[] = [
   {
     id: 'hz-canvas',
@@ -87,24 +112,16 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
         price: 0
       }
     ],
-    customProjects: [
-      {
-        id: 'cprj_hz_flow',
-        title: '流程修改、界面调整',
-        description: '按你的业务路径改提示词、SOP 和关键界面。',
-        price: 200,
-        active: true,
-        sortOrder: 0
-      },
+    customProjects: listedCustomProjects(
+      'cprj_hz_flow',
+      '按你的业务路径改提示词、SOP 和关键界面。',
       {
         id: 'cprj_hz_feishu',
         title: '同步到飞书文档',
         description: '把画布产出同步到指定飞书知识库/文档。',
-        price: 100,
-        active: true,
-        sortOrder: 1
+        price: 100
       }
-    ],
+    ),
     rating: 4.9
   },
   {
@@ -130,7 +147,17 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     sharesCount: '2.4k',
     usageCount: '34.2k',
     showcaseCount: 14,
-    rating: 5.0
+    rating: 5.0,
+    customProjects: listedCustomProjects(
+      'cprj_geo_flow',
+      '按你的品牌关键词和投放路径改监测看板、选题流和文章模板。',
+      {
+        id: 'cprj_geo_feishu',
+        title: '同步到飞书文档',
+        description: '把可见度报告和 GEO 文章同步到指定飞书知识库。',
+        price: 120
+      }
+    )
   },
   {
     id: 'doc-emergency',
@@ -145,13 +172,27 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     canFDECustom: true,
     authorName: '林然 (认证FDE)',
     authorId: 'fde-linran',
+    price: 19,
+    pricingPlans: {
+      price: 19
+    },
     likesCount: '8.9k',
     favoritesCount: '6.4k',
     commentsCount: 892,
     sharesCount: '3.2k',
     usageCount: '58.6k',
     showcaseCount: 26,
-    rating: 4.8
+    rating: 4.8,
+    customProjects: listedCustomProjects(
+      'cprj_doc_flow',
+      '按机关/企业发文规范改模板、审批口径和套红格式。',
+      {
+        id: 'cprj_doc_template',
+        title: '专属文种模板包',
+        description: '补齐请示、纪要、通报等你们常用文种，并接入现有公文库。',
+        price: 160
+      }
+    )
   },
   {
     id: 'global-news-radar',
@@ -166,13 +207,27 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     canFDECustom: true,
     authorName: '云帆',
     authorId: 'fde-yunfan',
+    price: 45,
+    pricingPlans: {
+      price: 45
+    },
     likesCount: '3.7k',
     favoritesCount: '2.9k',
     commentsCount: 412,
     sharesCount: '980',
     usageCount: '21.5k',
     showcaseCount: 11,
-    rating: 4.9
+    rating: 4.9,
+    customProjects: listedCustomProjects(
+      'cprj_news_flow',
+      '按你们关注的行业、地区和竞品改信源权重与推送节奏。',
+      {
+        id: 'cprj_news_source',
+        title: '行业信源接入',
+        description: '接入协会、监管和内部情报源，输出可订阅的简报模板。',
+        price: 180
+      }
+    )
   },
   {
     id: 'job-seek-assistant',
@@ -187,13 +242,27 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     canFDECustom: true,
     authorName: '张博 (智能体架构师)',
     authorId: 'fde-linran',
+    price: 25,
+    pricingPlans: {
+      price: 25
+    },
     likesCount: '6.3k',
     favoritesCount: '4.8k',
     commentsCount: 730,
     sharesCount: '1.6k',
     usageCount: '43.1k',
     showcaseCount: 19,
-    rating: 4.9
+    rating: 4.9,
+    customProjects: listedCustomProjects(
+      'cprj_job_flow',
+      '按目标岗位和投递流程改简历诊断、JD 匹配和面试题库。',
+      {
+        id: 'cprj_job_company',
+        title: '企业岗位库对接',
+        description: '接入你们的内推/校招岗位表，生成可跟踪的投递看板。',
+        price: 150
+      }
+    )
   },
   {
     id: 'pdf-tools',
@@ -208,6 +277,7 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     canFDECustom: false,
     authorName: 'Hellome官方',
     authorId: 'fde-linran',
+    pricingPlans: { isFree: true },
     likesCount: '11.5k',
     favoritesCount: '9.8k',
     commentsCount: '1.2k',
@@ -229,6 +299,7 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     canFDECustom: false,
     authorName: 'Hellome官方',
     authorId: 'fde-linran',
+    pricingPlans: { isFree: true },
     likesCount: '14.2k',
     favoritesCount: '12.1k',
     commentsCount: '1.5k',
@@ -250,6 +321,10 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     canFDECustom: true,
     authorName: '林然 (认证FDE)',
     authorId: 'fde-linran',
+    price: 59,
+    pricingPlans: {
+      price: 59
+    },
     likesCount: '1.8k',
     favoritesCount: '1.2k',
     commentsCount: 198,
@@ -257,24 +332,16 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     usageCount: '6.4k',
     showcaseCount: 8,
     rating: 4.9,
-    customProjects: [
-      {
-        id: 'cprj_ecom_flow',
-        title: '流程修改、界面调整',
-        description: '按店铺售后路径改工单分流、回复话术和客服工作台。',
-        price: 200,
-        active: true,
-        sortOrder: 0
-      },
+    customProjects: listedCustomProjects(
+      'cprj_ecom_flow',
+      '按店铺售后路径改工单分流、回复话术和客服工作台。',
       {
         id: 'cprj_ecom_feishu',
         title: '同步到飞书文档',
         description: '售后记录与质检结果同步到飞书文档/多维表格。',
-        price: 100,
-        active: true,
-        sortOrder: 1
+        price: 100
       }
-    ]
+    )
   },
   {
     id: 'industry-offline-rag',
@@ -289,13 +356,132 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     canFDECustom: true,
     authorName: '云帆',
     authorId: 'fde-yunfan',
+    price: 88,
+    pricingPlans: {
+      price: 88
+    },
     likesCount: '980',
     favoritesCount: '760',
     commentsCount: 114,
     sharesCount: '186',
     usageCount: '2.1k',
     showcaseCount: 5,
-    rating: 5.0
+    rating: 5.0,
+    customProjects: listedCustomProjects(
+      'cprj_rag_flow',
+      '按机型和工单路径改离线手册索引、故障码映射和排障步骤。',
+      {
+        id: 'cprj_rag_manual',
+        title: '设备手册入库',
+        description: '把厂内图纸、PLC 手册和历史工单导入离线知识库并校验召回。',
+        price: 280
+      }
+    )
+  },
+  {
+    id: 'meeting-minutes',
+    title: '会议纪要助手',
+    desc: '把录音和会议记录整理成可执行纪要：决议、待办、责任人和截止时间一次对齐。',
+    category: '办公协同',
+    coverImage: 'https://images.unsplash.com/photo-1552664730-d307ca884978?w=600&auto=format&fit=crop&q=80',
+    gradient: 'from-emerald-600 via-teal-600 to-slate-800',
+    tagColor: 'emerald',
+    badge: '团队协作',
+    platformSupport: 'both',
+    canFDECustom: true,
+    authorName: '周晨',
+    authorId: 'fde-zhouchen',
+    price: 32,
+    pricingPlans: {
+      price: 32
+    },
+    likesCount: '4.2k',
+    favoritesCount: '3.1k',
+    commentsCount: 356,
+    sharesCount: '890',
+    usageCount: '18.6k',
+    showcaseCount: 12,
+    rating: 4.8,
+    customProjects: listedCustomProjects(
+      'cprj_meet_flow',
+      '按你们的例会节奏改纪要模板、待办字段和会后跟进提醒。',
+      {
+        id: 'cprj_meet_feishu',
+        title: '同步到飞书文档',
+        description: '纪要和待办自动写入指定飞书文档/多维表格。',
+        price: 100
+      }
+    )
+  },
+  {
+    id: 'contract-review',
+    title: '合同审查助手',
+    desc: '对照内部条款库审查合同风险点，标出缺失条款、不对等义务和需法务确认的表述。',
+    category: '办公协同',
+    coverImage: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=600&auto=format&fit=crop&q=80',
+    gradient: 'from-stone-700 via-amber-800 to-slate-900',
+    tagColor: 'amber',
+    badge: '合规必备',
+    platformSupport: 'windows',
+    canFDECustom: true,
+    authorName: '张恒',
+    authorId: 'fde-zhangheng',
+    price: 69,
+    pricingPlans: {
+      price: 69
+    },
+    likesCount: '2.7k',
+    favoritesCount: '2.1k',
+    commentsCount: 241,
+    sharesCount: '510',
+    usageCount: '9.4k',
+    showcaseCount: 7,
+    rating: 4.9,
+    customProjects: listedCustomProjects(
+      'cprj_ct_flow',
+      '按你们的合同类型和审批节点改风险标签、红线条款和审查报告。',
+      {
+        id: 'cprj_ct_clause',
+        title: '条款库定制',
+        description: '导入内部范本与禁限条款，输出可归档的审查意见书。',
+        price: 260
+      }
+    )
+  },
+  {
+    id: 'short-video-studio',
+    title: '短视频脚本工坊',
+    desc: '按平台和品类生成选题、分镜脚本和口播稿，并把爆款结构沉淀成可复用的内容 SOP。',
+    category: '内容营销',
+    coverImage: 'https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?w=600&auto=format&fit=crop&q=80',
+    gradient: 'from-fuchsia-600 via-rose-500 to-orange-400',
+    tagColor: 'rose',
+    badge: '内容增长',
+    platformSupport: 'mac',
+    canFDECustom: true,
+    authorName: '陈子墨',
+    authorId: 'fde-chenzimo',
+    price: 35,
+    pricingPlans: {
+      price: 35
+    },
+    likesCount: '7.6k',
+    favoritesCount: '5.4k',
+    commentsCount: 618,
+    sharesCount: '2.1k',
+    usageCount: '27.9k',
+    showcaseCount: 16,
+    rating: 4.8,
+    customProjects: listedCustomProjects(
+      'cprj_sv_flow',
+      '按品牌口吻和投放平台改选题矩阵、脚本结构和发布节奏。',
+      {
+        id: 'cprj_sv_brand',
+        title: '品牌内容 SOP',
+        description: '沉淀品类话术、禁用词和分镜模板，并同步到内容排期表。',
+        price: 180
+      }
+    )
   }
 ];
 
@@ -339,7 +525,8 @@ export const mockExperts: FDEExpert[] = [
     socialLinks: {
       github: 'linran-ai',
       email: 'linran.ai@fdehub.com',
-      wechat: 'linran_ecommerce_ai'
+      wechat: 'linran_ecommerce_ai',
+      phone: '13100010001'
     }
   },
   {
@@ -413,7 +600,11 @@ export const mockExperts: FDEExpert[] = [
     },
     experienceYears: 5,
     featured: true,
-    featuredQuote: '“AI 不仅是提效工具，更是让 1 个人拥有 100 人创意内容中台的杠杆。”'
+    featuredQuote: '“AI 不仅是提效工具，更是让 1 个人拥有 100 人创意内容中台的杠杆。”',
+    socialLinks: {
+      wechat: 'hz_studio_maya',
+      phone: '13100010002'
+    }
   },
   {
     id: 'fde-zhangheng',

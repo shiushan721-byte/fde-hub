@@ -11,19 +11,13 @@ import { ensureExpertTags } from '../services/expertTags';
 import { ensureExpertTitles } from '../services/expertTitles';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
-import { toJson } from '../lib/json';
+import { toJson, parseJson } from '../lib/json';
 import { EXPERT_VERIFY_META } from '../lib/mappers';
 import { formatExpertNo, ensureExpertNos } from '../lib/expertNo';
 import { defaultHomeBanners, defaultHomeCategories } from '../../shared/homeDefaults';
 import { INSPIRATION_MOCK_SHOWCASES } from '../../shared/inspirationMock';
-import {
-  mockHellomeHomeAgents,
-  mockExperts,
-  mockAgentSolutions,
-  mockServicePackages,
-  mockCaseStudies,
-  mockClientReviews
-} from '../../src/data/mockData';
+import { mockHellomeHomeAgents, mockExperts, mockAgentSolutions, mockServicePackages, mockCaseStudies, mockClientReviews } from '../../src/data/mockData';
+import { DEMO_CREATOR_PHONES } from '../../shared/creatorContact';
 
 dotenv.config();
 
@@ -46,6 +40,7 @@ export async function seedDatabase(force = false) {
     await ensureSampleAdapterPackages();
     await ensureAdapterPackagePricing();
     await ensureSampleCustomProjects();
+    await ensureExpertPublicContact();
     await ensureAgentShowcases();
     await ensureShowcaseComments();
     await ensureSampleCommentReports();
@@ -187,7 +182,9 @@ export async function seedDatabase(force = false) {
       showOnHome: true,
       featured: index < 3,
       sortOrder: index + 1,
-      solutionPayload: ''
+      solutionPayload: '',
+      customProjects: toJson(agent.customProjects ?? []),
+      adapterPackages: toJson(agent.adapterPackages ?? [])
     }))
   });
 
@@ -351,6 +348,7 @@ export async function seedDatabase(force = false) {
   await ensureSampleAdapterPackages();
   await ensureAdapterPackagePricing();
   await ensureSampleCustomProjects();
+  await ensureExpertPublicContact();
   await ensureAgentShowcases();
   await ensureShowcaseComments();
   await ensureSampleCommentReports();
@@ -358,6 +356,20 @@ export async function seedDatabase(force = false) {
 
   const count = await prisma.agent.count();
   return { seeded: true, agents: count };
+}
+
+async function ensureExpertPublicContact() {
+  const experts = await prisma.expert.findMany({ select: { id: true, socialLinks: true } });
+  for (const expert of experts) {
+    const phone = DEMO_CREATOR_PHONES[expert.id];
+    if (!phone) continue;
+    const links = parseJson<Record<string, unknown>>(expert.socialLinks, {});
+    if (String(links.phone || '') === phone) continue;
+    await prisma.expert.update({
+      where: { id: expert.id },
+      data: { socialLinks: toJson({ ...links, phone }) }
+    });
+  }
 }
 
 async function ensureDemoUserRealName() {
@@ -628,6 +640,7 @@ export async function ensureExpertApplicationSeed() {
     await ensureSampleAdapterPackages();
     await ensureAdapterPackagePricing();
     await ensureSampleCustomProjects();
+    await ensureExpertPublicContact();
     await ensureAgentShowcases();
     await ensureShowcaseComments();
     await ensureSampleCommentReports();

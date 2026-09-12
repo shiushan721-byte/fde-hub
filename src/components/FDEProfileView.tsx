@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { FDEExpert, AgentSolution, CaseStudy, getCaseStudyImages } from '../types';
 import { FDEBadge } from './FDEBadge';
+import { CreatorContactModal } from './CreatorContactModal';
 
 interface FDEProfileViewProps {
   expert: FDEExpert;
@@ -38,6 +39,7 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
   onToggleFavoriteAgent
 }) => {
   const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
+  const [contactOpen, setContactOpen] = useState(false);
 
   // Filter items authored by or assigned to this expert
   const expertSolutions = agentSolutions.filter((a) => a.authorId === expert.id);
@@ -141,6 +143,13 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
                 <span className="text-xs text-slate-500 block">智能体服务模式</span>
                 <span className="text-sm font-bold text-slate-900">支持在线体验 · 咨询与定制合作</span>
               </div>
+              <button
+                type="button"
+                onClick={() => setContactOpen(true)}
+                className="w-full sm:w-auto px-6 py-2.5 bg-white hover:bg-slate-50 text-slate-800 rounded-xl text-xs font-bold border border-slate-200 shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                联系方式
+              </button>
               <button
                 onClick={() => onConsult(expert)}
                 className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
@@ -341,6 +350,7 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
         )}
       </div>
 
+      {contactOpen && <CreatorContactModal expert={expert} onClose={() => setContactOpen(false)} />}
       {previewImage && (
         <div
           className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-6"

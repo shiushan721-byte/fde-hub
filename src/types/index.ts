@@ -58,6 +58,7 @@ export interface FDEExpert {
     github?: string;
     wechat?: string;
     email?: string;
+    phone?: string;
   };
   isFavorite?: boolean;
 }
