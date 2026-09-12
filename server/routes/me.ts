@@ -45,6 +45,13 @@ import { normalizeAdapterPackages, validateAdapterPackagePricing } from '../../s
 import { normalizePricingPlans, validatePaidPlans } from '../../shared/pricingPlans';
 import { normalizeCustomProjects } from '../../shared/customProjects';
 import { resolveAdapterDownload, sendAdapterFile } from '../services/adapterDownload';
+import {
+  listMyEngagement,
+  toggleAgentFavorite,
+  toggleAgentLike,
+  toggleExpertFollow
+} from '../services/engagement';
+import { notifyExpertApplication, notifyUser } from '../services/notifications';
 
 export const meRouter = Router();
 meRouter.use(requireAuth);
@@ -177,6 +184,26 @@ meRouter.post('/real-name-verification', async (req, res) => {
     }
   });
 
+  if (updated.status === 'verified') {
+    await notifyUser({
+      userId: req.user!.id,
+      type: 'realname_verified',
+      title: '实名认证已通过',
+      body: '你已完成实名核验，可以继续申请成为 AI 专家。',
+      link: '/creator-center?tab=account',
+      payload: { verificationId: updated.id }
+    });
+  } else if (updated.status === 'failed' || updated.status === 'rejected') {
+    await notifyUser({
+      userId: req.user!.id,
+      type: 'realname_rejected',
+      title: '实名认证未通过',
+      body: updated.failReason || '请核对姓名与证件信息后重新提交。',
+      link: '/creator-center?tab=account',
+      payload: { verificationId: updated.id, reason: updated.failReason }
+    });
+  }
+
   return ok(res, {
     id: updated.id,
     status: updated.status,
@@ -226,7 +253,7 @@ meRouter.get('/expert-applications/:id', async (req, res) => {
 });
 
 const createAppSchema = z.object({
-  type: z.enum(['onboarding']).default('onboarding'),
+  type: z.enum(['onboarding', 'upgrade']).default('onboarding'),
   applicantName: z.string().min(1),
   nickname: z.string().max(15).optional(),
   avatarUrl: z.string().optional().default(''),
@@ -261,7 +288,11 @@ meRouter.post('/expert-applications', async (req, res) => {
 
   const cert = await getUserCertification(userId);
   if (cert?.status === 'frozen') return fail(res, '认证已冻结，无法提交申请');
-  if (cert?.status === 'active') return fail(res, '您已是 AI 专家，无需重复申请');
+  if (parsed.data.type === 'upgrade') {
+    if (cert?.status !== 'active') return fail(res, '仅已入驻专家可提交晋升申请');
+  } else if (cert?.status === 'active') {
+    return fail(res, '您已是 AI 专家，无需重复申请');
+  }
 
   const data = parsed.data;
 
@@ -305,7 +336,7 @@ meRouter.post('/expert-applications', async (req, res) => {
     data: {
       id: newId('expapp'),
       userId,
-      type: 'onboarding',
+      type: data.type,
       status: 'pending',
       submittedProfileSnapshot: toJson(snapshot),
       realNameVerificationId: realName.id,
@@ -320,7 +351,14 @@ meRouter.post('/expert-applications', async (req, res) => {
     eventType: 'application_submitted',
     actorId: userId,
     toStatus: 'pending',
-    payload: { type: 'onboarding' }
+    payload: { type: data.type }
+  });
+
+  await notifyExpertApplication({
+    userId,
+    applicationId: application.id,
+    applicationType: data.type,
+    event: 'submitted'
   });
 
   return ok(res, publicApplication(application), 201);
@@ -397,7 +435,7 @@ meRouter.get('/notifications', async (req, res) => {
   const items = await prisma.userNotification.findMany({
     where: { userId: req.user!.id },
     orderBy: { createdAt: 'desc' },
-    take: 50
+    take: 200
   });
   return ok(
     res,
@@ -412,6 +450,53 @@ meRouter.get('/notifications', async (req, res) => {
       createdAt: n.createdAt
     }))
   );
+});
+
+meRouter.get('/engagement', async (req, res) => {
+  const data = await listMyEngagement(req.user!.id);
+  return ok(res, data);
+});
+
+meRouter.post('/agents/:id/like', async (req, res) => {
+  try {
+    const result = await toggleAgentLike({
+      agentId: req.params.id,
+      userId: req.user!.id,
+      userName: req.user!.name
+    });
+    return ok(res, result);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status || 400;
+    return fail(res, error instanceof Error ? error.message : '点赞失败', status);
+  }
+});
+
+meRouter.post('/agents/:id/favorite', async (req, res) => {
+  try {
+    const result = await toggleAgentFavorite({
+      agentId: req.params.id,
+      userId: req.user!.id,
+      userName: req.user!.name
+    });
+    return ok(res, result);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status || 400;
+    return fail(res, error instanceof Error ? error.message : '收藏失败', status);
+  }
+});
+
+meRouter.post('/experts/:id/follow', async (req, res) => {
+  try {
+    const result = await toggleExpertFollow({
+      expertId: req.params.id,
+      userId: req.user!.id,
+      userName: req.user!.name
+    });
+    return ok(res, result);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status || 400;
+    return fail(res, error instanceof Error ? error.message : '关注失败', status);
+  }
 });
 
 const upsertAgentSchema = z.object({

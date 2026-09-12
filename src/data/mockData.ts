@@ -26,6 +26,8 @@ export interface HellomeAgentItem {
   sharesCount?: string | number;
   usageCount?: string;
   rating?: number;
+  /** 成果/作品条数 */
+  showcaseCount?: number;
   /** 外部工具适配分发包，平台名由创作者自定义 */
   adapterPackages?: AgentAdapterPackage[];
   /** FDE 标准定制项目 */
@@ -53,7 +55,9 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     likesCount: '2.4k',
     favoritesCount: '1.8k',
     commentsCount: 326,
+    sharesCount: '1.1k',
     usageCount: '12.8k',
+    showcaseCount: 18,
     adapterPackages: [
       {
         id: 'adp_hz_workbuddy',
@@ -123,7 +127,9 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     likesCount: '5.1k',
     favoritesCount: '3.6k',
     commentsCount: 580,
+    sharesCount: '2.4k',
     usageCount: '34.2k',
+    showcaseCount: 14,
     rating: 5.0
   },
   {
@@ -142,7 +148,9 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     likesCount: '8.9k',
     favoritesCount: '6.4k',
     commentsCount: 892,
+    sharesCount: '3.2k',
     usageCount: '58.6k',
+    showcaseCount: 26,
     rating: 4.8
   },
   {
@@ -161,7 +169,9 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     likesCount: '3.7k',
     favoritesCount: '2.9k',
     commentsCount: 412,
+    sharesCount: '980',
     usageCount: '21.5k',
+    showcaseCount: 11,
     rating: 4.9
   },
   {
@@ -180,7 +190,9 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     likesCount: '6.3k',
     favoritesCount: '4.8k',
     commentsCount: 730,
+    sharesCount: '1.6k',
     usageCount: '43.1k',
+    showcaseCount: 19,
     rating: 4.9
   },
   {
@@ -199,7 +211,9 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     likesCount: '11.5k',
     favoritesCount: '9.8k',
     commentsCount: '1.2k',
+    sharesCount: '4.6k',
     usageCount: '89.4k',
+    showcaseCount: 31,
     rating: 4.8
   },
   {
@@ -218,7 +232,9 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     likesCount: '14.2k',
     favoritesCount: '12.1k',
     commentsCount: '1.5k',
+    sharesCount: '5.8k',
     usageCount: '102.3k',
+    showcaseCount: 22,
     rating: 4.9
   },
   {
@@ -237,7 +253,9 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     likesCount: '1.8k',
     favoritesCount: '1.2k',
     commentsCount: 198,
+    sharesCount: '420',
     usageCount: '6.4k',
+    showcaseCount: 8,
     rating: 4.9,
     customProjects: [
       {
@@ -274,7 +292,9 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     likesCount: '980',
     favoritesCount: '760',
     commentsCount: 114,
+    sharesCount: '186',
     usageCount: '2.1k',
+    showcaseCount: 5,
     rating: 5.0
   }
 ];

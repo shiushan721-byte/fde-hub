@@ -107,6 +107,7 @@ export async function createCustomOrder(input: {
   deliveryDays?: number;
   serviceScope?: string;
   leadId?: string;
+  skipCreatorNotify?: boolean;
 }) {
   const base = await prisma.agent.findUnique({ where: { id: input.baseAgentId } });
   if (!base || base.status !== 'published') {
@@ -151,14 +152,15 @@ export async function createCustomOrder(input: {
     }
   });
 
-  if (creatorUserId) {
+  if (creatorUserId && !input.skipCreatorNotify) {
+    const dealId = input.leadId || order.id;
     await notify({
       userId: creatorUserId,
       type: 'custom_order_pending_quote',
       title: '新的定制订单待报价',
       body: `${order.orderNo} · ${order.title}`,
-      link: `/creator-center?tab=orders&orderId=${order.id}`,
-      payload: { orderId: order.id }
+      link: `/consult?dealId=${dealId}`,
+      payload: { orderId: order.id, leadId: input.leadId, dealId }
     });
   }
 
@@ -251,7 +253,8 @@ export async function createCustomOrderFromLeadForCreator(input: {
     title: `定制 · ${lead.clientCompany || lead.clientName} · ${lead.agentTitle || base.title}`,
     customizationSpec,
     serviceScope: lead.summary || lead.notes || input.fallback?.customizationSummary || '',
-    leadId: lead.id
+    leadId: lead.id,
+    skipCreatorNotify: true
   });
 }
 
@@ -341,13 +344,21 @@ export async function submitDeliveryProposal(input: {
     payload: { proposalVersion: version, priceCents: input.proposal.priceCents }
   });
 
+  if (order.leadId) {
+    await prisma.consultationLead.update({
+      where: { id: order.leadId },
+      data: { status: 'quoted' }
+    }).catch(() => undefined);
+  }
+
+  const dealId = order.leadId || order.id;
   await notify({
     userId: order.buyerUserId,
     type: 'delivery_proposal_ready',
     title: '创作者已发起定制交付方案，请确认',
     body: `${order.orderNo} · ¥${(input.proposal.priceCents / 100).toFixed(2)} · ${input.proposal.deliveryDays} 天`,
-    link: `/orders?orderId=${order.id}`,
-    payload: { orderId: order.id, proposalVersion: version }
+    link: `/consult?dealId=${dealId}`,
+    payload: { orderId: order.id, leadId: order.leadId, dealId, proposalVersion: version }
   });
 
   return updated;
@@ -414,14 +425,21 @@ export async function confirmProposalByBuyer(input: {
     payload: { paymentDeadlineAt: deadline.toISOString() }
   });
 
+  if (order.leadId) {
+    await prisma.consultationLead.update({
+      where: { id: order.leadId },
+      data: { status: 'signed' }
+    }).catch(() => undefined);
+  }
+
   if (order.creatorUserId) {
     await notify({
       userId: order.creatorUserId,
       type: 'proposal_confirmed',
       title: '用户已确认交付方案，等待付款',
       body: order.orderNo,
-      link: `/creator-center?tab=orders&orderId=${order.id}`,
-      payload: { orderId: order.id }
+      link: `/creator-center?tab=custom-services&orderId=${order.id}`,
+      payload: { orderId: order.id, leadId: order.leadId, dealId: order.leadId || order.id }
     });
   }
 
@@ -454,13 +472,14 @@ export async function rejectProposalByBuyer(input: {
   });
 
   if (order.creatorUserId) {
+    const dealId = order.leadId || order.id;
     await notify({
       userId: order.creatorUserId,
       type: 'proposal_rejected',
       title: '用户拒绝了交付方案',
       body: input.reason || '请修改后重新发起',
-      link: `/creator-center?tab=orders&orderId=${order.id}`,
-      payload: { orderId: order.id }
+      link: `/consult?dealId=${dealId}`,
+      payload: { orderId: order.id, leadId: order.leadId, dealId }
     });
   }
 
@@ -493,13 +512,14 @@ export async function requestProposalRevisionByBuyer(input: {
   });
 
   if (order.creatorUserId) {
+    const dealId = order.leadId || order.id;
     await notify({
       userId: order.creatorUserId,
       type: 'proposal_revision_requested',
       title: '用户要求修改交付方案',
       body: input.feedback,
-      link: `/creator-center?tab=orders&orderId=${order.id}`,
-      payload: { orderId: order.id }
+      link: `/consult?dealId=${dealId}`,
+      payload: { orderId: order.id, leadId: order.leadId, dealId }
     });
   }
 

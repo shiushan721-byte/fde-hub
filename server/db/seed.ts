@@ -6,6 +6,7 @@ import { ensureSampleAdapterPackages } from './seedAdapterPackages';
 import { ensureAdapterPackagePricing, ensureSampleCustomProjects } from './seedCustomProjects';
 import { ensureExpertDomainTagsAligned } from './seedExpertTagUsage';
 import { ensureSampleCommentReports } from './seedCommentReports';
+import { ensureSampleInboxNotifications } from './seedInboxNotifications';
 import { ensureExpertTags } from '../services/expertTags';
 import { ensureExpertTitles } from '../services/expertTitles';
 import bcrypt from 'bcryptjs';
@@ -48,6 +49,7 @@ export async function seedDatabase(force = false) {
     await ensureAgentShowcases();
     await ensureShowcaseComments();
     await ensureSampleCommentReports();
+    await ensureSampleInboxNotifications();
     return { seeded: false, agents: existing };
   }
 
@@ -65,6 +67,9 @@ export async function seedDatabase(force = false) {
     await prisma.expertTag.deleteMany();
     await prisma.expertTitle.deleteMany();
     await prisma.userNotification.deleteMany();
+    await prisma.agentLike.deleteMany();
+    await prisma.agentFavorite.deleteMany();
+    await prisma.expertFollow.deleteMany();
     await prisma.customOrderEvent.deleteMany();
     await prisma.deliveryVersion.deleteMany();
     await prisma.privateAgentInstance.deleteMany();
@@ -349,6 +354,7 @@ export async function seedDatabase(force = false) {
   await ensureAgentShowcases();
   await ensureShowcaseComments();
   await ensureSampleCommentReports();
+  await ensureSampleInboxNotifications();
 
   const count = await prisma.agent.count();
   return { seeded: true, agents: count };
@@ -625,6 +631,7 @@ export async function ensureExpertApplicationSeed() {
     await ensureAgentShowcases();
     await ensureShowcaseComments();
     await ensureSampleCommentReports();
+    await ensureSampleInboxNotifications();
   } catch (error) {
     console.warn('ensureExpertApplicationSeed skipped:', error);
   }

@@ -6,7 +6,9 @@ export type NotificationNavigationTarget =
   | { route: 'workspace'; instanceId?: string }
   | { route: 'creator-center'; tab: CreatorCenterTab; orderId?: string }
   | { route: 'inspiration'; showcaseId: string }
-  | { route: 'agent'; agentId: string; share?: string };
+  | { route: 'agent'; agentId: string; share?: string }
+  | { route: 'expert'; expertId: string }
+  | { route: 'consult'; dealId: string; orderId?: string };
 
 export type NavigationFocus = {
   orderId?: string;
@@ -41,13 +43,54 @@ function stringOrUndefined(value: unknown): string | undefined {
   return undefined;
 }
 
+function consultDealIdFromPayload(payload: Record<string, unknown>): string | undefined {
+  return (
+    stringOrUndefined(payload.dealId) ||
+    stringOrUndefined(payload.leadId) ||
+    stringOrUndefined(payload.orderId)
+  );
+}
+
+const CONSULT_STAGE_TYPES = new Set([
+  'consult_submitted',
+  'consult_contacted',
+  'consult_replied',
+  'consult_closed',
+  'custom_order_pending_quote',
+  'delivery_proposal_ready',
+  'proposal_rejected',
+  'proposal_revision_requested'
+]);
+
 function inferTargetFromContext(
   type: string,
   payload: Record<string, unknown>
 ): NotificationNavigationTarget | null {
-  if (type === 'showcase_like') {
+  if (
+    type === 'showcase_like' ||
+    type === 'showcase_comment' ||
+    type === 'showcase_reply' ||
+    type === 'showcase_featured'
+  ) {
     const showcaseId = stringOrUndefined(payload.showcaseId);
     if (showcaseId) return { route: 'inspiration', showcaseId };
+  }
+
+  if (
+    type === 'agent_like' ||
+    type === 'agent_comment' ||
+    type === 'agent_comment_reply' ||
+    type === 'agent_favorite' ||
+    type === 'catalog_purchase_paid' ||
+    type === 'adapter_purchase_paid'
+  ) {
+    const agentId = stringOrUndefined(payload.agentId);
+    if (agentId) return { route: 'agent', agentId };
+  }
+
+  if (type === 'expert_follow') {
+    const expertId = stringOrUndefined(payload.expertId);
+    if (expertId) return { route: 'expert', expertId };
   }
 
   if (
@@ -60,8 +103,24 @@ function inferTargetFromContext(
     return { route: 'creator-center', tab: 'my-agents' };
   }
 
+  if (
+    type.startsWith('expert_application') ||
+    type === 'upgrade' ||
+    type === 'onboarding' ||
+    type.startsWith('realname_') ||
+    type === 'order_settled_notice' ||
+    type.startsWith('withdrawal_')
+  ) {
+    return { route: 'creator-center', tab: 'account' };
+  }
+
   const orderId = stringOrUndefined(payload.orderId);
   const instanceId = stringOrUndefined(payload.instanceId);
+
+  if (CONSULT_STAGE_TYPES.has(type)) {
+    const dealId = consultDealIdFromPayload(payload);
+    if (dealId) return { route: 'consult', dealId, orderId };
+  }
 
   if (type === 'delivery_ready' && instanceId) {
     return { route: 'workspace', instanceId };
@@ -69,10 +128,7 @@ function inferTargetFromContext(
 
   if (orderId) {
     const creatorTypes = new Set([
-      'custom_order_pending_quote',
       'proposal_confirmed',
-      'proposal_rejected',
-      'proposal_revision_requested',
       'custom_order_escrowed',
       'delivery_review_approved',
       'order_settled',
@@ -116,6 +172,32 @@ export function parseNotificationLink(
   const type = context?.type || '';
   const payload = context?.payload || {};
 
+  if (CONSULT_STAGE_TYPES.has(type)) {
+    const dealId =
+      params.get('dealId') ||
+      consultDealIdFromPayload(payload) ||
+      params.get('orderId') ||
+      stringOrUndefined(payload.orderId);
+    if (dealId) {
+      return {
+        route: 'consult',
+        dealId,
+        orderId: params.get('orderId') || stringOrUndefined(payload.orderId)
+      };
+    }
+  }
+
+  if (pathname === '/consult') {
+    const dealId = params.get('dealId') || consultDealIdFromPayload(payload);
+    if (dealId) {
+      return {
+        route: 'consult',
+        dealId,
+        orderId: params.get('orderId') || stringOrUndefined(payload.orderId)
+      };
+    }
+  }
+
   if (pathname === '/orders') {
     return {
       route: 'orders',
@@ -156,6 +238,11 @@ export function parseNotificationLink(
     };
   }
 
+  const expertMatch = pathname.match(/^\/expert\/([^/]+)$/);
+  if (expertMatch) {
+    return { route: 'expert', expertId: decodeURIComponent(expertMatch[1]) };
+  }
+
   if (!link.trim()) {
     return inferTargetFromContext(type, payload);
   }
@@ -163,6 +250,6 @@ export function parseNotificationLink(
   return null;
 }
 
-export function defaultLeadNavigationTarget(): NotificationNavigationTarget {
-  return { route: 'orders' };
+export function defaultLeadNavigationTarget(dealId: string): NotificationNavigationTarget {
+  return { route: 'consult', dealId };
 }

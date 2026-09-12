@@ -40,6 +40,8 @@ interface AgentDetailViewProps {
   onToggleFavorite?: (agentId: string) => void;
   isLiked?: boolean;
   onToggleLike?: (agentId: string) => void;
+  isAuthorFollowed?: boolean;
+  onToggleFollowAuthor?: (expertId: string) => void;
   onToast?: (message: string) => void;
   enableAuthorShowcaseTools?: boolean;
   onOpenInspiration?: (item: PublicInspiration) => void;
@@ -79,11 +81,12 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   onConsultAuthor,
   onCustomizeFromAgent,
   onUseAgent,
+  isAuthorFollowed = false,
+  onToggleFollowAuthor,
   onToast,
   enableAuthorShowcaseTools = false,
   onOpenInspiration
 }) => {
-  const [followed, setFollowed] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
   const [comments, setComments] = useState<PublicComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
@@ -473,14 +476,16 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setFollowed((v) => !v)}
+                onClick={() =>
+                  onToggleFollowAuthor?.(agent.authorId || authorExpert.id)
+                }
                 className={`shrink-0 mt-1 px-3 h-7 rounded-md text-[12px] font-semibold cursor-pointer transition-colors ${
-                  followed
+                  isAuthorFollowed
                     ? 'bg-slate-100 text-slate-500'
                     : 'bg-slate-900 text-white hover:bg-slate-800'
                 }`}
               >
-                {followed ? '已关注' : '关注'}
+                {isAuthorFollowed ? '已关注' : '关注'}
               </button>
             </div>
 

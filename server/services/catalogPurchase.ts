@@ -12,6 +12,7 @@ import { createPendingPayment, markPaymentPaid } from './payments';
 import { creatorPayoutCents, getOrCreateWallet, newWalletId } from './wallet';
 import type { PayChannel } from './wallet';
 import { getPendingHoldMs } from './financeSettings';
+import { notifyUser, resolveExpertUserId, yuan } from './notifications';
 
 function httpError(message: string, status: number) {
   const err = new Error(message) as Error & { status: number };
@@ -266,7 +267,58 @@ export async function confirmCatalogPurchase(input: {
   await creditCatalogSale(updated.id).catch((err) =>
     console.warn('[catalog-purchase] credit failed', err)
   );
+  await notifyPurchasePaid(updated.id).catch((err) =>
+    console.warn('[catalog-purchase] notify failed', err)
+  );
   return updated;
+}
+
+async function notifyPurchasePaid(purchaseId: string) {
+  const purchase = await prisma.agentPurchase.findUnique({
+    where: { id: purchaseId },
+    include: { agent: { select: { id: true, title: true, authorId: true } } }
+  });
+  if (!purchase || purchase.status !== 'paid') return;
+
+  const snapshot = parseJson<Record<string, unknown>>(purchase.priceSnapshot || '{}', {});
+  const packageName = typeof snapshot.packageName === 'string' ? snapshot.packageName : '';
+  const isAdapter = purchase.kind === 'adapter';
+  const amount = yuan(purchase.priceCents);
+
+  await notifyUser({
+    userId: purchase.userId,
+    type: isAdapter ? 'adapter_purchase_paid' : 'catalog_purchase_paid',
+    title: isAdapter ? 'Skill / 适配包购买成功' : '智能体使用权购买成功',
+    body: isAdapter
+      ? `你已购买「${purchase.agent.title}」的 ${packageName || '适配包'}，可前往智能体详情下载。`
+      : `你已获得「${purchase.agent.title}」标准版使用权，可立即使用。`,
+    link: `/agent/${purchase.agent.id}`,
+    payload: {
+      purchaseId: purchase.id,
+      agentId: purchase.agent.id,
+      agentTitle: purchase.agent.title,
+      packageId: purchase.packageId,
+      packageName,
+      priceCents: purchase.priceCents
+    }
+  });
+
+  const creatorUserId = await resolveExpertUserId(purchase.agent.authorId);
+  if (creatorUserId && creatorUserId !== purchase.userId && purchase.priceCents > 0) {
+    await notifyUser({
+      userId: creatorUserId,
+      type: 'order_settled_notice',
+      title: isAdapter ? '适配包销售收入已入账' : '标准版销售收入已入账',
+      body: `「${purchase.agent.title}」成交 ${amount}，收益将按规则进入待结算。`,
+      link: '/creator-center?tab=account',
+      payload: {
+        purchaseId: purchase.id,
+        agentId: purchase.agent.id,
+        agentTitle: purchase.agent.title,
+        priceCents: purchase.priceCents
+      }
+    });
+  }
 }
 
 export async function getAdapterEntitlement(userId: string, agentId: string, packageId: string) {

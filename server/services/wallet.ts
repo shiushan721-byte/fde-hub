@@ -9,6 +9,7 @@ import {
   postWithdrawalRejected,
   postWithdrawalRequested
 } from './platformFinance';
+import { notifyUser, yuan } from './notifications';
 
 export type PayChannel = 'wechat' | 'alipay';
 export type IncomeSourceKind = 'agent' | 'custom';
@@ -331,6 +332,14 @@ export async function reviewWithdrawal(input: {
     amountCents: withdraw.amountCents,
     operatorId: input.actorId
   }).catch((err) => console.warn('[finance] postWithdrawalRejected', err));
+  await notifyUser({
+    userId: withdraw.userId,
+    type: 'withdrawal_rejected',
+    title: '提现申请未通过',
+    body: `${yuan(withdraw.amountCents)} 已退回可提现余额。原因：${reason}`,
+    link: '/creator-center?tab=account',
+    payload: { withdrawId: withdraw.id, amountCents: withdraw.amountCents, reason }
+  });
   return rejected;
 }
 
@@ -385,6 +394,19 @@ export async function markWithdrawalPaid(input: {
     feeCents: withdraw.feeCents,
     operatorId: input.actorId
   }).catch((err) => console.warn('[finance] postWithdrawalPaid', err));
+  await notifyUser({
+    userId: withdraw.userId,
+    type: 'withdrawal_paid',
+    title: '提现已打款',
+    body: `${yuan(withdraw.amountCents)} 已打款至你绑定的账户${note ? `（${note}）` : ''}。`,
+    link: '/creator-center?tab=account',
+    payload: {
+      withdrawId: withdraw.id,
+      amountCents: withdraw.amountCents,
+      feeCents: withdraw.feeCents,
+      paidNote: note
+    }
+  });
   return paid;
 }
 

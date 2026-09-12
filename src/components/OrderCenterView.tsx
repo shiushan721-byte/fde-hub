@@ -15,6 +15,7 @@ import {
   BUYER_CUSTOM_SERVICE_FILTERS,
   CustomServiceFilterKey,
   formatOrderTime,
+  isConfirmedCustomDeal,
   matchesCustomServiceFilter,
   statusBadgeClass,
   yuan
@@ -28,7 +29,7 @@ import { DeliveryProposal } from '../types/deliveryProposal';
 import { CustomServiceDeal, CustomServiceOrder } from '../types/customService';
 import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
 
-/** 买家视角：我的定制（咨询 → 方案 → 支付 → 交付 → 验收） */
+/** 买家视角：我的定制（确认方案后的支付、交付、验收） */
 export const OrderCenterView: React.FC<{
   focusOrderId?: string;
   onFocusConsumed?: () => void;
@@ -95,7 +96,7 @@ export const OrderCenterView: React.FC<{
   }, [detailDeal]);
 
   const filtered = useMemo(
-    () => deals.filter((d) => matchesCustomServiceFilter(d.stageKey, filter)),
+    () => deals.filter((d) => isConfirmedCustomDeal(d) && matchesCustomServiceFilter(d.stageKey, filter)),
     [deals, filter]
   );
 
@@ -200,7 +201,7 @@ export const OrderCenterView: React.FC<{
             我的定制
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            咨询 → 确认方案 → 支付 → 提交交付 → 审核 → 验收，同一条流程跟进
+            咨询确认方案并付款后，订单会出现在这里。新咨询请到消息中心处理。
           </p>
         </div>
         <button
@@ -245,8 +246,8 @@ export const OrderCenterView: React.FC<{
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-16 text-center space-y-2 px-6">
-            <p className="text-sm font-bold text-slate-800">暂无定制服务</p>
-            <p className="text-xs text-slate-500">向专家发起咨询后，会出现在这里</p>
+            <p className="text-sm font-bold text-slate-800">暂无定制订单</p>
+            <p className="text-xs text-slate-500">确认交付方案后，订单会出现在这里。新咨询请到消息中心处理。</p>
           </div>
         ) : (
           <div className="overflow-x-auto">

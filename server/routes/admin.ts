@@ -14,6 +14,7 @@ import {
   writeCertEventStandalone
 } from '../services/certification';
 import { markWithdrawalPaid, releasePendingIncomes, reviewWithdrawal } from '../services/wallet';
+import { notifyExpertApplication } from '../services/notifications';
 import { licenseActive } from '../services/catalogPurchase';
 import {
   getFinanceSettings,
@@ -1485,6 +1486,14 @@ adminRouter.post('/expert-applications/:id/request-supplement', async (req, res)
     reason: message
   });
 
+  await notifyExpertApplication({
+    userId: application.userId,
+    applicationId: application.id,
+    applicationType: application.type,
+    event: 'supplement',
+    reason: message
+  });
+
   return ok(res, mapAdminApplication(updated));
 });
 
@@ -1503,6 +1512,12 @@ adminRouter.post('/expert-applications/:id/approve', async (req, res) => {
   try {
     const result = await approveApplication(req.params.id, actorId(req), {
       domainTags: body.data.domainTags
+    });
+    await notifyExpertApplication({
+      userId: result.application.userId,
+      applicationId: result.application.id,
+      applicationType: result.application.type,
+      event: 'approved'
     });
     return ok(res, result.application);
   } catch (error) {
@@ -1547,6 +1562,14 @@ adminRouter.post('/expert-applications/:id/reject', async (req, res) => {
     targetType: 'expert_application',
     targetId: application.id,
     diff: { reason: reason.data }
+  });
+
+  await notifyExpertApplication({
+    userId: application.userId,
+    applicationId: application.id,
+    applicationType: application.type,
+    event: 'rejected',
+    reason: reason.data
   });
 
   return ok(res, updated);

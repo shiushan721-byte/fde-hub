@@ -107,6 +107,42 @@ export async function approveApplication(
       where: { userId: application.userId },
       orderBy: { certifiedAt: 'desc' }
     });
+    if (application.type === 'upgrade') {
+      if (existingCert?.status !== 'active') {
+        throw new Error('仅已入驻专家可审批晋升申请');
+      }
+      const updatedApp = await tx.expertApplication.update({
+        where: { id: application.id },
+        data: {
+          status: 'approved',
+          reviewerId: actorId,
+          reviewedAt: new Date(),
+          decisionReason: '',
+          expertId: existingCert.expertId
+        }
+      });
+      await writeCertEvent(tx, {
+        userId: application.userId,
+        expertId: existingCert.expertId,
+        applicationId: application.id,
+        certificationId: existingCert.id,
+        eventType: 'application_approved',
+        actorId,
+        fromStatus: application.status,
+        toStatus: 'approved',
+        payload: { type: 'upgrade' }
+      });
+      if (actorId) {
+        await writeAuditTx(tx, {
+          actorId,
+          action: 'approve_expert_upgrade',
+          targetType: 'expert_application',
+          targetId: application.id,
+          diff: { type: 'upgrade' }
+        });
+      }
+      return { application: updatedApp, certification: existingCert, expertId: existingCert.expertId };
+    }
     if (existingCert?.status === 'active') {
       throw new Error('用户已是有效 AI 专家，无需重复认证');
     }

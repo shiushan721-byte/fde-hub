@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Package,
   FileText,
-  X,
   UploadCloud
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -11,10 +10,10 @@ import {
   CUSTOM_SERVICE_FILTERS,
   CustomServiceFilterKey,
   formatOrderTime,
+  isConfirmedCustomDeal,
   matchesCustomServiceFilter,
   yuan
 } from '../lib/customOrderLabels';
-import { DeliveryProposalForm } from './DeliveryProposalForm';
 import {
   DeliveryProposalModal,
   DeliveryProposalReviewPanel,
@@ -34,7 +33,7 @@ function selectedProjectsFromOrder(order?: OrderRow | null) {
   return Array.isArray(rows) ? rows.filter((row) => row?.title) : [];
 }
 
-/** 创作者：定制服务（咨询线索与订单同一条流程） */
+/** 创作者：确认方案后的定制订单 */
 export const CreatorCustomOrdersPanel: React.FC<{
   sessionLeads?: CustomerLeadItem[];
   focusOrderId?: string;
@@ -45,8 +44,6 @@ export const CreatorCustomOrdersPanel: React.FC<{
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
   const [filter, setFilter] = useState<CustomServiceFilterKey>('all');
-  const [proposalOrder, setProposalOrder] = useState<OrderRow | null>(null);
-  const [creatingLeadId, setCreatingLeadId] = useState('');
   const [deliveryDeal, setDeliveryDeal] = useState<CustomServiceDeal | null>(null);
   const [viewProposalDeal, setViewProposalDeal] = useState<CustomServiceDeal | null>(null);
 
@@ -119,81 +116,9 @@ export const CreatorCustomOrdersPanel: React.FC<{
   }, [focusOrderId, loading, deals, onFocusConsumed]);
 
   const filtered = useMemo(
-    () => deals.filter((d) => matchesCustomServiceFilter(d.stageKey, filter)),
+    () => deals.filter((d) => isConfirmedCustomDeal(d) && matchesCustomServiceFilter(d.stageKey, filter)),
     [deals, filter]
   );
-
-  const submitProposal = async (
-    orderId: string,
-    proposal: Omit<DeliveryProposal, 'submittedAt' | 'version'>
-  ) => {
-    setBusyId(orderId);
-    try {
-      await api(`/api/custom-orders/${orderId}/proposal`, {
-        method: 'POST',
-        body: JSON.stringify(proposal)
-      });
-      await reload();
-      alert('已发起定制交付方案，等待用户确认。');
-    } finally {
-      setBusyId('');
-    }
-  };
-
-  const createOrderFromLead = async (deal: CustomServiceDeal): Promise<OrderRow | null> => {
-    if (!deal.leadId) return null;
-    if (!deal.agentId) {
-      alert('该咨询未关联智能体，无法直接创建交付订单。');
-      return null;
-    }
-    setCreatingLeadId(deal.leadId);
-    try {
-      const order = await api<OrderRow>(`/api/custom-orders/from-lead/${deal.leadId}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          clientName: deal.clientName,
-          clientCompany: deal.clientCompany,
-          agentId: deal.agentId,
-          agentTitle: deal.agentTitle,
-          baseAgentVersion: deal.standardVersionAtRequest,
-          customizationSummary: deal.requirement,
-          notes: deal.requirement
-        })
-      });
-      await reload();
-      return order;
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '创建交付订单失败');
-      return null;
-    } finally {
-      setCreatingLeadId('');
-    }
-  };
-
-  const startProposal = async (deal: CustomServiceDeal) => {
-    if (deal.order && canPropose(deal.order.status)) {
-      setProposalOrder(deal.order);
-      return;
-    }
-    const created = await createOrderFromLead(deal);
-    if (created) setProposalOrder(created);
-  };
-
-  const closeConsulting = async (deal: CustomServiceDeal) => {
-    if (!window.confirm('确认关闭该咨询？关闭后将不再跟进。')) return;
-    setBusyId(deal.dealId);
-    try {
-      await api(`/api/custom-services/${deal.dealId}/close`, {
-        method: 'POST',
-        body: '{}'
-      });
-      await reload();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '关闭失败');
-    } finally {
-      setBusyId('');
-    }
-  };
 
   const submitSkillDelivery = async (
     order: OrderRow,
@@ -223,9 +148,6 @@ export const CreatorCustomOrdersPanel: React.FC<{
     alert('Skill 已提交，订单进入平台审核中。');
   };
 
-  const canPropose = (status: string) =>
-    ['consulting', 'pending_quote'].includes(status);
-
   const canUploadSkill = (status: string) =>
     ['paid_pending_start', 'escrowed', 'in_development', 'revision'].includes(status);
 
@@ -241,7 +163,7 @@ export const CreatorCustomOrdersPanel: React.FC<{
             定制服务
           </h3>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            咨询 → 方案 → 支付 → 提交交付 → 审核 → 验收，同一条流程跟进
+            用户确认方案后的订单在这里。新咨询请到消息中心处理。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -265,7 +187,7 @@ export const CreatorCustomOrdersPanel: React.FC<{
         </div>
       </div>
       {filtered.length === 0 && (
-        <p className="text-xs text-slate-500">暂无定制服务。用户提交咨询后会出现在这里。</p>
+        <p className="text-xs text-slate-500">暂无定制订单。用户确认交付方案后会出现在这里。</p>
       )}
       {filtered.map((deal) => {
         const order = deal.order;
@@ -275,11 +197,7 @@ export const CreatorCustomOrdersPanel: React.FC<{
         const timeValue = isConsulting
           ? deal.consultedAt || order?.createdAt
           : order?.createdAt || deal.consultedAt;
-        const canStartProposal =
-          isConsulting && (!order || canPropose(order.status));
-        const canCloseConsulting = isConsulting;
-        const canViewProposal =
-          !isConsulting && hasViewableProposal(proposal);
+        const canViewProposal = hasViewableProposal(proposal);
         const isFocused =
           focusOrderId &&
           (deal.orderId === focusOrderId ||
@@ -345,28 +263,6 @@ export const CreatorCustomOrdersPanel: React.FC<{
               <p className="text-[11px] text-rose-600">驳回：{order.deliveries[0].rejectReason}</p>
             )}
             <div className="flex flex-wrap gap-2 pt-0.5">
-              {canCloseConsulting && (
-                <button
-                  type="button"
-                  disabled={busyId === deal.dealId}
-                  onClick={() => closeConsulting(deal)}
-                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold cursor-pointer flex items-center gap-1.5 disabled:opacity-60 hover:bg-slate-50"
-                >
-                  <X size={14} />
-                  关闭
-                </button>
-              )}
-              {canStartProposal && (
-                <button
-                  type="button"
-                  disabled={busyId === order?.id || creatingLeadId === deal.leadId}
-                  onClick={() => startProposal(deal)}
-                  className="px-3.5 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold cursor-pointer flex items-center gap-1.5 disabled:opacity-60 shadow-sm shadow-blue-600/20"
-                >
-                  <FileText size={14} />
-                  {creatingLeadId === deal.leadId ? '创建中…' : '发起定制交付方案'}
-                </button>
-              )}
               {canViewProposal && (
                 <button
                   type="button"
@@ -392,28 +288,6 @@ export const CreatorCustomOrdersPanel: React.FC<{
           </div>
         );
       })}
-
-      {proposalOrder && (
-        <DeliveryProposalForm
-          isOpen
-          onClose={() => setProposalOrder(null)}
-          baseAgentId={proposalOrder.baseAgentId || ''}
-          baseAgentTitle={proposalOrder.baseAgentTitle}
-          baseAgentVersion={proposalOrder.baseAgentVersion}
-          initialCustomization={
-            selectedProjectsFromOrder(proposalOrder)
-              .map((item) => item.title)
-              .join('\n') || proposalOrder.title
-          }
-          initialPriceYuan={
-            proposalOrder.priceCents > 0 ? String((proposalOrder.priceCents / 100).toFixed(0)) : ''
-          }
-          onSubmit={async (proposal) => {
-            await submitProposal(proposalOrder.id, proposal);
-            setProposalOrder(null);
-          }}
-        />
-      )}
 
       {viewProposalDeal?.order && hasViewableProposal(viewProposalDeal.order.deliveryProposal) && (
         <DeliveryProposalModal

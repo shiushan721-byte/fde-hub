@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { isAgentAuthor } from './agentShowcases';
+import { notifyUser, resolveExpertUserId } from './notifications';
 
 const CONTENT_MAX = 500;
 
@@ -105,9 +106,11 @@ export async function createComment(input: {
     if (!showcase || showcase.agent.status !== 'published' || showcase.agent.creatorDeletedAt) {
       throw httpError('成果不存在或未公开', 404);
     }
+    let parent: { id: string; userId: string | null; userName: string } | null = null;
     if (input.parentId) {
-      const parent = await prisma.agentComment.findFirst({
-        where: { id: input.parentId, showcaseId: input.showcaseId, source: 'showcase' }
+      parent = await prisma.agentComment.findFirst({
+        where: { id: input.parentId, showcaseId: input.showcaseId, source: 'showcase' },
+        select: { id: true, userId: true, userName: true }
       });
       if (!parent) throw httpError('回复的评论不存在', 404);
     }
@@ -126,6 +129,17 @@ export async function createComment(input: {
         content
       }
     });
+    await notifyShowcaseComment({
+      actorUserId: input.userId,
+      actorName: row.userName,
+      content,
+      showcaseId: showcase.id,
+      showcaseTitle: showcase.title || '未命名成果',
+      agentId: showcase.agent.id,
+      ownerUserId: showcase.userId,
+      parentUserId: parent?.userId || null,
+      isReply: Boolean(parent)
+    });
     return mapPublicComment(row);
   }
 
@@ -134,9 +148,11 @@ export async function createComment(input: {
   });
   if (!agent) throw httpError('智能体不存在或未上架', 404);
 
+  let parent: { id: string; userId: string | null; userName: string } | null = null;
   if (input.parentId) {
-    const parent = await prisma.agentComment.findFirst({
-      where: { id: input.parentId, agentId: input.agentId, source: 'agent' }
+    parent = await prisma.agentComment.findFirst({
+      where: { id: input.parentId, agentId: input.agentId, source: 'agent' },
+      select: { id: true, userId: true, userName: true }
     });
     if (!parent) throw httpError('回复的评论不存在', 404);
   }
@@ -166,5 +182,115 @@ export async function createComment(input: {
     data: { commentsCount: String(remaining) }
   });
 
+  const authorUserId = await resolveExpertUserId(agent.authorId);
+  await notifyAgentComment({
+    actorUserId: input.userId,
+    actorName: row.userName,
+    content,
+    agentId: agent.id,
+    agentTitle: agent.title,
+    authorUserId,
+    parentUserId: parent?.userId || null,
+    isReply: Boolean(parent),
+    isAuthorReply: isAuthor
+  });
+
   return mapPublicComment(row);
+}
+
+function preview(content: string) {
+  const text = content.trim();
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+}
+
+async function notifyAgentComment(input: {
+  actorUserId: string;
+  actorName: string;
+  content: string;
+  agentId: string;
+  agentTitle: string;
+  authorUserId: string | null;
+  parentUserId: string | null;
+  isReply: boolean;
+  isAuthorReply: boolean;
+}) {
+  const snippet = preview(input.content);
+  const payload = {
+    agentId: input.agentId,
+    agentTitle: input.agentTitle,
+    commenterUserId: input.actorUserId
+  };
+
+  if (input.isReply && input.parentUserId && input.parentUserId !== input.actorUserId) {
+    await notifyUser({
+      userId: input.parentUserId,
+      type: input.isAuthorReply ? 'agent_comment_reply' : 'agent_comment',
+      title: input.isAuthorReply
+        ? `作者回复了你在「${input.agentTitle}」的评论`
+        : `有人回复了你在「${input.agentTitle}」的评论`,
+      body: `${input.actorName}：${snippet}`,
+      link: `/agent/${input.agentId}`,
+      payload
+    });
+  }
+
+  if (
+    input.authorUserId &&
+    input.authorUserId !== input.actorUserId &&
+    input.authorUserId !== input.parentUserId
+  ) {
+    await notifyUser({
+      userId: input.authorUserId,
+      type: 'agent_comment',
+      title: `有人评论了你的智能体「${input.agentTitle}」`,
+      body: `${input.actorName}：${snippet}`,
+      link: `/agent/${input.agentId}`,
+      payload
+    });
+  }
+}
+
+async function notifyShowcaseComment(input: {
+  actorUserId: string;
+  actorName: string;
+  content: string;
+  showcaseId: string;
+  showcaseTitle: string;
+  agentId: string;
+  ownerUserId: string | null;
+  parentUserId: string | null;
+  isReply: boolean;
+}) {
+  const snippet = preview(input.content);
+  const payload = {
+    showcaseId: input.showcaseId,
+    agentId: input.agentId,
+    commenterUserId: input.actorUserId
+  };
+
+  if (input.isReply && input.parentUserId && input.parentUserId !== input.actorUserId) {
+    await notifyUser({
+      userId: input.parentUserId,
+      type: 'showcase_reply',
+      title: `有人回复了你在成果「${input.showcaseTitle}」的评论`,
+      body: `${input.actorName}：${snippet}`,
+      link: `/inspiration/${input.showcaseId}`,
+      payload
+    });
+  }
+
+  if (
+    input.ownerUserId &&
+    input.ownerUserId !== input.actorUserId &&
+    input.ownerUserId !== input.parentUserId
+  ) {
+    await notifyUser({
+      userId: input.ownerUserId,
+      type: 'showcase_comment',
+      title: `有人评论了你的成果「${input.showcaseTitle}」`,
+      body: `${input.actorName}：${snippet}`,
+      link: `/inspiration/${input.showcaseId}`,
+      payload
+    });
+  }
 }

@@ -5,6 +5,7 @@ import { fail, ok } from '../lib/http';
 import { parseJson, toJson } from '../lib/json';
 import { createCustomOrder, mapOrder } from '../services/customOrder';
 import { activeCustomProjects, customProjectsTotalYuan, snapshotCustomProjects } from '../../shared/customProjects';
+import { notifyUser, resolveExpertUserId } from '../services/notifications';
 
 export const consultationRouter = Router();
 
@@ -64,9 +65,43 @@ consultationRouter.post('/', async (req, res) => {
     include: { messages: true }
   });
 
+  const creatorUserId = await resolveExpertUserId(data.expertId);
+  if (creatorUserId) {
+    await notifyUser({
+      userId: creatorUserId,
+      type: 'consult_submitted',
+      title: '新的定制咨询',
+      body: [lead.clientName, lead.agentTitle].filter(Boolean).join(' · '),
+      link: `/consult?dealId=${lead.id}`,
+      payload: {
+        dealId: lead.id,
+        leadId: lead.id,
+        agentId: lead.agentId,
+        agentTitle: lead.agentTitle
+      }
+    });
+  }
+  if (req.user?.id) {
+    await notifyUser({
+      userId: req.user.id,
+      type: 'consult_submitted',
+      title: '定制需求已提交',
+      body: lead.agentId
+        ? `「${lead.agentTitle}」已发给创作者。有进展时会在消息中提醒你。`
+        : '已向专家提交咨询。有进展时会在消息中提醒你。',
+      link: `/consult?dealId=${lead.id}`,
+      payload: {
+        dealId: lead.id,
+        leadId: lead.id,
+        agentId: lead.agentId,
+        agentTitle: lead.agentTitle
+      }
+    });
+  }
+
   let customOrder = null;
   const shouldCreateOrder =
-    Boolean(data.createCustomOrder ?? data.customizationSpec) &&
+    Boolean(data.createCustomOrder) &&
     Boolean(data.agentId) &&
     Boolean(req.user?.id);
 

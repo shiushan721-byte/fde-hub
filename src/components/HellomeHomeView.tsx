@@ -51,12 +51,6 @@ function platformSupportLabel(support?: HellomeAgentItem['platformSupport']) {
   }
 }
 
-const RECOMMEND_EXAMPLES = [
-  '帮我给新茶饮出三套主视觉 KV',
-  '写一篇能被 AI 搜索引用的选购长文',
-  '临时要一份上会请示，连夜出稿'
-];
-
 export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
   onOpenAuthorProfile,
   onOpenAgentDetail,
@@ -86,7 +80,8 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
   // Category & search state for 热门智能体
   const [catalogueTab, setCatalogueTab] = useState<'agents' | 'inspiration'>(initialCatalogueTab);
   const [selectedCategory, setSelectedCategory] = useState('全部');
-  const [agentSearchQuery, setAgentSearchQuery] = useState('');
+  const [heroQuery, setHeroQuery] = useState('');
+  const [inspirationSearchQuery, setInspirationSearchQuery] = useState('');
   const [recommendOpen, setRecommendOpen] = useState(false);
   const [recommendBusy, setRecommendBusy] = useState(false);
   const [recommendError, setRecommendError] = useState('');
@@ -126,7 +121,7 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
   const filteredInspirations = inspirations.filter((item) => {
     const matchesCat =
       selectedCategory === '全部' || item.inspireCategory === selectedCategory;
-    const q = agentSearchQuery.trim().toLowerCase();
+    const q = inspirationSearchQuery.trim().toLowerCase();
     const matchesSearch =
       !q ||
       item.title.toLowerCase().includes(q) ||
@@ -142,8 +137,9 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
   });
 
   const submitAgentRecommend = async (raw?: string) => {
-    const query = (raw ?? agentSearchQuery).trim() || RECOMMEND_EXAMPLES[0];
-    setAgentSearchQuery(query);
+    const query = (raw ?? heroQuery).trim();
+    if (query.length < 2) return;
+    setHeroQuery(query);
     setRecommendQuery(query);
     setRecommendOpen(true);
     setRecommendBusy(true);
@@ -164,11 +160,20 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
         const local = catalogAgents.find((agent) => agent.id === item.id);
         return {
           ...(local || item),
+          ...item,
           reason: item.reason,
-          matchScore: item.matchScore
+          matchScore: item.matchScore,
+          groupTitle: item.groupTitle,
+          groupIntro: item.groupIntro,
+          likesCount: local?.likesCount || item.likesCount,
+          favoritesCount: local?.favoritesCount || item.favoritesCount,
+          commentsCount: local?.commentsCount || item.commentsCount,
+          sharesCount: local?.sharesCount || item.sharesCount,
+          usageCount: local?.usageCount || item.usageCount,
+          showcaseCount: local?.showcaseCount || item.showcaseCount
         };
       });
-      setRecommendItems(hydrated);
+      setRecommendItems(hydrated.slice(0, 6));
       setRecommendSummary(result.analysis?.summary || '');
       setRecommendIntents(result.analysis?.intents || []);
       setRecommendSource(result.source || 'local');
@@ -315,6 +320,50 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
         )}
       </section>
 
+      <section id="home-intent-search" className="relative overflow-hidden rounded-[2rem] px-4 py-8 sm:py-10">
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-violet-50/80 via-white to-transparent" />
+        <div className="relative mx-auto max-w-2xl text-center space-y-5">
+          <h2 className="text-[28px] sm:text-[34px] font-black tracking-tight text-slate-950 leading-tight">
+            今天想让 AI 帮你做什么？
+          </h2>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitAgentRecommend();
+            }}
+            className="relative"
+          >
+            <Search
+              size={18}
+              className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+            />
+            <input
+              id="home-intent-search-input"
+              type="text"
+              value={heroQuery}
+              onChange={(e) => setHeroQuery(e.target.value)}
+              placeholder="搜索智能体、功能，或用一句话描述你想做什么…"
+              aria-label="用自然语言描述需求，匹配智能体"
+              disabled={recommendBusy}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                }
+              }}
+              className="w-full h-14 pl-12 pr-16 rounded-full bg-white text-sm text-slate-900 placeholder:text-slate-400 border border-slate-200 shadow-[0_8px_30px_rgba(15,23,42,0.06)] outline-none transition-all focus:border-slate-400 focus:shadow-[0_10px_36px_rgba(15,23,42,0.1)] disabled:bg-slate-50 disabled:text-slate-400"
+            />
+            <button
+              type="submit"
+              disabled={recommendBusy || heroQuery.trim().length < 2}
+              aria-label="匹配智能体"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-slate-950 text-white flex items-center justify-center cursor-pointer transition-all hover:bg-slate-800 active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
+            >
+              {recommendBusy ? <Loader2 size={18} className="animate-spin" /> : <ArrowRight size={18} />}
+            </button>
+          </form>
+        </div>
+      </section>
+
       {/* ========================================================================= */}
       {/* 2. THE MAIN SECTION HEADER BAR: [热门智能体] & 分类标签与搜索 */}
       {/* ========================================================================= */}
@@ -382,60 +431,21 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
               </button>
             </div>
 
-            {/* Right: Search Input */}
-            <div className="flex items-center justify-end gap-3 px-2 w-full md:w-auto">
-              <div className={`relative w-full ${catalogueTab === 'agents' ? 'md:w-[28rem]' : 'md:w-72'}`}>
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={agentSearchQuery}
-                  onChange={(e) => setAgentSearchQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.nativeEvent.isComposing) return;
-                    if (e.key === 'Enter' && catalogueTab === 'agents') {
-                      e.preventDefault();
-                      void submitAgentRecommend();
-                    }
-                  }}
-                  placeholder={
-                    catalogueTab === 'inspiration'
-                      ? '搜索成果、作者或智能体...'
-                      : '用一句话描述你想做什么…'
-                  }
-                  className={`w-full pl-9 py-2 bg-slate-50 text-xs text-slate-900 rounded-xl border border-slate-200 focus:border-emerald-500 focus:bg-white outline-none transition-all ${
-                    catalogueTab === 'agents' ? 'pr-20' : 'pr-3'
-                  }`}
-                />
-                {catalogueTab === 'agents' && (
-                  <button
-                    type="button"
-                    disabled={recommendBusy}
-                    onClick={() => void submitAgentRecommend()}
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white disabled:text-slate-400 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
-                  >
-                    {recommendBusy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                    匹配
-                  </button>
-                )}
+            {catalogueTab === 'inspiration' && (
+              <div className="flex items-center justify-end gap-3 px-2 w-full md:w-auto">
+                <div className="relative w-full md:w-72">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={inspirationSearchQuery}
+                    onChange={(e) => setInspirationSearchQuery(e.target.value)}
+                    placeholder="搜索成果、作者或智能体..."
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 text-xs text-slate-900 rounded-xl border border-slate-200 focus:border-emerald-500 focus:bg-white outline-none transition-all"
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </div>
-          {catalogueTab === 'agents' && (
-            <div className="px-2 pt-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] text-slate-400 shrink-0">试试：</span>
-              {RECOMMEND_EXAMPLES.map((example) => (
-                <button
-                  key={example}
-                  type="button"
-                  disabled={recommendBusy}
-                  onClick={() => void submitAgentRecommend(example)}
-                  className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-200 text-[11px] text-slate-600 hover:text-emerald-700 cursor-pointer"
-                >
-                  {example}
-                </button>
-              ))}
-            </div>
-          )}
 
           {/* Sub-bar for Agents: Category Filter Pills */}
           <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 overflow-x-auto no-scrollbar">

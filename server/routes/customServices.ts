@@ -4,6 +4,7 @@ import { fail, ok } from '../lib/http';
 import { parseJson } from '../lib/json';
 import { requireAuth } from '../middleware/auth';
 import { mapOrder } from '../services/customOrder';
+import { notifyUser, resolveExpertUserId } from '../services/notifications';
 
 const customServicesRouter = Router();
 customServicesRouter.use(requireAuth);
@@ -133,6 +134,105 @@ function dealFromOrphanOrder(order: any, audience: 'buyer' | 'creator' = 'creato
   };
 }
 
+const ORDER_INCLUDE = {
+  creator: { select: { id: true, name: true, email: true } },
+  buyer: { select: { id: true, name: true, email: true } },
+  instance: true,
+  deliveries: { orderBy: { createdAt: 'desc' as const }, take: 5 }
+};
+
+function mapLeadMessages(lead: { messages?: Array<{ id: string; sender: string; senderName: string; text: string; createdAt: Date }> } | null) {
+  return (lead?.messages || []).map((m) => ({
+    id: m.id,
+    sender: m.sender,
+    senderName: m.senderName,
+    text: m.text,
+    createdAt: m.createdAt
+  }));
+}
+
+function newMessageId() {
+  return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function loadDealParts(dealId: string) {
+  let lead = await prisma.consultationLead.findUnique({
+    where: { id: dealId },
+    include: { messages: { orderBy: { createdAt: 'asc' } } }
+  });
+  let order = lead
+    ? await prisma.customOrder.findFirst({
+        where: { leadId: lead.id },
+        include: ORDER_INCLUDE
+      })
+    : await prisma.customOrder.findUnique({
+        where: { id: dealId },
+        include: ORDER_INCLUDE
+      });
+  if (!lead && order?.leadId) {
+    lead = await prisma.consultationLead.findUnique({
+      where: { id: order.leadId },
+      include: { messages: { orderBy: { createdAt: 'asc' } } }
+    });
+  }
+  return { lead, order };
+}
+
+async function resolveAudience(
+  userId: string,
+  lead: { userId?: string | null; expertId?: string | null } | null,
+  order: { buyerUserId?: string; creatorUserId?: string | null; status?: string } | null
+): Promise<'buyer' | 'creator' | null> {
+  const expert = await prisma.expert.findFirst({ where: { userId }, select: { id: true } });
+  const isBuyer = Boolean((lead && lead.userId === userId) || (order && order.buyerUserId === userId));
+  const isCreator = Boolean(
+    (lead && expert && lead.expertId === expert.id) ||
+      (order &&
+        (order.creatorUserId === userId ||
+          (order.creatorUserId == null && ['consulting', 'pending_quote'].includes(order.status || ''))))
+  );
+  if (isCreator && !isBuyer) return 'creator';
+  if (isBuyer && !isCreator) return 'buyer';
+  if (isCreator && isBuyer) {
+    return expert && lead?.expertId === expert.id ? 'creator' : 'buyer';
+  }
+  return null;
+}
+
+async function enrichDeal(
+  lead: any,
+  order: any,
+  audience: 'buyer' | 'creator'
+) {
+  const deal = lead ? dealFromLead(lead, order, audience) : dealFromOrphanOrder(order, audience);
+  let expertName = order?.creator?.name || '';
+  if (!expertName && lead?.expertId) {
+    const expert = await prisma.expert.findUnique({
+      where: { id: lead.expertId },
+      select: { name: true }
+    });
+    expertName = expert?.name || '';
+  }
+  return {
+    ...deal,
+    audience,
+    expertName,
+    contacted: Boolean(lead && lead.status !== 'new'),
+    messages: mapLeadMessages(lead)
+  };
+}
+
+async function counterpartUserId(
+  audience: 'buyer' | 'creator',
+  lead: { userId?: string | null; expertId?: string | null } | null,
+  order: { buyerUserId?: string; creatorUserId?: string | null } | null
+) {
+  if (audience === 'buyer') {
+    return order?.creatorUserId || (await resolveExpertUserId(lead?.expertId));
+  }
+  return lead?.userId || order?.buyerUserId || null;
+}
+
 customServicesRouter.get('/mine', async (req, res) => {
   try {
     const leads = await prisma.consultationLead.findMany({
@@ -233,24 +333,110 @@ customServicesRouter.get('/creator', async (req, res) => {
 
 const CONSULTING_ORDER_STATUSES = ['consulting', 'pending_quote'];
 
+customServicesRouter.get('/:dealId', async (req, res) => {
+  try {
+    const { lead, order } = await loadDealParts(req.params.dealId);
+    if (!lead && !order) return fail(res, '记录不存在', 404);
+    const audience = await resolveAudience(req.user!.id, lead, order);
+    if (!audience) return fail(res, '无权查看该咨询', 403);
+    return ok(res, await enrichDeal(lead, order, audience));
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : '加载咨询失败');
+  }
+});
+
+customServicesRouter.post('/:dealId/contact', async (req, res) => {
+  try {
+    const { lead, order } = await loadDealParts(req.params.dealId);
+    if (!lead && !order) return fail(res, '记录不存在', 404);
+    const audience = await resolveAudience(req.user!.id, lead, order);
+    if (!audience) return fail(res, '无权操作该咨询', 403);
+    const orderStatus = order?.status;
+    if (order && !CONSULTING_ORDER_STATUSES.includes(orderStatus || '') && orderStatus !== 'awaiting_proposal_confirm') {
+      return fail(res, '当前阶段请到「我的定制」继续跟进', 400);
+    }
+
+    if (lead && lead.status === 'new') {
+      await prisma.consultationLead.update({
+        where: { id: lead.id },
+        data: { status: 'contacted' }
+      });
+    }
+
+    const otherId = await counterpartUserId(audience, lead, order);
+    if (otherId && otherId !== req.user!.id) {
+      const dealId = lead?.id || order?.id;
+      await notifyUser({
+        userId: otherId,
+        type: 'consult_contacted',
+        title: audience === 'buyer' ? '客户已跟进咨询' : '创作者已接手咨询',
+        body: lead?.agentTitle || order?.title || '定制咨询',
+        link: `/consult?dealId=${dealId}`,
+        payload: { dealId, leadId: lead?.id, orderId: order?.id }
+      });
+    }
+
+    const next = await loadDealParts(req.params.dealId);
+    return ok(res, await enrichDeal(next.lead, next.order, audience));
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : '操作失败');
+  }
+});
+
+customServicesRouter.post('/:dealId/messages', async (req, res) => {
+  try {
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) return fail(res, '请填写消息内容');
+    const { lead, order } = await loadDealParts(req.params.dealId);
+    if (!lead) return fail(res, '该咨询暂不支持留言', 400);
+    const audience = await resolveAudience(req.user!.id, lead, order);
+    if (!audience) return fail(res, '无权发送消息', 403);
+    if (lead.status === 'closed') return fail(res, '咨询已关闭');
+
+    if (lead.status === 'new') {
+      await prisma.consultationLead.update({
+        where: { id: lead.id },
+        data: { status: 'contacted' }
+      });
+    }
+
+    await prisma.consultationMessage.create({
+      data: {
+        id: newMessageId(),
+        leadId: lead.id,
+        sender: audience === 'creator' ? 'creator' : 'user',
+        senderName: req.user!.name || (audience === 'creator' ? '创作者' : '客户'),
+        text
+      }
+    });
+
+    const otherId = await counterpartUserId(audience, lead, order);
+    if (otherId && otherId !== req.user!.id) {
+      await notifyUser({
+        userId: otherId,
+        type: 'consult_replied',
+        title: audience === 'buyer' ? '客户回复了咨询' : '创作者回复了你的咨询',
+        body: text.slice(0, 80),
+        link: `/consult?dealId=${lead.id}`,
+        payload: { dealId: lead.id, leadId: lead.id, orderId: order?.id }
+      });
+    }
+
+    const next = await loadDealParts(lead.id);
+    return ok(res, await enrichDeal(next.lead, next.order, audience), 201);
+  } catch (e) {
+    return fail(res, e instanceof Error ? e.message : '发送失败');
+  }
+});
+
 customServicesRouter.post('/:dealId/close', async (req, res) => {
   try {
     const dealId = req.params.dealId;
-    const expert = await prisma.expert.findFirst({ where: { userId: req.user!.id } });
-    const lead = await prisma.consultationLead.findUnique({ where: { id: dealId } });
-    const relatedOrder = lead
-      ? await prisma.customOrder.findFirst({ where: { leadId: lead.id } })
-      : await prisma.customOrder.findUnique({ where: { id: dealId } });
-
+    const { lead, order: relatedOrder } = await loadDealParts(dealId);
     if (!lead && !relatedOrder) return fail(res, '记录不存在', 404);
 
-    const ownsLead = Boolean(lead && expert && lead.expertId === expert.id);
-    const ownsOrder = Boolean(
-      relatedOrder &&
-        (relatedOrder.creatorUserId === req.user!.id ||
-          relatedOrder.creatorUserId == null)
-    );
-    if (!ownsLead && !ownsOrder) return fail(res, '无权关闭该咨询', 403);
+    const audience = await resolveAudience(req.user!.id, lead, relatedOrder);
+    if (!audience) return fail(res, '无权关闭该咨询', 403);
 
     const orderStatus = relatedOrder?.status;
     if (relatedOrder && !CONSULTING_ORDER_STATUSES.includes(orderStatus || '')) {
@@ -263,14 +449,28 @@ customServicesRouter.post('/:dealId/close', async (req, res) => {
         data: { status: 'closed' }
       });
     }
+    const closeReason = audience === 'buyer' ? 'buyer_closed_consulting' : 'creator_closed_consulting';
     if (relatedOrder && CONSULTING_ORDER_STATUSES.includes(relatedOrder.status)) {
       await prisma.customOrder.update({
         where: { id: relatedOrder.id },
         data: {
           status: 'closed',
           closedAt: new Date(),
-          closeReason: 'creator_closed_consulting'
+          closeReason
         }
+      });
+    }
+
+    const otherId = await counterpartUserId(audience, lead, relatedOrder);
+    if (otherId && otherId !== req.user!.id) {
+      const notifyDealId = lead?.id || relatedOrder?.id;
+      await notifyUser({
+        userId: otherId,
+        type: 'consult_closed',
+        title: audience === 'buyer' ? '客户已关闭咨询' : '创作者已关闭咨询',
+        body: lead?.agentTitle || relatedOrder?.title || '',
+        link: `/consult?dealId=${notifyDealId}`,
+        payload: { dealId: notifyDealId, leadId: lead?.id, orderId: relatedOrder?.id }
       });
     }
 

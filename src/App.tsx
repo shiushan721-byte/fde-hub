@@ -9,9 +9,11 @@ import { BuyerOrderBillingView } from './components/BuyerOrderBillingView';
 import { ApiKeyView } from './components/ApiKeyView';
 import { AgentTestDrawer } from './components/AgentTestDrawer';
 import { ConsultationModal } from './components/ConsultationModal';
-import { ConsultationMessagesDrawer, mockUserNotifications } from './components/ConsultationMessagesDrawer';
+import { ConsultationMessagesDrawer } from './components/ConsultationMessagesDrawer';
+import { ConsultDealDrawer } from './components/ConsultDealDrawer';
+import { MessagesInboxView } from './components/MessagesInboxView';
 import { RechargeModal } from './components/RechargeModal';
-import { CreatorCenterTab } from './components/CreatorCenterView';
+import { CreatorCenterView, CreatorCenterTab } from './components/CreatorCenterView';
 import { PersonalCenterView } from './components/PersonalCenterView';
 import { CreatorOnboardingModal } from './components/CreatorOnboardingModal';
 import { CreatorDebugPanelModal } from './components/CreatorDebugPanelModal';
@@ -19,6 +21,7 @@ import { UserIdentityRole, CustomerLeadItem, ConsultationMessage } from './types
 import { FavoritesView } from './components/FavoritesView';
 import { ExpertsCatalogView } from './components/ExpertsCatalogView';
 import { AgentDetailView } from './components/AgentDetailView';
+import { LocalWorkbenchView } from './components/LocalWorkbenchView';
 import { InspirationDetailView } from './components/InspirationDetailView';
 import { FDEIntroView } from './components/FDEIntroView';
 import { DemoModeBar } from './components/DemoModeBar';
@@ -46,6 +49,7 @@ import {
   type PublicInspiration,
   getMockPublicInspiration
 } from './lib/inspiration';
+import { type InboxChannel } from './lib/notificationInbox';
 import {
   type NavigationFocus,
   type NotificationNavigationTarget
@@ -67,16 +71,21 @@ export default function App() {
   // Agent interactive trial drawer state
   const [activeTestAgent, setActiveTestAgent] = useState<AgentSolution | null>(null);
   const [isTestDrawerOpen, setIsTestDrawerOpen] = useState(false);
+  const [workbenchTabs, setWorkbenchTabs] = useState<HellomeAgentItem[]>([]);
+  const [activeWorkbenchTabId, setActiveWorkbenchTabId] = useState<string | null>(null);
 
   // Consultation modal & in-platform chat workspace
   const [isConsultationModalOpen, setIsConsultationModalOpen] = useState(false);
   const [consultationTargetExpert, setConsultationTargetExpert] = useState<FDEExpert | null>(null);
   const [consultationReferenceAgent, setConsultationReferenceAgent] = useState<AgentSolution | null>(null);
   const [consultationInitialPrompt, setConsultationInitialPrompt] = useState<string>('');
+  const [consultationInitialProjectIds, setConsultationInitialProjectIds] = useState<string[]>([]);
 
-  // 咨询提交后写入创作者中心「定制服务」，进度通过消息提醒通知用户
+  // 咨询提交后写入消息中心；确认方案后才进入「我的定制」
   const [sessionConsultationLeads, setSessionConsultationLeads] = useState<CustomerLeadItem[]>([]);
+  const [consultDealId, setConsultDealId] = useState<string | null>(null);
   const [isMessagesDrawerOpen, setIsMessagesDrawerOpen] = useState(false);
+  const [messagesInitialTab, setMessagesInitialTab] = useState<InboxChannel>('activity');
   const [apiUnreadCount, setApiUnreadCount] = useState(0);
   const [saveToastVisible, setSaveToastVisible] = useState(false);
   const [saveToastMessage, setSaveToastMessage] = useState('操作已完成');
@@ -88,16 +97,9 @@ export default function App() {
   };
 
   // Favorites & Likes
-  const [favoriteExpertIds, setFavoriteExpertIds] = useState<string[]>(['fde-linran', 'fde-maya']);
-  const [favoriteAgentIds, setFavoriteAgentIds] = useState<string[]>([
-    'hz-canvas',
-    'geo-helper',
-    'doc-emergency'
-  ]);
-  const [likedAgentIds, setLikedAgentIds] = useState<string[]>([
-    'hz-canvas',
-    'doc-emergency'
-  ]);
+  const [favoriteExpertIds, setFavoriteExpertIds] = useState<string[]>([]);
+  const [favoriteAgentIds, setFavoriteAgentIds] = useState<string[]>([]);
+  const [likedAgentIds, setLikedAgentIds] = useState<string[]>([]);
   const [favoritesInitialTab, setFavoritesInitialTab] = useState<'agents' | 'experts'>('agents');
   const [creatorCenterBackRoute, setCreatorCenterBackRoute] = useState<MainNavRoute | null>(null);
 
@@ -131,8 +133,25 @@ export default function App() {
     }
   };
 
+  const refreshEngagement = async () => {
+    try {
+      await ensureMarketplaceSession();
+      const data = await api<{
+        likedAgentIds: string[];
+        favoriteAgentIds: string[];
+        followedExpertIds: string[];
+      }>('/api/me/engagement');
+      setLikedAgentIds(data.likedAgentIds || []);
+      setFavoriteAgentIds(data.favoriteAgentIds || []);
+      setFavoriteExpertIds(data.followedExpertIds || []);
+    } catch {
+      /* keep local */
+    }
+  };
+
   useEffect(() => {
     void refreshUnreadCount();
+    void refreshEngagement();
   }, [userRole, isMessagesDrawerOpen]);
 
   const handleSwitchUserRole = (role: UserIdentityRole) => {
@@ -253,7 +272,9 @@ export default function App() {
     const from =
       currentRoute === 'agent-detail' || currentRoute === 'author-profile'
         ? agentDetailBackRoute
-        : 'hellome-home';
+        : currentRoute === 'local-workbench'
+          ? 'local-workbench'
+          : 'hellome-home';
     setAgentDetailBackRoute(from);
     detailAgentIdRef.current = agent.id;
     setActiveDetailAgent(agent);
@@ -287,6 +308,9 @@ export default function App() {
     leaveInspirationRoute();
 
     switch (target.route) {
+      case 'consult':
+        setConsultDealId(target.dealId || target.orderId || null);
+        return;
       case 'orders':
         setNavigationFocus({ orderId: target.orderId });
         setCurrentRoute('orders');
@@ -338,8 +362,9 @@ export default function App() {
         }
         break;
       }
-      default:
-        break;
+      case 'expert':
+        handleOpenAuthorProfile(target.expertId);
+        return;
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -425,11 +450,67 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog.homeAgents]);
 
+  const toggleEngagementList = async (input: {
+    id: string;
+    has: boolean;
+    setList: React.Dispatch<React.SetStateAction<string[]>>;
+    path: string;
+    flag: string;
+  }) => {
+    input.setList((prev) => (input.has ? prev.filter((id) => id !== input.id) : [...prev, input.id]));
+    try {
+      await ensureMarketplaceSession();
+      const result = await api<Record<string, unknown>>(input.path, {
+        method: 'POST',
+        body: '{}'
+      });
+      const on = Boolean(result[input.flag]);
+      input.setList((prev) => {
+        const next = new Set(prev);
+        if (on) next.add(input.id);
+        else next.delete(input.id);
+        return [...next];
+      });
+      void refreshUnreadCount();
+    } catch {
+      input.setList((prev) => {
+        const next = new Set(prev);
+        if (input.has) next.add(input.id);
+        else next.delete(input.id);
+        return [...next];
+      });
+    }
+  };
+
   // Toggle Like state on Agent
   const handleToggleLikeAgent = (agentId: string) => {
-    setLikedAgentIds((prev) =>
-      prev.includes(agentId) ? prev.filter((id) => id !== agentId) : [...prev, agentId]
-    );
+    void toggleEngagementList({
+      id: agentId,
+      has: likedAgentIds.includes(agentId),
+      setList: setLikedAgentIds,
+      path: `/api/me/agents/${encodeURIComponent(agentId)}/like`,
+      flag: 'liked'
+    });
+  };
+
+  const handleToggleFavoriteAgent = (agentId: string) => {
+    void toggleEngagementList({
+      id: agentId,
+      has: favoriteAgentIds.includes(agentId),
+      setList: setFavoriteAgentIds,
+      path: `/api/me/agents/${encodeURIComponent(agentId)}/favorite`,
+      flag: 'favorited'
+    });
+  };
+
+  const handleToggleFavoriteExpert = (expertId: string) => {
+    void toggleEngagementList({
+      id: expertId,
+      has: favoriteExpertIds.includes(expertId),
+      setList: setFavoriteExpertIds,
+      path: `/api/me/experts/${encodeURIComponent(expertId)}/follow`,
+      flag: 'followed'
+    });
   };
 
   const handleBackToHome = () => {
@@ -440,10 +521,50 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Open Live Agent Test Drawer for AgentSolution
+  const solutionToHellomeItem = (agent: AgentSolution): HellomeAgentItem => {
+    const existing = catalog.homeAgents.find((item) => item.id === agent.id);
+    if (existing) return existing;
+    return {
+      id: agent.id,
+      title: agent.title,
+      desc: agent.description || agent.subtitle,
+      category: agent.category,
+      coverImage: agent.coverImage,
+      gradient: 'from-slate-800 to-slate-950',
+      tagColor: 'slate',
+      authorName: agent.authorName,
+      authorId: agent.authorId,
+      likesCount: agent.likesCount,
+      favoritesCount: 0,
+      commentsCount: 0,
+      price: agent.priceFrom,
+      pricingPlans: agent.pricingPlans,
+      canFDECustom: agent.canFDECustom,
+      customProjects: agent.customProjects
+    };
+  };
+
+  const openInWorkbench = (agent: HellomeAgentItem) => {
+    setWorkbenchTabs((prev) => (prev.some((tab) => tab.id === agent.id) ? prev : [...prev, agent]));
+    setActiveWorkbenchTabId(agent.id);
+    setActiveAuthorId(null);
+    leaveAgentDetailRoute();
+    leaveInspirationRoute();
+    setCurrentRoute('local-workbench');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const closeWorkbenchTab = (id: string) => {
+    const next = workbenchTabs.filter((tab) => tab.id !== id);
+    setWorkbenchTabs(next);
+    if (activeWorkbenchTabId === id) {
+      setActiveWorkbenchTabId(next[next.length - 1]?.id ?? null);
+    }
+  };
+
+  // 使用市场智能体：在本地工作台以页签打开
   const handleTryAgent = (agent: AgentSolution) => {
-    setActiveTestAgent(agent);
-    setIsTestDrawerOpen(true);
+    openInWorkbench(solutionToHellomeItem(agent));
   };
 
   // Trigger Consultation for specific FDE
@@ -451,21 +572,30 @@ export default function App() {
     setConsultationTargetExpert(expert);
     setConsultationReferenceAgent(null);
     setConsultationInitialPrompt(initialPrompt || '');
+    setConsultationInitialProjectIds([]);
     setIsConsultationModalOpen(true);
   };
 
   // Trigger Consultation from an Agent Card
-  const handleConsultAgentCustomization = (agent: AgentSolution, initialPrompt?: string) => {
+  const handleConsultAgentCustomization = (
+    agent: AgentSolution,
+    initialPrompt?: string,
+    projectIds?: string[]
+  ) => {
     const author = catalog.experts.find((e) => e.id === agent.authorId) || catalog.experts[0];
     setConsultationTargetExpert(author);
     setConsultationReferenceAgent(agent);
+    setConsultationInitialProjectIds(projectIds || []);
     setConsultationInitialPrompt(
-      initialPrompt || `咨询「${agent.title}」的技术接入与服务方案`
+      initialPrompt ||
+        (projectIds?.length
+          ? `想基于「${agent.title}」做定制`
+          : `咨询「${agent.title}」的技术接入与服务方案`)
     );
     setIsConsultationModalOpen(true);
   };
 
-  // When user submits consultation form -> Enter Platform Escrow IM Room + 写入线索
+  // When user submits consultation form -> 消息·咨询提醒，不直接创建定制订单
   const handleConsultationSubmitSuccess = (data: ConsultationFormState) => {
     const spec = data.customizationSpec;
     const customizationSummary = spec
@@ -510,39 +640,38 @@ export default function App() {
       notes: data.businessProblem || '',
       messages: [firstMessage]
     };
-    setSessionConsultationLeads((prev) => [newLead, ...prev]);
 
     if (catalog.source === 'api') {
       import('./lib/marketplaceAuth').then(({ ensureMarketplaceSession }) =>
         ensureMarketplaceSession()
           .then(() =>
-            api('/api/consultations', {
+            api<{ lead?: { id: string } }>('/api/consultations', {
               method: 'POST',
               body: JSON.stringify({
                 ...data,
                 expertId: consultationTargetExpert?.id,
-                createCustomOrder: Boolean(data.customizationSpec && data.agentId),
+                createCustomOrder: false,
                 baseAgentVersion: data.standardVersionAtRequest || 'v1.0.0',
                 priceCents: data.priceCents
               })
             })
           )
           .then(() => {
-            showToast(
-              data.customizationSpec && data.agentId
-                ? '已创建定制订单；创作者接单后将分叉专属实例，运营审核通过后才会推送给你'
-                : '定制需求已保存，有进展时会通过消息提醒你'
-            );
+            showToast('定制需求已提交，有进展时会在消息中提醒你');
+            void refreshUnreadCount();
           })
-          .catch(() => undefined)
+          .catch(() => {
+            setSessionConsultationLeads((prev) => [newLead, ...prev]);
+            showToast('定制需求已保存，有进展时会通过消息提醒你');
+          })
       );
+    } else {
+      setSessionConsultationLeads((prev) => [newLead, ...prev]);
+      showToast('定制需求已保存，有进展时会通过消息提醒你');
     }
 
     setIsConsultationModalOpen(false);
     setIsTestDrawerOpen(false);
-    if (catalog.source !== 'api') {
-      showToast('定制需求已保存，有进展时会通过消息提醒你');
-    }
   };
 
   const hellomeItemToSolution = (agent: HellomeAgentItem): AgentSolution => {
@@ -585,20 +714,8 @@ export default function App() {
   };
 
   // 从智能体详情发起定制：已选定基础智能体，直接进入表单
-  const handleCustomizeFromHellomeAgent = (agent: HellomeAgentItem) => {
-    handleConsultAgentCustomization(hellomeItemToSolution(agent));
-  };
-
-  const handleToggleFavoriteExpert = (expertId: string) => {
-    setFavoriteExpertIds((prev) =>
-      prev.includes(expertId) ? prev.filter((id) => id !== expertId) : [...prev, expertId]
-    );
-  };
-
-  const handleToggleFavoriteAgent = (agentId: string) => {
-    setFavoriteAgentIds((prev) =>
-      prev.includes(agentId) ? prev.filter((id) => id !== agentId) : [...prev, agentId]
-    );
+  const handleCustomizeFromHellomeAgent = (agent: HellomeAgentItem, projectIds?: string[]) => {
+    handleConsultAgentCustomization(hellomeItemToSolution(agent), undefined, projectIds);
   };
 
   if (showAdmin) {
@@ -642,6 +759,7 @@ export default function App() {
         onOpenBecomeCreator={() => setIsCreatorOnboardingOpen(true)}
         onOpenMyExpertHome={() => {
           setCreatorCenterBackRoute('fde-experts');
+          setCreatorCenterTab('my-agents');
           setCurrentRoute('creator-center');
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
@@ -652,7 +770,7 @@ export default function App() {
       <div
         className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${
           sidebarCollapsed ? 'ml-18' : 'ml-56'
-        }`}
+        } ${currentRoute === 'local-workbench' ? 'h-screen overflow-hidden' : ''}`}
       >
         {/* Top Header */}
         <TopHeader
@@ -683,12 +801,12 @@ export default function App() {
                 ? handleBackFromInspiration
                 : handleBackToHome
           }
+          workbenchTabs={workbenchTabs.map((tab) => ({ id: tab.id, title: tab.title }))}
+          activeWorkbenchTabId={activeWorkbenchTabId}
+          onSelectWorkbenchTab={setActiveWorkbenchTabId}
+          onCloseWorkbenchTab={closeWorkbenchTab}
           onOpenRechargeModal={() => setIsRechargeOpen(true)}
-          unreadCount={
-            apiUnreadCount +
-            mockUserNotifications.filter((n) => n.unread).length +
-            sessionConsultationLeads.length
-          }
+          unreadCount={apiUnreadCount + sessionConsultationLeads.length}
           favoriteAgentCount={favoriteAgentIds.length}
           favoriteExpertCount={favoriteExpertIds.length}
           onOpenFavorites={(tab) => {
@@ -705,7 +823,29 @@ export default function App() {
         />
 
         {/* Dynamic Route Content */}
-        <main className="flex-1 w-full">
+        <main
+          className={
+            currentRoute === 'local-workbench'
+              ? 'flex-1 min-h-0 flex flex-col w-full'
+              : 'flex-1 w-full'
+          }
+        >
+          {currentRoute === 'local-workbench' && (
+            <LocalWorkbenchView
+              agents={catalog.homeAgents}
+              tabs={workbenchTabs}
+              activeTabId={activeWorkbenchTabId}
+              onOpenAgent={openInWorkbench}
+              onBrowseMarket={() => {
+                setCurrentRoute('hellome-home');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onCustomize={handleCustomizeFromHellomeAgent}
+              onOpenAuthor={handleOpenAuthorProfile}
+              onOpenAgentDetail={handleOpenAgentDetail}
+            />
+          )}
+
           {/* ROUTE 1: Hellome Home */}
           {currentRoute === 'hellome-home' && (
             <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
@@ -743,6 +883,7 @@ export default function App() {
               isExpert={isExpertRole(userRole)}
               onOpenMyExpertHome={() => {
                 setCreatorCenterBackRoute('fde-experts');
+                setCreatorCenterTab('my-agents');
                 setCurrentRoute('creator-center');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
@@ -820,12 +961,14 @@ export default function App() {
                 handleCustomizeFromHellomeAgent(agent);
               }}
               onUseAgent={(agent) => {
-                handleTryAgent(hellomeItemToSolution(agent));
+                openInWorkbench(agent);
               }}
               isFavorite={favoriteAgentIds.includes(activeDetailAgent.id)}
               onToggleFavorite={handleToggleFavoriteAgent}
               isLiked={likedAgentIds.includes(activeDetailAgent.id)}
               onToggleLike={handleToggleLikeAgent}
+              isAuthorFollowed={favoriteExpertIds.includes(activeDetailAgent.authorId || '')}
+              onToggleFollowAuthor={handleToggleFavoriteExpert}
               onToast={showToast}
               enableAuthorShowcaseTools={isExpertRole(userRole)}
               onOpenInspiration={(item) => handleOpenInspiration(item, 'agent')}
@@ -849,8 +992,48 @@ export default function App() {
             />
           )}
 
-          {/* ROUTE 3: Personal Center（普通用户与 AI-FDE 专家共用） */}
-          {currentRoute === 'creator-center' && (
+          {currentRoute === 'messages' && (
+            <MessagesInboxView
+              leads={sessionConsultationLeads}
+              initialTab={messagesInitialTab}
+              onNavigate={handleNotificationNavigate}
+              onUnreadChange={() => void refreshUnreadCount()}
+            />
+          )}
+
+          {/* ROUTE 3: AI 专家中心（智能体管理 / 定制服务 / 收益） */}
+          {currentRoute === 'creator-center' && isExpertRole(userRole) && (
+            <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+              <CreatorCenterView
+                key={creatorCenterTab}
+                initialTab={creatorCenterTab}
+                onOpenOnboardingModal={() => setIsCreatorOnboardingOpen(true)}
+                onOpenBecomeFDE={() => setIsCreatorOnboardingOpen(true)}
+                onNavigateToFDE={() => {
+                  handleOpenAuthorProfile('fde-linran');
+                }}
+                userRole={userRole}
+                sessionLeads={sessionConsultationLeads}
+                onOpenRecharge={() => setIsRechargeOpen(true)}
+                focusOrderId={navigationFocus?.orderId}
+                onFocusConsumed={clearNavigationFocus}
+                onBack={
+                  creatorCenterBackRoute
+                    ? () => {
+                        setCurrentRoute(creatorCenterBackRoute);
+                        setCreatorCenterBackRoute(null);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }
+                    : undefined
+                }
+                backLabel={
+                  creatorCenterBackRoute === 'fde-experts' ? '返回 AI 专家库' : '返回'
+                }
+              />
+            </div>
+          )}
+
+          {currentRoute === 'creator-center' && !isExpertRole(userRole) && (
             <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
               <PersonalCenterView
                 userRole={userRole}
@@ -888,10 +1071,15 @@ export default function App() {
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
                 onTryAgentItem={(agent) => {
-                  handleOpenAuthorProfile(agent.authorId || 'fde-linran');
+                  openInWorkbench(agent);
                 }}
                 onOpenAgentDetail={handleOpenAgentDetail}
                 onRunExclusiveAgent={(inst) => {
+                  const owned = catalog.homeAgents.find((item) => item.id === inst.baseAgentId);
+                  if (owned) {
+                    openInWorkbench(owned);
+                    return;
+                  }
                   const baseAgent = catalog.solutions.find((a) => a.id === inst.baseAgentId);
                   if (baseAgent) handleTryAgent(baseAgent);
                 }}
@@ -932,6 +1120,7 @@ export default function App() {
         referenceAgent={consultationReferenceAgent}
         availableAgents={catalog.solutions}
         initialPrompt={consultationInitialPrompt}
+        initialProjectIds={consultationInitialProjectIds}
         defaultContactName={userRole === 'normal' ? '普通用户' : '林然'}
         defaultContactPhone={userRole === 'normal' ? '13800008000' : '18800006699'}
         onSubmitSuccess={handleConsultationSubmitSuccess}
@@ -945,7 +1134,31 @@ export default function App() {
         }}
         leads={sessionConsultationLeads}
         onNavigate={handleNotificationNavigate}
+        onUnreadChange={() => void refreshUnreadCount()}
+        onOpenAllMessages={(tab) => {
+          setMessagesInitialTab(tab);
+          setIsMessagesDrawerOpen(false);
+          setActiveAuthorId(null);
+          leaveAgentDetailRoute();
+          leaveInspirationRoute();
+          setCurrentRoute('messages');
+          void refreshUnreadCount();
+          window.scrollTo({ top: 0 });
+        }}
       />
+      {consultDealId && (
+        <ConsultDealDrawer
+          dealId={consultDealId}
+          sessionLeads={sessionConsultationLeads}
+          onClose={() => setConsultDealId(null)}
+          onBecameOrder={(orderId) => {
+            setConsultDealId(null);
+            setNavigationFocus({ orderId });
+            setCurrentRoute('orders');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
+      )}
       <CreatorOnboardingModal
         isOpen={isCreatorOnboardingOpen}
         onClose={() => setIsCreatorOnboardingOpen(false)}

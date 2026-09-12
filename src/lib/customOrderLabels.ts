@@ -162,8 +162,6 @@ export type CustomServiceFilterKey =
 
 export const CUSTOM_SERVICE_FILTERS: { key: CustomServiceFilterKey; label: string }[] = [
   { key: 'all', label: '全部' },
-  { key: 'consulting', label: '咨询中' },
-  { key: 'awaiting_proposal_confirm', label: '待确认方案' },
   { key: 'awaiting_payment', label: '待支付' },
   { key: 'in_delivery', label: '待提交交付' },
   { key: 'in_review', label: '平台审核中' },
@@ -171,6 +169,30 @@ export const CUSTOM_SERVICE_FILTERS: { key: CustomServiceFilterKey; label: strin
   { key: 'completed', label: '已完成' },
   { key: 'closed', label: '已关闭/争议中' }
 ];
+
+const CONSULTING_STAGE_STATUSES = new Set(['consulting', 'pending_quote', 'awaiting_proposal_confirm']);
+const CONSULT_CLOSE_REASONS = new Set(['creator_closed_consulting', 'buyer_closed_consulting']);
+
+/** 尚未确认方案：只出现在消息·咨询，不进「我的定制」 */
+export function isConsultingStageDeal(deal: {
+  stageKey?: string;
+  order?: { status?: string; closeReason?: string; proposalConfirmedAt?: string } | null;
+}) {
+  const status = deal.order?.status;
+  if (!status) return true;
+  if (CONSULTING_STAGE_STATUSES.has(status)) return true;
+  if (status === 'closed' && CONSULT_CLOSE_REASONS.has(deal.order?.closeReason || '')) return true;
+  if (status === 'closed' && !deal.order?.proposalConfirmedAt && deal.stageKey === 'consulting') return true;
+  return false;
+}
+
+/** 买家已确认交付方案之后的订单 */
+export function isConfirmedCustomDeal(deal: {
+  stageKey?: string;
+  order?: { status?: string; closeReason?: string; proposalConfirmedAt?: string } | null;
+}) {
+  return !isConsultingStageDeal(deal);
+}
 
 /** 买家侧：不展示「平台审核中」，该阶段并入「待提交交付」 */
 export const BUYER_CUSTOM_SERVICE_FILTERS: { key: CustomServiceFilterKey; label: string }[] =

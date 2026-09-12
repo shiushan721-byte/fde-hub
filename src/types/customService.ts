@@ -41,6 +41,8 @@ export type CustomServiceOrder = {
   disputeReason?: string;
   revisionQuota?: number;
   revisionsUsed?: number;
+  closeReason?: string;
+  proposalConfirmedAt?: string;
   creator?: { name?: string };
   buyer?: { name?: string; email?: string };
   instance?: { id: string; title: string; currentVersion: string } | null;
@@ -63,4 +65,14 @@ export type CustomServiceDeal = {
   leadStatus?: string;
   consultedAt?: string;
   order: CustomServiceOrder | null;
+  audience?: 'buyer' | 'creator';
+  expertName?: string;
+  contacted?: boolean;
+  messages?: Array<{
+    id: string;
+    sender: string;
+    senderName: string;
+    text: string;
+    createdAt: string;
+  }>;
 };

@@ -69,6 +69,7 @@ import { CustomerAgentInstance } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
 import { AccountView } from './AccountView';
 import { api, ApiError } from '../lib/api';
+import { ensureAgentAuthorSession } from '../lib/marketplaceAuth';
 import { creatorAgentHasBeenUsed, creatorListingBadgeClass, creatorListingLabel } from '../lib/agentLifecycle';
 import { pricingLabel } from '../../shared/pricingPlans';
 
@@ -109,7 +110,7 @@ function platformSupportBadgeClass(support: CreatorAgentItem['platformSupport'])
 export type CreatorCenterTab =
   | 'profile-editor'   // 1. 主页编辑
   | 'my-agents'        // 2. 智能体管理（含通用 / 专属子 Tab）
-  | 'custom-services'  // 3. 定制服务（咨询 + 订单同一流程）
+  | 'custom-services'  // 3. 定制服务（确认方案后的订单）
   | 'account'          // 4. 我的收益（可提现 / 总收入 / 待入账 / 提现中）
   | 'customer-leads'   // 兼容旧入口：映射到定制服务
   | 'orders'           // 兼容旧入口：映射到定制服务
@@ -244,13 +245,17 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    api<CreatorAgentItem[]>('/api/me/agents')
-      .then((items) => {
-        if (!cancelled && Array.isArray(items)) setAgentsList(items);
-      })
-      .catch(() => {
+    (async () => {
+      try {
+        await ensureAgentAuthorSession('fde-linran');
+        const items = await api<CreatorAgentItem[]>('/api/me/agents');
+        if (cancelled || !Array.isArray(items) || items.length === 0) return;
+        const liveById = new Map(items.map((item) => [item.id, item]));
+        setAgentsList((prev) => prev.map((item) => liveById.get(item.id) ?? item));
+      } catch {
         /* keep mock fallback */
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -1095,7 +1100,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       )}
 
       {/* ========================================================= */}
-      {/* MODULE 3: 定制服务（咨询 + 订单同一流程）                  */}
+      {/* MODULE 3: 定制服务（确认方案后的订单）                  */}
       {/* ========================================================= */}
       {activeTab === 'custom-services' && (
         <div className="space-y-6">

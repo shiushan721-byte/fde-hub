@@ -2,26 +2,22 @@ import React from 'react';
 import {
   Home,
   Award,
-  Sparkles,
   LayoutDashboard,
   ClipboardList,
   Receipt,
-  Key,
+  Monitor,
+  Users,
+  Crown,
   PanelLeftClose,
   PanelLeft,
-  ChevronDown,
-  ExternalLink,
-  ShieldCheck,
-  Zap,
-  Users,
-  Star,
-  Crown
+  ChevronDown
 } from 'lucide-react';
 import { UserIdentityRole } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
 
 export type MainNavRoute =
   | 'hellome-home'
+  | 'local-workbench'
   | 'workspace'
   | 'orders'
   | 'order-center'
@@ -30,7 +26,8 @@ export type MainNavRoute =
   | 'favorites'
   | 'account'
   | 'apikey'
-  | 'fde-intro';
+  | 'fde-intro'
+  | 'messages';
 
 interface SidebarProps {
   currentRoute: MainNavRoute;
@@ -74,6 +71,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Home
     },
     {
+      key: 'local-workbench',
+      label: '本地工作台',
+      icon: Monitor
+    },
+    {
       key: 'workspace',
       label: '我的智能体',
       icon: LayoutDashboard
@@ -97,7 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   menuItems.push({
     key: 'creator-center',
-    label: '个人中心',
+    label: isExpert ? 'AI 专家中心' : '个人中心',
     icon: Crown
   });
 

@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { toJson } from '../lib/json';
 import { findExpertForUser } from './creatorAgents';
 import { isInspirationCategory } from '../../shared/inspirationCategories';
+import { notifyUser } from './notifications';
 
 const TITLE_MAX = 40;
 const PER_USER_LIMIT = 20;
@@ -18,10 +19,6 @@ function newShowcaseId() {
 
 function newLikeId() {
   return `asl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function newNotificationId() {
-  return `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function mapShowcase(row: {
@@ -162,7 +159,7 @@ export async function moderateAgentShowcase(input: {
 }) {
   const agent = await prisma.agent.findUnique({
     where: { id: input.agentId },
-    select: { id: true, authorId: true }
+    select: { id: true, title: true, authorId: true }
   });
   if (!agent) throw httpError('智能体不存在', 404);
   if (!input.asAdmin && !(await isAgentAuthor(input.actorUserId, agent.authorId))) {
@@ -202,6 +199,28 @@ export async function moderateAgentShowcase(input: {
     where: { id: row.id },
     data
   });
+
+  if (data.featured === true && !row.featured && updated.userId && updated.userId !== input.actorUserId) {
+    const actor = await prisma.user.findUnique({
+      where: { id: input.actorUserId },
+      select: { name: true }
+    });
+    const actorName = actor?.name || (input.asAdmin ? '平台运营' : '作者');
+    await notifyUser({
+      userId: updated.userId,
+      type: 'showcase_featured',
+      title: `你的成果「${updated.title || '未命名成果'}」被设为精选`,
+      body: `${actorName} 将你在「${agent.title}」上传的成果设为精选。`,
+      link: `/inspiration/${updated.id}`,
+      payload: {
+        showcaseId: updated.id,
+        agentId: agent.id,
+        agentTitle: agent.title,
+        actorUserId: input.actorUserId
+      }
+    });
+  }
+
   return mapShowcase(updated);
 }
 
@@ -499,20 +518,17 @@ export async function toggleShowcaseLike(input: { showcaseId: string; userId: st
   if (notifyUserId) {
     const likerName = (input.userName || '有人').trim() || '有人';
     const title = row.title || '未命名成果';
-    await prisma.userNotification.create({
-      data: {
-        id: newNotificationId(),
-        userId: notifyUserId,
-        type: 'showcase_like',
-        title: '有人点赞了你的成果',
-        body: `${likerName} 赞了「${title}」`,
-        link: `#/inspiration/${row.id}`,
-        payload: toJson({
-          showcaseId: row.id,
-          agentId: row.agent.id,
-          agentTitle: row.agent.title,
-          likerUserId: input.userId
-        })
+    await notifyUser({
+      userId: notifyUserId,
+      type: 'showcase_like',
+      title: '有人点赞了你的成果',
+      body: `${likerName} 赞了「${title}」`,
+      link: `/inspiration/${row.id}`,
+      payload: {
+        showcaseId: row.id,
+        agentId: row.agent.id,
+        agentTitle: row.agent.title,
+        likerUserId: input.userId
       }
     });
   }

@@ -11,6 +11,8 @@ interface ConsultationModalProps {
   referenceAgent?: AgentSolution | null;
   availableAgents?: AgentSolution[];
   initialPrompt?: string;
+  /** 打开时预选的定制项目 */
+  initialProjectIds?: string[];
   /** 登录用户姓名，打开时预填联系人 */
   defaultContactName?: string;
   /** 登录用户手机号，打开时预填且可修改 */
@@ -25,6 +27,7 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
   referenceAgent,
   availableAgents = [],
   initialPrompt = '',
+  initialProjectIds = [],
   defaultContactName = '',
   defaultContactPhone = '',
   onSubmitSuccess
@@ -60,12 +63,16 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
     }
 
     setRequirement(initialPrompt || '');
-    setSelectedProjectIds([]);
+    setSelectedProjectIds(
+      (initialProjectIds || []).filter((id) =>
+        activeCustomProjects(referenceAgent?.customProjects || []).some((item) => item.id === id)
+      )
+    );
     setContactName(defaultContactName || '');
     setContactCompany('');
     setContactPhone(defaultContactPhone || '');
     setIsSubmitting(false);
-  }, [isOpen, referenceAgent, initialPrompt, defaultContactName, defaultContactPhone, targetExpert?.id, expertAgents.length]);
+  }, [isOpen, referenceAgent, initialPrompt, initialProjectIds, defaultContactName, defaultContactPhone, targetExpert?.id, expertAgents.length]);
 
   if (!isOpen || !targetExpert) return null;
 

@@ -11,18 +11,16 @@ import {
   Award,
   ChevronDown,
   UserPlus,
-  CheckCircle2,
-  AlertCircle,
   Star,
-  Crown,
-  Lightbulb
+  Lightbulb,
+  X
 } from 'lucide-react';
 import { MainNavRoute } from './Sidebar';
 import { CreatorTierLevel, RealNameVerifyStatus, FDECertStatus, UserIdentityRole } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
 
 interface TopHeaderProps {
-  currentRoute: MainNavRoute | 'author-profile' | 'agent-detail' | 'inspiration-detail';
+  currentRoute: MainNavRoute | 'author-profile' | 'agent-detail' | 'inspiration-detail' | 'messages';
   onNavigate: (route: MainNavRoute) => void;
   onOpenRechargeModal: () => void;
   currentTier?: CreatorTierLevel;
@@ -43,6 +41,10 @@ interface TopHeaderProps {
   fdeCertStatus?: FDECertStatus;
   userRole?: UserIdentityRole;
   onToggleUserRole?: (role: UserIdentityRole) => void;
+  workbenchTabs?: Array<{ id: string; title: string }>;
+  activeWorkbenchTabId?: string | null;
+  onSelectWorkbenchTab?: (id: string) => void;
+  onCloseWorkbenchTab?: (id: string) => void;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
@@ -66,7 +68,11 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   realNameStatus = 'verified',
   fdeCertStatus = 'certified',
   userRole = 'normal',
-  onToggleUserRole
+  onToggleUserRole,
+  workbenchTabs = [],
+  activeWorkbenchTabId = null,
+  onSelectWorkbenchTab,
+  onCloseWorkbenchTab
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -90,8 +96,50 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
       className="sticky top-0 z-30 h-16 bg-white/90 backdrop-blur-md border-b border-slate-200/90 px-4 sm:px-6 flex items-center justify-between transition-all"
     >
       {/* Left Breadcrumb & Route Context */}
-      <div className="flex items-center gap-3">
-        {currentRoute === 'agent-detail' ? (
+      <div className="flex-1 min-w-0 flex items-center gap-3 pr-3">
+        {currentRoute === 'local-workbench' ? (
+          <div className="flex-1 min-w-0 h-10 flex items-end gap-1 overflow-x-auto no-scrollbar">
+            {workbenchTabs.length === 0 ? (
+              <div className="h-8 max-w-xs w-full rounded-lg bg-slate-50 border border-dashed border-slate-200 text-[11px] text-slate-400 flex items-center px-3">
+                暂无运行中的工作
+              </div>
+            ) : (
+              workbenchTabs.map((tab) => {
+                const isActive = tab.id === activeWorkbenchTabId;
+                return (
+                  <div
+                    key={tab.id}
+                    className={`group flex items-center gap-2 max-w-[200px] h-8 px-3 rounded-t-lg border border-b-0 text-xs shrink-0 ${
+                      isActive
+                        ? 'bg-slate-50 border-slate-200 text-slate-900 font-semibold'
+                        : 'bg-transparent border-transparent text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSelectWorkbenchTab?.(tab.id)}
+                      className="truncate cursor-pointer"
+                      title={tab.title}
+                    >
+                      {tab.title}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCloseWorkbenchTab?.(tab.id);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-slate-200 text-slate-400 cursor-pointer"
+                      aria-label={`关闭 ${tab.title}`}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        ) : currentRoute === 'agent-detail' ? (
           <div className="flex items-center gap-2 text-xs">
             <button
               onClick={onBackToHome || (() => onNavigate('hellome-home'))}
@@ -183,6 +231,18 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <span className="text-slate-900 font-bold">
               AI 专家库 · 真人实名专业开发者网络
             </span>
+          </div>
+        ) : currentRoute === 'messages' ? (
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              onClick={() => onNavigate('hellome-home')}
+              className="text-slate-500 hover:text-slate-900 font-medium flex items-center gap-1 cursor-pointer"
+            >
+              <Home size={13} />
+              <span>首页</span>
+            </button>
+            <ChevronRight size={12} className="text-slate-400" />
+            <span className="text-slate-900 font-bold">消息中心</span>
           </div>
         ) : currentRoute === 'favorites' ? (
           <div className="flex items-center gap-2 text-xs">

@@ -34,6 +34,9 @@ model User {
   withdrawals           Withdrawal[]
   agentPurchases        AgentPurchase[]
   showcaseLikes         AgentShowcaseLike[]
+  agentLikes            AgentLike[]
+  agentFavorites        AgentFavorite[]
+  expertFollows         ExpertFollow[]
 }
 
 model Session {
@@ -110,6 +113,8 @@ model Agent {
   shareLinks      AgentShareLink[]
   purchases       AgentPurchase[]
   showcases       AgentShowcase[]
+  likes           AgentLike[]
+  favorites       AgentFavorite[]
 }
 
 /** 分享链接：私有/已下架智能体凭 token 仍可访问 */
@@ -178,6 +183,45 @@ model AgentShowcase {
   @@index([featured, inspireCategory])
   comments    AgentComment[]
   likes       AgentShowcaseLike[]
+}
+
+/** 用户对智能体的点赞 */
+model AgentLike {
+  id        String   @id
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([agentId, userId])
+  @@index([userId])
+}
+
+/** 用户对智能体的收藏 */
+model AgentFavorite {
+  id        String   @id
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([agentId, userId])
+  @@index([userId])
+}
+
+/** 用户关注 AI 专家 */
+model ExpertFollow {
+  id        String   @id
+  expertId  String
+  expert    Expert   @relation(fields: [expertId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([expertId, userId])
+  @@index([userId])
 }
 
 /** 用户对成果的点赞 */
@@ -284,6 +328,7 @@ model Expert {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   certification   ExpertCertification?
+  follows         ExpertFollow[]
 }
 
 /** 平台统一维护的专家领域分类标签（上架才在前台展示/可选） */
