@@ -586,17 +586,12 @@ export default function App() {
     setConsultationTargetExpert(author);
     setConsultationReferenceAgent(agent);
     setConsultationInitialProjectIds(projectIds || []);
-    setConsultationInitialPrompt(
-      initialPrompt ||
-        (projectIds?.length
-          ? `想基于「${agent.title}」做定制`
-          : `咨询「${agent.title}」的技术接入与服务方案`)
-    );
+    setConsultationInitialPrompt(initialPrompt || '');
     setIsConsultationModalOpen(true);
   };
 
   // When user submits consultation form -> 消息·咨询提醒，不直接创建定制订单
-  const handleConsultationSubmitSuccess = (data: ConsultationFormState) => {
+  const handleConsultationSubmitSuccess = (data: ConsultationFormState, expert: FDEExpert) => {
     const spec = data.customizationSpec;
     const customizationSummary = spec
       ? [
@@ -641,6 +636,9 @@ export default function App() {
       messages: [firstMessage]
     };
 
+    const providerName = consultationReferenceAgent?.authorName || expert.name;
+    const successToast = `咨询已提交给 ${providerName}，专家将在后续与你联系。`;
+
     if (catalog.source === 'api') {
       import('./lib/marketplaceAuth').then(({ ensureMarketplaceSession }) =>
         ensureMarketplaceSession()
@@ -657,17 +655,17 @@ export default function App() {
             })
           )
           .then(() => {
-            showToast('定制需求已提交，有进展时会在消息中提醒你');
+            showToast(successToast);
             void refreshUnreadCount();
           })
           .catch(() => {
             setSessionConsultationLeads((prev) => [newLead, ...prev]);
-            showToast('定制需求已保存，有进展时会通过消息提醒你');
+            showToast(successToast);
           })
       );
     } else {
       setSessionConsultationLeads((prev) => [newLead, ...prev]);
-      showToast('定制需求已保存，有进展时会通过消息提醒你');
+      showToast(successToast);
     }
 
     setIsConsultationModalOpen(false);
@@ -681,6 +679,7 @@ export default function App() {
     if (existing) {
       return {
         ...existing,
+        authorName: agent.authorName || existing.authorName,
         canFDECustom: agent.canFDECustom,
         customProjects: agent.customProjects || existing.customProjects
       };
@@ -843,6 +842,7 @@ export default function App() {
               onCustomize={handleCustomizeFromHellomeAgent}
               onOpenAuthor={handleOpenAuthorProfile}
               onOpenAgentDetail={handleOpenAgentDetail}
+              onToast={showToast}
             />
           )}
 
@@ -957,8 +957,8 @@ export default function App() {
               onConsultAuthor={(agent) => {
                 handleCustomizeFromHellomeAgent(agent);
               }}
-              onCustomizeFromAgent={(agent) => {
-                handleCustomizeFromHellomeAgent(agent);
+              onCustomizeFromAgent={(agent, projectIds) => {
+                handleCustomizeFromHellomeAgent(agent, projectIds);
               }}
               onUseAgent={(agent) => {
                 openInWorkbench(agent);

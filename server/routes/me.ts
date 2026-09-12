@@ -35,6 +35,7 @@ import {
   mapPurchase,
   payCatalogPurchase
 } from '../services/catalogPurchase';
+import { checkoutStandardCustomProject, mapOrder } from '../services/customOrder';
 import {
   createAgentShowcase,
   deleteAgentShowcase,
@@ -799,6 +800,24 @@ meRouter.get('/agents/:id/adapters/:packageId/file', async (req, res) => {
     return fail(res, result.error || '无法下载', result.status, result.status === 401 ? 'UNAUTHENTICATED' : 'FORBIDDEN');
   }
   return sendAdapterFile(res, result.pack);
+});
+
+meRouter.post('/agents/:id/custom-projects/:projectId/checkout', async (req, res) => {
+  try {
+    const order = await checkoutStandardCustomProject({
+      buyerUserId: req.user!.id,
+      agentId: req.params.id,
+      projectId: req.params.projectId
+    });
+    return ok(res, mapOrder(order));
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '无法创建定制支付单',
+      status === 403 || status === 404 || status === 400 ? status : 400
+    );
+  }
 });
 
 meRouter.post('/agents/:id/checkout', async (req, res) => {

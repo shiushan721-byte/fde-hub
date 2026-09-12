@@ -11,6 +11,7 @@ import {
   platformFeeCentsForPrice
 } from './financeSettings';
 import { postEscrowReceived, postOrderSettlement } from './platformFinance';
+import { activeCustomProjects, snapshotCustomProjects } from '../../shared/customProjects';
 
 export function newId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -163,6 +164,105 @@ export async function createCustomOrder(input: {
       payload: { orderId: order.id, leadId: input.leadId, dealId }
     });
   }
+
+  return order;
+}
+
+function httpError(message: string, status: number) {
+  const err = new Error(message) as Error & { status: number };
+  err.status = status;
+  return err;
+}
+
+/** 用户按标准定制项标价直接下单，进入待支付托管 */
+export async function checkoutStandardCustomProject(input: {
+  buyerUserId: string;
+  agentId: string;
+  projectId: string;
+}) {
+  const agent = await prisma.agent.findFirst({
+    where: { id: input.agentId, status: 'published', creatorDeletedAt: null }
+  });
+  if (!agent) throw httpError('智能体不存在或已下架', 404);
+  if (agent.canFDECustom === false) throw httpError('该智能体暂不支持定制服务', 400);
+
+  const project = activeCustomProjects(parseJson(agent.customProjects, [])).find(
+    (item) => item.id === input.projectId
+  );
+  if (!project) throw httpError('定制服务不存在或已下架', 404);
+  if (project.price < 1) throw httpError('该定制服务尚未标价', 400);
+
+  const expert = agent.authorId
+    ? await prisma.expert.findUnique({ where: { id: agent.authorId } })
+    : null;
+  if (!expert?.userId) throw httpError('该服务暂无法下单，请先咨询专家', 400);
+
+  const now = new Date();
+  const priceCents = project.price * 100;
+  const snapshot = snapshotCustomProjects([project]);
+  const proposal = {
+    baseAgentId: agent.id,
+    baseAgentTitle: agent.title,
+    baseAgentVersion: 'v1.0.0',
+    customizationItems: [project.title],
+    excludedItems: [],
+    deliverables: [project.description || project.title],
+    priceCents,
+    deliveryDays: 14,
+    freeRevisionCount: 2,
+    acceptanceCriteria: `按标准服务「${project.title}」完成交付`,
+    afterSalePeriodDays: 30,
+    note: '用户按标价直接购买的标准定制服务',
+    submittedAt: now.toISOString(),
+    version: 1
+  };
+
+  const order = await prisma.customOrder.create({
+    data: {
+      id: newId('cord'),
+      orderNo: newOrderNo(),
+      status: 'awaiting_payment',
+      buyerUserId: input.buyerUserId,
+      creatorUserId: expert.userId,
+      expertId: expert.id,
+      baseAgentId: agent.id,
+      baseAgentTitle: agent.title,
+      baseAgentVersion: 'v1.0.0',
+      title: `${project.title} · ${agent.title}`,
+      customizationSpec: toJson({
+        selectedProjectIds: [project.id],
+        selectedProjects: snapshot,
+        unsatisfiedAreas: project.description || project.title
+      }),
+      priceCents,
+      deliveryDays: 14,
+      serviceScope: project.description || project.title,
+      deliveryProposal: toJson(proposal),
+      proposalVersion: 1,
+      proposalSubmittedAt: now,
+      proposalConfirmedAt: now,
+      quotedAt: now,
+      paymentDeadlineAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+      paymentStatus: 'none'
+    }
+  });
+
+  await writeOrderEvent({
+    orderId: order.id,
+    actorId: input.buyerUserId,
+    eventType: 'standard_custom_checkout',
+    toStatus: 'awaiting_payment',
+    payload: { projectId: project.id, priceCents }
+  });
+
+  await notify({
+    userId: expert.userId,
+    type: 'custom_order_pending_quote',
+    title: '有用户按标价下单定制服务',
+    body: `${order.orderNo} · ${project.title} · ¥${project.price}`,
+    link: `/orders?orderId=${order.id}`,
+    payload: { orderId: order.id, projectId: project.id }
+  });
 
   return order;
 }

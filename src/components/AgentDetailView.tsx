@@ -28,13 +28,14 @@ import { CommentThread, type ThreadComment } from './CommentThread';
 import { showcaseToPublicInspiration, type PublicInspiration } from '../lib/inspiration';
 import { yuanAmount } from '../lib/customOrderLabels';
 import { getMockComments } from '../data/agentSocialMock';
+import { activeCustomProjects } from '../../shared/customProjects';
 
 interface AgentDetailViewProps {
   agent: HellomeAgentItem;
   onBack: () => void;
   onOpenAuthorProfile: (authorId: string) => void;
   onConsultAuthor?: (agent: HellomeAgentItem, initialPrompt?: string) => void;
-  onCustomizeFromAgent?: (agent: HellomeAgentItem) => void;
+  onCustomizeFromAgent?: (agent: HellomeAgentItem, projectIds?: string[]) => void;
   onUseAgent?: (agent: HellomeAgentItem) => void;
   isFavorite?: boolean;
   onToggleFavorite?: (agentId: string) => void;
@@ -60,8 +61,9 @@ type CatalogLicense = {
 type CheckoutOrder = {
   id: string;
   priceCents: number;
-  kind?: 'catalog' | 'adapter';
+  kind?: 'catalog' | 'adapter' | 'custom';
   packageId?: string;
+  title?: string;
 };
 
 type AdapterEntitlement = {
@@ -115,6 +117,8 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const shareQuery = parseAgentShareHash(typeof window === 'undefined' ? '' : window.location.hash);
   const currentShareToken = shareQuery?.id === agent.id ? shareQuery.share : '';
   const adapterPackages = agent.adapterPackages || [];
+  const customProjects = agent.canFDECustom === false ? [] : activeCustomProjects(agent.customProjects || []);
+  const canCustomize = agent.canFDECustom !== false && Boolean(onCustomizeFromAgent || onConsultAuthor);
   const pricing = pricingFromAgent(agent);
   const priceText = pricingLabel(pricing);
   const saleYuan = pricing.price;
@@ -140,6 +144,30 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
       }, 2000);
     } catch {
       onToast?.('复制失败，请手动复制');
+    }
+  };
+
+  const startCustomProjectCheckout = async (projectId: string, title: string, priceYuan: number) => {
+    setBuyBusy(true);
+    try {
+      await ensureMarketplaceSession();
+      const order = await api<{ id: string; priceCents: number; title?: string }>(
+        `/api/me/agents/${agent.id}/custom-projects/${encodeURIComponent(projectId)}/checkout`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ channel: 'wechat' })
+        }
+      );
+      setCheckout({
+        id: order.id,
+        priceCents: order.priceCents || priceYuan * 100,
+        kind: 'custom',
+        title: order.title || title
+      });
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : '无法发起支付');
+    } finally {
+      setBuyBusy(false);
     }
   };
 
@@ -515,7 +543,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               </button>
             </div>
 
-            <div className="py-4 border-b border-slate-100">
+            <div className="py-4 border-b border-slate-100 space-y-4">
               {pricing.isFree ? (
                 <div>
                   <div className="text-[22px] font-bold text-emerald-600 leading-none">免费</div>
@@ -527,7 +555,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                     ￥{saleYuan}
                     <span className="text-[13px] font-medium text-slate-400"> 一次性</span>
                   </div>
-                  <p className="text-[12px] text-slate-400">购买后可长期使用，不按月或年续费</p>
+                  <p className="text-[12px] text-slate-400">购买后可长期使用</p>
                   {owned ? (
                     <p className="text-[11px] text-emerald-700">已购买，可长期使用</p>
                   ) : (
@@ -537,9 +565,53 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                       onClick={() => void startCheckout()}
                       className="w-full h-10 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[13px] font-semibold cursor-pointer disabled:opacity-60"
                     >
-                      {buyBusy ? '正在创建订单…' : `立即购买 ${yuanAmount(saleYuan * 100)}`}
+                      {buyBusy ? '正在创建订单…' : `立即解锁 ${yuanAmount(saleYuan * 100)}`}
                     </button>
                   )}
+                </div>
+              )}
+
+              {canCustomize && (
+                <div className="pt-4 border-t border-slate-100 space-y-2">
+                  <h4 className="text-[13px] font-bold text-slate-900">专家定制服务</h4>
+                  <p className="text-[11px] text-slate-500">
+                    以下服务由 {agent.authorName || authorExpert.name} 提供
+                  </p>
+                  {customProjects.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">暂无标准服务项，可咨询专家说明自定义需求。</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {customProjects.map((item) => (
+                        <li
+                          key={item.id}
+                          className="rounded-lg border border-slate-200 px-2.5 py-2 space-y-1"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-[12px] font-semibold text-slate-900 leading-snug">
+                              {item.title}
+                            </span>
+                            <span className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[12px] font-bold text-slate-900">¥{item.price}</span>
+                              <button
+                                type="button"
+                                disabled={buyBusy || item.price < 1}
+                                onClick={() => void startCustomProjectCheckout(item.id, item.title, item.price)}
+                                className="h-6 px-2 rounded-md bg-slate-900 text-white text-[10px] font-semibold hover:bg-slate-800 cursor-pointer disabled:opacity-60"
+                              >
+                                支付
+                              </button>
+                            </span>
+                          </div>
+                          {item.description ? (
+                            <p className="text-[11px] text-slate-500 leading-5">{item.description}</p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-[10px] text-slate-400 leading-4">
+                    标价服务可直接托管支付。非标需求请咨询专家，内容与交付以双方确认为准。
+                  </p>
                 </div>
               )}
             </div>
@@ -555,7 +627,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                   <span>立即体验</span>
                 </button>
               )}
-              {agent.canFDECustom !== false && (onCustomizeFromAgent || onConsultAuthor) && (
+              {canCustomize && (
                 <button
                   type="button"
                   id="btn-customize-from-agent"
@@ -565,7 +637,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                   }}
                   className="flex-1 h-10 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-[12px] font-semibold cursor-pointer flex items-center justify-center gap-1 active:scale-[0.98] transition-transform px-2"
                 >
-                  <span className="leading-tight text-center">基于此智能体定制</span>
+                  <span className="leading-tight text-center">咨询专家定制</span>
                   <ArrowRight size={13} className="shrink-0 text-slate-400" />
                 </button>
               )}
@@ -714,19 +786,39 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
       {checkout && (
         <PaymentCheckoutDrawer
           orderId={checkout.id}
-          title={agent.title}
+          title={checkout.title || agent.title}
           amountCents={checkout.priceCents}
-          heading={checkout.kind === 'adapter' ? '购买 Skill 下载' : '购买智能体'}
-          amountLabel="应付金额"
-          successTitle={checkout.kind === 'adapter' ? '购买成功' : '购买成功'}
+          heading={
+            checkout.kind === 'adapter'
+              ? '购买 Skill 下载'
+              : checkout.kind === 'custom'
+                ? '支付定制服务'
+                : '购买智能体'
+          }
+          amountLabel={checkout.kind === 'custom' ? '应付金额（平台托管）' : '应付金额'}
+          successTitle={checkout.kind === 'custom' ? '支付成功' : '购买成功'}
           successHint={
             checkout.kind === 'adapter'
               ? '支付成功后即可下载该适配 ZIP，并复制安装提示词。'
-              : '支付成功后按购买时价格开通，可长期使用；后续改价不影响已购使用权。'
+              : checkout.kind === 'custom'
+                ? '款项已进入平台托管。专家将按该标准服务开始交付，可在「我的定制」查看进度。'
+                : '支付成功后按购买时价格开通，可长期使用；后续改价不影响已购使用权。'
           }
-          escrowNote="演示环境：扫码不会真实扣款。支付成功后按购买时价格开通。"
-          payUrl={`/api/me/purchases/${checkout.id}/pay`}
-          confirmUrl={`/api/me/purchases/${checkout.id}/confirm`}
+          escrowNote={
+            checkout.kind === 'custom'
+              ? '演示环境：扫码不会真实扣款。资金由平台托管至验收完成。'
+              : '演示环境：扫码不会真实扣款。支付成功后按购买时价格开通。'
+          }
+          payUrl={
+            checkout.kind === 'custom'
+              ? `/api/custom-orders/${checkout.id}/pay`
+              : `/api/me/purchases/${checkout.id}/pay`
+          }
+          confirmUrl={
+            checkout.kind === 'custom'
+              ? `/api/custom-orders/${checkout.id}/confirm-escrow`
+              : `/api/me/purchases/${checkout.id}/confirm`
+          }
           onClose={() => setCheckout(null)}
           onPaid={() => {
             if (checkout.kind === 'adapter' && checkout.packageId) {
@@ -748,6 +840,11 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
               api<AdapterEntitlement[]>(`/api/me/agents/${agent.id}/adapter-licenses`)
                 .then(setAdapterEntitlements)
                 .catch(() => undefined);
+              return;
+            }
+            if (checkout.kind === 'custom') {
+              setCheckout(null);
+              onToast?.('支付成功，定制订单已托管，可在「我的定制」查看');
               return;
             }
             setLicense({

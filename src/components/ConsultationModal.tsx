@@ -4,6 +4,8 @@ import { FDEExpert, AgentSolution, ConsultationFormState } from '../types';
 import { getStandardVersionForAgent } from '../data/agentInstanceMockData';
 import { activeCustomProjects, customProjectsTotalYuan } from '../../shared/customProjects';
 
+const OTHER_INTENT = '__other__';
+
 interface ConsultationModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -42,7 +44,7 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
   const [step, setStep] = useState<'select-agent' | 'form'>(agentLocked ? 'form' : 'select-agent');
   const [selectedAgent, setSelectedAgent] = useState<AgentSolution | null>(referenceAgent || null);
   const [requirement, setRequirement] = useState('');
-  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [intentId, setIntentId] = useState('');
   const [contactName, setContactName] = useState('');
   const [contactCompany, setContactCompany] = useState('');
   const [contactPhone, setContactPhone] = useState('');
@@ -63,11 +65,9 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
     }
 
     setRequirement(initialPrompt || '');
-    setSelectedProjectIds(
-      (initialProjectIds || []).filter((id) =>
-        activeCustomProjects(referenceAgent?.customProjects || []).some((item) => item.id === id)
-      )
-    );
+    const validIds = activeCustomProjects(referenceAgent?.customProjects || []).map((item) => item.id);
+    const preset = (initialProjectIds || []).find((id) => validIds.includes(id));
+    setIntentId(preset || '');
     setContactName(defaultContactName || '');
     setContactCompany('');
     setContactPhone(defaultContactPhone || '');
@@ -77,27 +77,31 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
   if (!isOpen || !targetExpert) return null;
 
   const catalogProjects = activeCustomProjects(selectedAgent?.customProjects || []);
-  const selectedProjects = catalogProjects.filter((item) => selectedProjectIds.includes(item.id));
+  const selectedProjects =
+    intentId && intentId !== OTHER_INTENT
+      ? catalogProjects.filter((item) => item.id === intentId)
+      : [];
   const projectTotal = customProjectsTotalYuan(selectedProjects);
   const canSubmit =
-    Boolean(contactName.trim() && contactPhone.trim()) &&
-    (catalogProjects.length ? selectedProjects.length > 0 : Boolean(requirement.trim()));
+    Boolean(contactName.trim() && contactPhone.trim() && requirement.trim()) &&
+    (catalogProjects.length === 0 || Boolean(intentId));
 
   const handleSelectAgent = (agent: AgentSolution) => {
     setSelectedAgent(agent);
-    setSelectedProjectIds([]);
+    setIntentId('');
     setStep('form');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
-    if (catalogProjects.length && selectedProjects.length === 0) return;
-    const problem =
-      requirement.trim() ||
-      (selectedProjects.length ? `已选择定制项目：${selectedProjects.map((item) => item.title).join('、')}` : '');
-    if (!problem) return;
-    if (!contactName.trim() || !contactPhone.trim()) return;
+    if (!requirement.trim() || !contactName.trim() || !contactPhone.trim()) return;
+    const intentLabel = selectedProjects[0]
+      ? `意向服务：${selectedProjects[0].title}（¥${selectedProjects[0].price} 起）`
+      : intentId === OTHER_INTENT
+        ? '意向服务：其他定制需求'
+        : '';
+    const problem = [intentLabel, requirement.trim()].filter(Boolean).join('\n');
 
     setIsSubmitting(true);
     setTimeout(() => {
@@ -167,7 +171,9 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
               <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-400 border-2 border-slate-900 rounded-full" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-lg font-bold truncate">向 {targetExpert.name} 发起项目咨询</h2>
+              <h2 className="text-lg font-bold truncate">
+                {agentLocked ? '咨询专家定制' : `向 ${targetExpert.name} 发起项目咨询`}
+              </h2>
             </div>
           </div>
 
@@ -237,166 +243,148 @@ export const ConsultationModal: React.FC<ConsultationModalProps> = ({
 
         {(agentLocked || step === 'form') && (
           <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1">
-            {selectedAgent ? (
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <img
-                    src={selectedAgent.coverImage}
-                    alt={selectedAgent.title}
-                    referrerPolicy="no-referrer"
-                    className="w-10 h-10 rounded-lg object-cover shrink-0"
-                  />
-                  <div className="min-w-0">
-                    <span className="text-[10px] text-slate-500 uppercase font-semibold">咨询智能体</span>
-                    <p className="text-xs font-bold text-slate-900 truncate">{selectedAgent.title}</p>
-                  </div>
-                </div>
-                {!agentLocked && hasExpertAgents && (
-                  <button
-                    type="button"
-                    onClick={() => setStep('select-agent')}
-                    className="text-xs text-slate-600 hover:text-blue-700 px-2.5 py-1 rounded-lg border border-slate-200 hover:border-blue-300 bg-white cursor-pointer flex items-center gap-1 shrink-0"
-                  >
-                    <ArrowLeft size={12} />
-                    更换
-                  </button>
-                )}
-              </div>
-            ) : directConsultOnly ? (
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-xs text-slate-600 leading-relaxed">
-                暂无可选智能体，直接向专家咨询。
-              </div>
-            ) : null}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-[13px] text-slate-700 space-y-1">
+              <p>
+                <span className="text-slate-500">服务专家：</span>
+                <span className="font-semibold text-slate-900">
+                  {selectedAgent?.authorName || targetExpert.name}
+                </span>
+              </p>
+              {selectedAgent ? (
+                <p>
+                  <span className="text-slate-500">关联工具：</span>
+                  <span className="font-semibold text-slate-900">{selectedAgent.title}</span>
+                </p>
+              ) : directConsultOnly ? (
+                <p className="text-slate-500">暂无可选智能体，直接向专家咨询。</p>
+              ) : null}
+              {!agentLocked && selectedAgent && hasExpertAgents && (
+                <button
+                  type="button"
+                  onClick={() => setStep('select-agent')}
+                  className="mt-1 text-xs text-blue-600 hover:text-blue-800 cursor-pointer inline-flex items-center gap-1"
+                >
+                  <ArrowLeft size={12} />
+                  更换关联工具
+                </button>
+              )}
+            </div>
 
             {catalogProjects.length > 0 && (
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  选择定制项目
-                </label>
-                <p className="text-[11px] text-slate-500">
-                  价格由该智能体作者设定，提交后仍走咨询与平台托管。
-                </p>
+              <fieldset className="space-y-2">
+                <legend className="text-[13px] font-bold text-slate-900">
+                  意向服务 <span className="text-rose-500">*</span>
+                </legend>
                 <div className="space-y-2">
-                  {catalogProjects.map((item) => {
-                    const checked = selectedProjectIds.includes(item.id);
-                    return (
-                      <label
-                        key={item.id}
-                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer ${
-                          checked ? 'border-indigo-300 bg-indigo-50/70' : 'border-slate-200 bg-white'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          className="mt-0.5"
-                          checked={checked}
-                          onChange={() =>
-                            setSelectedProjectIds((prev) =>
-                              prev.includes(item.id)
-                                ? prev.filter((id) => id !== item.id)
-                                : [...prev, item.id]
-                            )
-                          }
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-bold text-slate-900">{item.title}</span>
-                            <span className="text-xs font-black text-amber-600 shrink-0">¥{item.price}</span>
-                          </span>
-                          {item.description ? (
-                            <span className="block text-[11px] text-slate-500 mt-0.5">{item.description}</span>
-                          ) : null}
-                        </span>
-                      </label>
-                    );
-                  })}
+                  {catalogProjects.map((item) => (
+                    <label
+                      key={item.id}
+                      className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer ${
+                        intentId === item.id ? 'border-slate-900 bg-slate-50' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="consult-intent"
+                        className="mt-0.5"
+                        checked={intentId === item.id}
+                        onChange={() => setIntentId(item.id)}
+                      />
+                      <span className="min-w-0 flex-1 text-[13px] text-slate-800">
+                        {item.title}（¥{item.price} 起）
+                      </span>
+                    </label>
+                  ))}
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer ${
+                      intentId === OTHER_INTENT ? 'border-slate-900 bg-slate-50' : 'border-slate-200 bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="consult-intent"
+                      className="mt-0.5"
+                      checked={intentId === OTHER_INTENT}
+                      onChange={() => setIntentId(OTHER_INTENT)}
+                    />
+                    <span className="text-[13px] text-slate-800">其他定制需求</span>
+                  </label>
                 </div>
-                <div className="text-right text-xs font-bold text-slate-800">
-                  合计 ¥{projectTotal}
-                </div>
-              </div>
+              </fieldset>
             )}
 
             <div>
-              <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                {catalogProjects.length ? '补充说明（选填）' : '填写需求'}
+              <label className="block text-[13px] font-bold text-slate-900 mb-1.5">
+                需求描述 <span className="text-rose-500">*</span>
               </label>
               <textarea
                 id="consult-requirement"
-                required={!catalogProjects.length}
-                rows={catalogProjects.length ? 3 : 5}
+                required
+                rows={4}
                 value={requirement}
                 onChange={(e) => setRequirement(e.target.value)}
-                placeholder={
-                  catalogProjects.length
-                    ? '如有额外要求可在这里补充…'
-                    : '请描述你的定制需求、业务场景或希望专家协助的内容…'
-                }
-                className="w-full p-3.5 bg-slate-50 hover:bg-white focus:bg-white text-sm text-slate-900 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all resize-none"
+                placeholder="请描述你的业务场景、定制需求和期望结果"
+                className="w-full p-3.5 bg-white text-sm text-slate-900 rounded-xl border border-slate-200 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 outline-none transition-all resize-none"
               />
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
-                联系人信息
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">联系人姓名</label>
-                  <input
-                    type="text"
-                    required
-                    value={contactName}
-                    onChange={(e) => setContactName(e.target.value)}
-                    placeholder="您的称呼"
-                    className="w-full px-3 py-2 bg-white text-xs text-slate-900 rounded-lg border border-slate-200 focus:border-blue-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">手机号</label>
-                  <input
-                    type="tel"
-                    required
-                    value={contactPhone}
-                    onChange={(e) => setContactPhone(e.target.value)}
-                    placeholder="便于专家与您联系"
-                    className="w-full px-3 py-2 bg-white text-xs text-slate-900 rounded-lg border border-slate-200 focus:border-blue-500 outline-none"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] text-slate-500 mb-1">企业 / 团队（选填）</label>
-                  <input
-                    type="text"
-                    value={contactCompany}
-                    onChange={(e) => setContactCompany(e.target.value)}
-                    placeholder="所属公司或团队名称"
-                    className="w-full px-3 py-2 bg-white text-xs text-slate-900 rounded-lg border border-slate-200 focus:border-blue-500 outline-none"
-                  />
-                </div>
-              </div>
+            <div>
+              <label className="block text-[13px] font-bold text-slate-900 mb-1.5">
+                联系人 <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                placeholder="请输入联系人姓名"
+                className="w-full px-3 py-2.5 bg-white text-sm text-slate-900 rounded-xl border border-slate-200 focus:border-slate-400 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[13px] font-bold text-slate-900 mb-1.5">
+                手机号 <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="tel"
+                required
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="请输入手机号"
+                className="w-full px-3 py-2.5 bg-white text-sm text-slate-900 rounded-xl border border-slate-200 focus:border-slate-400 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[13px] font-bold text-slate-900 mb-1.5">企业 / 团队</label>
+              <input
+                type="text"
+                value={contactCompany}
+                onChange={(e) => setContactCompany(e.target.value)}
+                placeholder="请输入企业或团队名称（选填）"
+                className="w-full px-3 py-2.5 bg-white text-sm text-slate-900 rounded-xl border border-slate-200 focus:border-slate-400 outline-none"
+              />
             </div>
 
             <div className="pt-1 flex items-center justify-between gap-4">
-              <span className="text-xs text-slate-500">提交后专家将尽快与您联系</span>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="px-4 py-2.5 text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  id="btn-submit-consultation"
-                  type="submit"
-                  disabled={isSubmitting || !canSubmit}
-                  className={`px-6 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 rounded-xl shadow-md transition-all ${
-                    isSubmitting ? 'opacity-70 cursor-wait' : 'cursor-pointer'
-                  }`}
-                >
-                  {isSubmitting ? '正在提交...' : '提交咨询'}
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2.5 text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer transition-colors"
+              >
+                取消
+              </button>
+              <button
+                id="btn-submit-consultation"
+                type="submit"
+                disabled={isSubmitting || !canSubmit}
+                className={`px-6 py-2.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-all ${
+                  isSubmitting ? 'opacity-70 cursor-wait' : 'cursor-pointer'
+                }`}
+              >
+                {isSubmitting ? '正在提交...' : '提交给专家'}
+              </button>
             </div>
           </form>
         )}

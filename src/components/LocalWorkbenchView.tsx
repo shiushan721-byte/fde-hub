@@ -7,8 +7,6 @@ import {
   MessageCircle,
   Minus,
   Send,
-  Sparkles,
-  User,
   ZoomIn,
   ZoomOut
 } from 'lucide-react';
@@ -17,6 +15,9 @@ import { mockExperts } from '../data/mockData';
 import { activeCustomProjects } from '../../shared/customProjects';
 import { pricingFromAgent, pricingLabel } from '../../shared/pricingPlans';
 import { useCatalog } from '../lib/catalog';
+import { api } from '../lib/api';
+import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
+import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
 
 export type WorkbenchTab = HellomeAgentItem;
 
@@ -50,6 +51,7 @@ interface LocalWorkbenchViewProps {
   onCustomize?: (agent: HellomeAgentItem, projectIds?: string[]) => void;
   onOpenAuthor?: (authorId: string) => void;
   onOpenAgentDetail?: (agent: HellomeAgentItem) => void;
+  onToast?: (message: string) => void;
 }
 
 const FEATURED_IDS = ['hz-canvas', 'img-compress', 'geo-helper', 'doc-emergency'];
@@ -71,7 +73,8 @@ export const LocalWorkbenchView: React.FC<LocalWorkbenchViewProps> = ({
   onBrowseMarket,
   onCustomize,
   onOpenAuthor,
-  onOpenAgentDetail
+  onOpenAgentDetail,
+  onToast
 }) => {
   const active = tabs.find((tab) => tab.id === activeTabId) || tabs[0] || null;
   const suggestions = useMemo(() => featuredAgents(agents), [agents]);
@@ -92,6 +95,7 @@ export const LocalWorkbenchView: React.FC<LocalWorkbenchViewProps> = ({
           onCustomize={onCustomize}
           onOpenAuthor={onOpenAuthor}
           onOpenAgentDetail={onOpenAgentDetail}
+          onToast={onToast}
         />
       ) : (
         <div className="flex-1 min-h-0 relative overflow-auto">
@@ -164,7 +168,8 @@ const AgentWorkbenchPane: React.FC<{
   onCustomize?: (agent: HellomeAgentItem, projectIds?: string[]) => void;
   onOpenAuthor?: (authorId: string) => void;
   onOpenAgentDetail?: (agent: HellomeAgentItem) => void;
-}> = ({ agent, infoExpanded, onToggleInfo, onCustomize, onOpenAuthor, onOpenAgentDetail }) => {
+  onToast?: (message: string) => void;
+}> = ({ agent, infoExpanded, onToggleInfo, onCustomize, onOpenAuthor, onOpenAgentDetail, onToast }) => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([
     {
@@ -273,6 +278,7 @@ const AgentWorkbenchPane: React.FC<{
         onCustomize={onCustomize}
         onOpenAuthor={onOpenAuthor}
         onOpenAgentDetail={onOpenAgentDetail}
+        onToast={onToast}
       />
       <div className="absolute bottom-4 right-4 flex items-center gap-1 rounded-full bg-white/90 border border-slate-200 px-2 py-1 text-[11px] text-slate-500 shadow-xs">
         <ZoomOut size={12} />
@@ -290,8 +296,15 @@ const WorkbenchAgentInfoCard: React.FC<{
   onCustomize?: (agent: HellomeAgentItem, projectIds?: string[]) => void;
   onOpenAuthor?: (authorId: string) => void;
   onOpenAgentDetail?: (agent: HellomeAgentItem) => void;
-}> = ({ agent, expanded, onToggle, onCustomize, onOpenAuthor, onOpenAgentDetail }) => {
+  onToast?: (message: string) => void;
+}> = ({ agent, expanded, onToggle, onCustomize, onOpenAuthor, onOpenAgentDetail, onToast }) => {
   const catalog = useCatalog();
+  const [checkout, setCheckout] = useState<{
+    id: string;
+    priceCents: number;
+    title: string;
+  } | null>(null);
+  const [payBusy, setPayBusy] = useState(false);
   const expert =
     catalog.experts.find((item) => item.id === agent.authorId) ||
     mockExperts.find((item) => item.id === agent.authorId) ||
@@ -302,6 +315,31 @@ const WorkbenchAgentInfoCard: React.FC<{
   const pricing = pricingFromAgent(agent);
   const priceText = pricingLabel(pricing);
 
+  const startCustomProjectCheckout = async (projectId: string, title: string, priceYuan: number) => {
+    setPayBusy(true);
+    try {
+      await ensureMarketplaceSession();
+      const order = await api<{ id: string; priceCents: number; title?: string }>(
+        `/api/me/agents/${agent.id}/custom-projects/${encodeURIComponent(projectId)}/checkout`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ channel: 'wechat' })
+        }
+      );
+      setCheckout({
+        id: order.id,
+        priceCents: order.priceCents || priceYuan * 100,
+        title: order.title || title
+      });
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : '无法发起支付');
+    } finally {
+      setPayBusy(false);
+    }
+  };
+
+  const expertName = agent.authorName || expert.name;
+
   if (!expanded) {
     return (
       <button
@@ -310,136 +348,152 @@ const WorkbenchAgentInfoCard: React.FC<{
         className="absolute top-4 right-4 z-20 h-9 px-3 rounded-full bg-white/95 border border-slate-200 shadow-md text-[12px] font-semibold text-slate-700 hover:bg-white cursor-pointer inline-flex items-center gap-1.5"
       >
         <Info size={13} className="text-blue-600" />
-        智能体简介
+        快速了解
       </button>
     );
   }
 
   return (
-    <aside className="absolute top-4 right-4 z-20 w-[300px] max-h-[min(72vh,560px)] bg-white/95 backdrop-blur-md border border-slate-200 rounded-2xl shadow-xl overflow-hidden flex flex-col">
-      <div className="px-3.5 py-2.5 border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
-        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">快捷了解</span>
+    <aside className="absolute top-4 right-4 z-20 w-[320px] bg-white/95 backdrop-blur-md border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+      <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between gap-2">
+        <span className="text-[13px] font-bold text-slate-900">快速了解</span>
         <button
           type="button"
           onClick={() => onToggle(false)}
-          className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 cursor-pointer inline-flex items-center justify-center"
+          className="w-6 h-6 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-700 cursor-pointer inline-flex items-center justify-center"
           aria-label="收起简介"
         >
           <Minus size={14} />
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3.5">
+      <div className="p-3 space-y-2.5">
         <div>
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-[10px] text-slate-400 mb-0.5">{agent.category}</p>
-              <h3 className="text-[14px] font-extrabold text-slate-900 leading-snug">{agent.title}</h3>
-            </div>
+          <p className="text-[11px] text-slate-400">{agent.category}</p>
+          <div className="flex items-start justify-between gap-2 mt-0.5">
+            <h3 className="text-[13px] font-extrabold text-slate-900 leading-snug">{agent.title}</h3>
             <span
-              className={`shrink-0 text-[12px] font-bold ${pricing.isFree ? 'text-emerald-600' : 'text-slate-900'}`}
+              className={`shrink-0 text-[13px] font-bold ${pricing.isFree ? 'text-emerald-600' : 'text-slate-900'}`}
             >
               {priceText}
             </span>
           </div>
-          <p className="mt-1.5 text-[12px] text-slate-500 leading-relaxed line-clamp-3">{agent.desc}</p>
+          <p className="mt-1.5 text-[12px] text-slate-500 leading-5">{agent.desc}</p>
         </div>
 
         {canCustomize && (
-          <div>
-            <p className="text-[11px] font-bold text-slate-800 mb-1.5">支持的定制项目</p>
+          <div className="pt-2.5 border-t border-slate-100 space-y-2">
+            <h4 className="text-[13px] font-extrabold text-slate-900">专家定制服务</h4>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onOpenAuthor?.(agent.authorId || expert.id)}
+                className="shrink-0 cursor-pointer"
+              >
+                <img
+                  src={expert.avatar}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="w-8 h-8 rounded-full object-cover border border-slate-200"
+                />
+              </button>
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => onOpenAuthor?.(agent.authorId || expert.id)}
+                  className="text-left cursor-pointer group w-full"
+                >
+                  <span className="block text-[12px] font-bold text-slate-900 truncate group-hover:text-blue-600">
+                    {expertName}
+                  </span>
+                  <span className="block text-[10px] text-slate-400 truncate">
+                    {expert.verifyLabel || expert.roleTag || 'AI 专家'}
+                  </span>
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenAuthor?.(agent.authorId || expert.id)}
+                className="shrink-0 h-6 px-1.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 rounded-md cursor-pointer"
+              >
+                查看主页
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-500">以下服务由 {expertName} 提供</p>
+
             {projects.length === 0 ? (
-              <p className="text-[11px] text-slate-400">暂无标准项目，可直接咨询专家定制。</p>
+              <p className="text-[11px] text-slate-400">暂无标准服务项，可直接咨询专家说明需求。</p>
             ) : (
               <ul className="space-y-1.5">
                 {projects.map((item) => (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      onClick={() => onCustomize?.(agent, [item.id])}
-                      className="w-full text-left rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 px-2.5 py-2 cursor-pointer"
-                    >
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="text-[12px] font-bold text-slate-900 truncate">{item.title}</span>
-                        <span className="text-[12px] font-extrabold text-amber-600 shrink-0">¥{item.price}</span>
+                  <li key={item.id} className="rounded-lg border border-slate-200 px-2.5 py-2 space-y-1">
+                    <span className="flex items-start justify-between gap-2">
+                      <span className="text-[12px] font-bold text-slate-900 leading-snug">{item.title}</span>
+                      <span className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[12px] font-extrabold text-slate-900">¥{item.price}</span>
+                        <button
+                          type="button"
+                          disabled={payBusy || item.price < 1}
+                          onClick={() => void startCustomProjectCheckout(item.id, item.title, item.price)}
+                          className="h-6 px-2 rounded-md bg-slate-900 text-white text-[10px] font-semibold hover:bg-slate-800 cursor-pointer disabled:opacity-60"
+                        >
+                          支付
+                        </button>
                       </span>
-                      {item.description ? (
-                        <span className="block text-[11px] text-slate-500 mt-0.5 line-clamp-2">
-                          {item.description}
-                        </span>
-                      ) : null}
-                    </button>
+                    </span>
+                    {item.description ? (
+                      <span className="block text-[11px] text-slate-500 leading-5">{item.description}</span>
+                    ) : null}
                   </li>
                 ))}
               </ul>
             )}
+
+            <button
+              type="button"
+              onClick={() => onCustomize?.(agent)}
+              className="w-full h-8 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[12px] font-semibold cursor-pointer inline-flex items-center justify-center gap-1"
+            >
+              咨询专家定制
+              <ArrowRight size={13} />
+            </button>
+            <p className="text-[10px] text-slate-400 leading-4">
+              标价服务可直接托管支付。非标需求请咨询专家，内容与交付以双方确认为准。
+            </p>
           </div>
         )}
 
-        <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-2.5">
-          <p className="text-[10px] font-bold text-slate-400 mb-2">归属专家</p>
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => onOpenAuthor?.(agent.authorId || expert.id)}
-              className="shrink-0 cursor-pointer"
-            >
-              <img
-                src={expert.avatar}
-                alt=""
-                referrerPolicy="no-referrer"
-                className="w-9 h-9 rounded-full object-cover border border-slate-200"
-              />
-            </button>
-            <div className="min-w-0 flex-1">
-              <button
-                type="button"
-                onClick={() => onOpenAuthor?.(agent.authorId || expert.id)}
-                className="text-left cursor-pointer group w-full"
-              >
-                <span className="block text-[12px] font-bold text-slate-900 truncate group-hover:text-blue-600">
-                  {agent.authorName || expert.name}
-                </span>
-                <span className="block text-[10px] text-slate-400 truncate">
-                  {expert.verifyLabel || expert.roleTag || 'AI 专家'}
-                </span>
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => onOpenAuthor?.(agent.authorId || expert.id)}
-              className="shrink-0 h-7 px-2 rounded-lg border border-slate-200 bg-white text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer inline-flex items-center gap-0.5"
-            >
-              <User size={11} />
-              主页
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-3 border-t border-slate-100 space-y-2 shrink-0">
-        {canCustomize && (
-          <button
-            type="button"
-            onClick={() => onCustomize?.(agent)}
-            className="w-full h-9 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[12px] font-semibold cursor-pointer inline-flex items-center justify-center gap-1"
-          >
-            <Sparkles size={13} />
-            基于此智能体定制
-            <ArrowRight size={13} />
-          </button>
-        )}
         {onOpenAgentDetail && (
           <button
             type="button"
             onClick={() => onOpenAgentDetail(agent)}
-            className="w-full h-8 rounded-lg text-[12px] font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 cursor-pointer inline-flex items-center justify-center gap-0.5"
+            className="w-full h-7 text-[12px] font-semibold text-slate-600 hover:text-slate-900 cursor-pointer inline-flex items-center justify-center gap-0.5"
           >
             查看完整介绍
             <ChevronRight size={13} />
           </button>
         )}
       </div>
+      {checkout && (
+        <PaymentCheckoutDrawer
+          orderId={checkout.id}
+          title={checkout.title}
+          amountCents={checkout.priceCents}
+          heading="支付定制服务"
+          amountLabel="应付金额（平台托管）"
+          successTitle="支付成功"
+          successHint="款项已进入平台托管。专家将按该标准服务开始交付，可在「我的定制」查看进度。"
+          escrowNote="演示环境：扫码不会真实扣款。资金由平台托管至验收完成。"
+          payUrl={`/api/custom-orders/${checkout.id}/pay`}
+          confirmUrl={`/api/custom-orders/${checkout.id}/confirm-escrow`}
+          onClose={() => setCheckout(null)}
+          onPaid={() => {
+            setCheckout(null);
+            onToast?.('支付成功，定制订单已托管，可在「我的定制」查看');
+          }}
+        />
+      )}
     </aside>
   );
 };
