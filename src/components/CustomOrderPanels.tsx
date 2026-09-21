@@ -2,16 +2,24 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Package,
   FileText,
+  Handshake,
+  MessageSquare,
   UploadCloud
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
 import {
-  CUSTOM_SERVICE_FILTERS,
-  CustomServiceFilterKey,
+  CONSULT_FILTERS,
+  ConsultFilterKey,
+  FULFILLMENT_FILTERS,
+  FulfillmentFilterKey,
+  consultListStatus,
   formatOrderTime,
-  isConfirmedCustomDeal,
-  matchesCustomServiceFilter,
+  fulfillmentListStatus,
+  isPaidFulfillmentDeal,
+  matchesConsultFilter,
+  matchesFulfillmentFilter,
+  paymentStatusText,
   yuan
 } from '../lib/customOrderLabels';
 import {
@@ -23,6 +31,7 @@ import { DeliveryProposal } from '../types/deliveryProposal';
 import { CustomServiceDeal, CustomServiceOrder } from '../types/customService';
 import { CustomerLeadItem, CreatorAgentItem } from '../types/creator';
 import { AgentPublishWizardModal } from './AgentPublishWizardModal';
+import { ConsultDealDrawer } from './ConsultDealDrawer';
 
 type OrderRow = CustomServiceOrder;
 
@@ -33,19 +42,10 @@ function selectedProjectsFromOrder(order?: OrderRow | null) {
   return Array.isArray(rows) ? rows.filter((row) => row?.title) : [];
 }
 
-/** 创作者：确认方案后的定制订单 */
-export const CreatorCustomOrdersPanel: React.FC<{
-  sessionLeads?: CustomerLeadItem[];
-  focusOrderId?: string;
-  onFocusConsumed?: () => void;
-}> = ({ sessionLeads = [], focusOrderId, onFocusConsumed }) => {
+function useCreatorDeals(sessionLeads: CustomerLeadItem[]) {
   const [deals, setDeals] = useState<CustomServiceDeal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [busyId, setBusyId] = useState('');
-  const [filter, setFilter] = useState<CustomServiceFilterKey>('all');
-  const [deliveryDeal, setDeliveryDeal] = useState<CustomServiceDeal | null>(null);
-  const [viewProposalDeal, setViewProposalDeal] = useState<CustomServiceDeal | null>(null);
 
   const reload = async () => {
     setLoading(true);
@@ -93,8 +93,150 @@ export const CreatorCustomOrdersPanel: React.FC<{
   };
 
   useEffect(() => {
-    reload();
+    void reload();
   }, [sessionLeads]);
+
+  return { deals, loading, error, reload };
+}
+
+/** 咨询单：尚未付款的定制需求，已转订单仍保留记录 */
+export const CreatorConsultationsPanel: React.FC<{
+  sessionLeads?: CustomerLeadItem[];
+  focusDealId?: string;
+  onFocusConsumed?: () => void;
+  onOpenOrder?: (orderId: string) => void;
+}> = ({ sessionLeads = [], focusDealId, onFocusConsumed, onOpenOrder }) => {
+  const { deals, loading, error, reload } = useCreatorDeals(sessionLeads);
+  const [filter, setFilter] = useState<ConsultFilterKey>('all');
+  const [openDealId, setOpenDealId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!focusDealId || loading) return;
+    const deal = deals.find(
+      (d) => d.dealId === focusDealId || d.leadId === focusDealId || d.orderId === focusDealId
+    );
+    if (deal) setOpenDealId(deal.dealId);
+    onFocusConsumed?.();
+  }, [focusDealId, loading, deals, onFocusConsumed]);
+
+  const filtered = useMemo(
+    () => deals.filter((d) => matchesConsultFilter(d, filter)),
+    [deals, filter]
+  );
+
+  if (loading) return <p className="text-sm text-slate-500">加载咨询单…</p>;
+  if (error) return <p className="text-sm text-rose-600">{error}</p>;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+            <MessageSquare size={15} className="text-blue-600" />
+            咨询单管理
+          </h3>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            用户提出需求、尚未付款。付款后自动生成订单，咨询单记录会保留并链接到订单。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200">
+            {CONSULT_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFilter(f.key)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
+                  filter === f.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => void reload()} className="text-[11px] text-blue-600 font-bold cursor-pointer shrink-0">
+            刷新
+          </button>
+        </div>
+      </div>
+      {filtered.length === 0 && <p className="text-xs text-slate-500">暂无咨询单。</p>}
+      {filtered.map((deal) => {
+        const consult = consultListStatus(deal);
+        const converted = consult.key === 'converted';
+        const orderId = deal.orderId || deal.order?.id || '';
+        return (
+          <div key={deal.dealId} className="p-3.5 rounded-2xl border border-slate-200 bg-white space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-slate-900">
+                  {deal.clientName}
+                  {deal.clientCompany ? ` · ${deal.clientCompany}` : ''}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {deal.agentTitle || deal.order?.baseAgentTitle || '未指定智能体'}
+                  {deal.consultedAt ? ` · ${formatOrderTime(deal.consultedAt)}` : ''}
+                </div>
+                <p className="text-[11px] text-slate-600 mt-1.5 line-clamp-2">{deal.requirement || '暂无需求描述'}</p>
+              </div>
+              <span
+                className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  converted ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                }`}
+              >
+                {consult.label}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setOpenDealId(deal.dealId)}
+                className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <Handshake size={14} />
+                {consult.key === 'pending_accept' ? '接单处理' : '查看沟通'}
+              </button>
+              {converted && orderId && (
+                <button
+                  type="button"
+                  onClick={() => onOpenOrder?.(orderId)}
+                  className="px-3.5 py-2 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold cursor-pointer"
+                >
+                  查看对应订单
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {openDealId && (
+        <ConsultDealDrawer
+          dealId={openDealId}
+          sessionLeads={sessionLeads}
+          onClose={() => {
+            setOpenDealId(null);
+            void reload();
+          }}
+          onBecameOrder={(orderId) => {
+            setOpenDealId(null);
+            onOpenOrder?.(orderId);
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+/** 订单管理：已付款、需要交付的标准商品与定制订单 */
+export const CreatorCustomOrdersPanel: React.FC<{
+  sessionLeads?: CustomerLeadItem[];
+  focusOrderId?: string;
+  onFocusConsumed?: () => void;
+}> = ({ sessionLeads = [], focusOrderId, onFocusConsumed }) => {
+  const { deals, loading, error, reload } = useCreatorDeals(sessionLeads);
+  const [busyId, setBusyId] = useState('');
+  const [filter, setFilter] = useState<FulfillmentFilterKey>('all');
+  const [deliveryDeal, setDeliveryDeal] = useState<CustomServiceDeal | null>(null);
+  const [viewProposalDeal, setViewProposalDeal] = useState<CustomServiceDeal | null>(null);
 
   useEffect(() => {
     if (!focusOrderId || loading) return;
@@ -116,7 +258,10 @@ export const CreatorCustomOrdersPanel: React.FC<{
   }, [focusOrderId, loading, deals, onFocusConsumed]);
 
   const filtered = useMemo(
-    () => deals.filter((d) => isConfirmedCustomDeal(d) && matchesCustomServiceFilter(d.stageKey, filter)),
+    () =>
+      deals.filter(
+        (d) => isPaidFulfillmentDeal(d) && matchesFulfillmentFilter(d.order?.status, filter)
+      ),
     [deals, filter]
   );
 
@@ -151,7 +296,7 @@ export const CreatorCustomOrdersPanel: React.FC<{
   const canUploadSkill = (status: string) =>
     ['paid_pending_start', 'escrowed', 'in_development', 'revision'].includes(status);
 
-  if (loading) return <p className="text-sm text-slate-500">加载定制服务…</p>;
+  if (loading) return <p className="text-sm text-slate-500">加载订单…</p>;
   if (error) return <p className="text-sm text-rose-600">{error}</p>;
 
   return (
@@ -160,15 +305,15 @@ export const CreatorCustomOrdersPanel: React.FC<{
         <div>
           <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
             <Package size={15} className="text-blue-600" />
-            定制服务
+            订单管理
           </h3>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            用户确认方案后的订单在这里。新咨询请到消息中心处理。
+            仅处理已付款项目：直接购买的标准商品，以及由咨询单转化的定制订单。
           </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200">
-            {CUSTOM_SERVICE_FILTERS.map((f) => (
+            {FULFILLMENT_FILTERS.map((f) => (
               <button
                 key={f.key}
                 type="button"
@@ -181,22 +326,19 @@ export const CreatorCustomOrdersPanel: React.FC<{
               </button>
             ))}
           </div>
-          <button type="button" onClick={reload} className="text-[11px] text-blue-600 font-bold cursor-pointer shrink-0">
+          <button type="button" onClick={() => void reload()} className="text-[11px] text-blue-600 font-bold cursor-pointer shrink-0">
             刷新
           </button>
         </div>
       </div>
       {filtered.length === 0 && (
-        <p className="text-xs text-slate-500">暂无定制订单。用户确认交付方案后会出现在这里。</p>
+        <p className="text-xs text-slate-500">暂无已付款订单。咨询单付款后会自动出现在这里。</p>
       )}
       {filtered.map((deal) => {
         const order = deal.order;
         const hasPrice = (order?.priceCents || 0) > 0;
         const proposal = order?.deliveryProposal as DeliveryProposal | undefined;
-        const isConsulting = deal.stageKey === 'consulting';
-        const timeValue = isConsulting
-          ? deal.consultedAt || order?.createdAt
-          : order?.createdAt || deal.consultedAt;
+        const fulfill = fulfillmentListStatus(order?.status);
         const canViewProposal = hasViewableProposal(proposal);
         const isFocused =
           focusOrderId &&
@@ -214,48 +356,57 @@ export const CreatorCustomOrdersPanel: React.FC<{
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold text-slate-900">
-                  {deal.clientName}
+                  {deal.clientName || order?.buyer?.name || '购买用户'}
                   {deal.clientCompany ? ` · ${deal.clientCompany}` : ''}
                 </div>
                 <div className="text-[11px] text-slate-500 mt-0.5">
-                  {order?.orderNo || '尚未成单'} · 基于 {deal.agentTitle || order?.baseAgentTitle || '未指定智能体'}
-                  {deal.standardVersionAtRequest || order?.baseAgentVersion
-                    ? ` ${deal.standardVersionAtRequest || order?.baseAgentVersion}`
-                    : ''}
+                  {order?.orderNo || '订单'} · {deal.agentTitle || order?.baseAgentTitle || '未指定智能体'}
+                  {order?.baseAgentVersion ? ` ${order.baseAgentVersion}` : ''}
                 </div>
                 {selectedProjectsFromOrder(order).length > 0 && (
                   <div className="text-[11px] text-slate-600 mt-1">
-                    标准项目：
+                    商品 / 定制项目：
                     {selectedProjectsFromOrder(order)
                       .map((item) => `${item.title}${item.price ? ` ¥${item.price}` : ''}`)
                       .join('、')}
                   </div>
                 )}
-                {timeValue && (
-                  <div className="text-[11px] text-slate-500 mt-1">
-                    {isConsulting ? '咨询时间' : '下单时间'} · {formatOrderTime(timeValue)}
-                  </div>
-                )}
+                <div className="text-[11px] text-slate-500 mt-1 space-y-0.5">
+                  {order?.createdAt && <div>下单时间 · {formatOrderTime(order.createdAt)}</div>}
+                  {order?.paidAt && <div>付款时间 · {formatOrderTime(order.paidAt)}</div>}
+                  {order?.acceptanceDeadlineAt && (
+                    <div>验收截止 · {formatOrderTime(order.acceptanceDeadlineAt)}</div>
+                  )}
+                  {order?.deliveryDays ? <div>交付期限 · {order.deliveryDays} 天</div> : null}
+                </div>
               </div>
               <div className="text-right shrink-0 space-y-1.5">
                 <span className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
-                  {deal.stageLabel}
+                  {fulfill.label}
                 </span>
                 <div>
-                  <div className="text-[10px] font-bold text-slate-400 tracking-wide">订单价格</div>
+                  <div className="text-[10px] font-bold text-slate-400 tracking-wide">已支付金额</div>
                   <div
                     className={`text-lg font-black tabular-nums leading-tight ${
                       hasPrice ? 'text-amber-600' : 'text-slate-300'
                     }`}
                   >
-                    {hasPrice ? yuan(order?.priceCents) : '待填写'}
+                    {hasPrice ? yuan(order?.priceCents) : '—'}
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    托管 {paymentStatusText[order?.paymentStatus || ''] || paymentStatusText.none}
                   </div>
                 </div>
               </div>
             </div>
+            {(order?.serviceScope || order?.quoteNote) && (
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                服务方案：{order.serviceScope || order.quoteNote}
+              </p>
+            )}
             {order?.instance && (
               <p className="text-[11px] text-slate-600">
-                专属实例：{order.instance.title}
+                当前交付版本：{order.instance.title}
                 {order.instance.currentVersion ? ` · ${order.instance.currentVersion}` : ''}
               </p>
             )}
@@ -281,7 +432,7 @@ export const CreatorCustomOrdersPanel: React.FC<{
                   className="px-3.5 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold cursor-pointer flex items-center gap-1.5 disabled:opacity-60 shadow-sm shadow-indigo-600/20"
                 >
                   <UploadCloud size={14} />
-                  上传 Skill
+                  上传交付版本
                 </button>
               )}
             </div>

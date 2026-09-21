@@ -13,11 +13,13 @@ import { consultationRouter } from './routes/consultations';
 import { expertApplicationRouter } from './routes/expertApplications';
 import { meRouter } from './routes/me';
 import { customOrderRouter } from './routes/customOrders';
+import { dmRouter } from './routes/dm';
 import { seedDatabase, ensureExpertApplicationSeed } from './db/seed';
 import { ensureExpertNos } from './lib/expertNo';
 import { startCustomOrderJobScheduler } from './services/customOrderJobs';
 import { customServicesRouter } from './routes/customServices';
 import { walletRouter } from './routes/wallet';
+import { handleRobots, handleSeoPage, handleSitemap } from './seo';
 
 
 dotenv.config();
@@ -50,12 +52,40 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/me', meRouter);
 app.use('/api/custom-orders', customOrderRouter);
+app.use('/api/dm', dmRouter);
 app.use('/api/custom-services', customServicesRouter);
 app.use('/api/wallet', walletRouter);
 app.use('/api/public', publicRouter);
 app.use('/api/consultations', consultationRouter);
 app.use('/api/expert-applications', expertApplicationRouter);
 app.use('/api/admin', requireAdmin, adminRouter);
+
+// Public pages are rendered on the server so crawlers and link previews receive
+// the page's real title, description, content and structured data without JS.
+const asyncRoute =
+  (handler: (req: express.Request, res: express.Response) => Promise<unknown>) =>
+  (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    void handler(req, res).catch(next);
+  };
+app.get('/robots.txt', handleRobots);
+app.get('/sitemap.xml', asyncRoute(handleSitemap));
+app.get('/', asyncRoute(handleSeoPage));
+app.get('/agents', asyncRoute(handleSeoPage));
+app.get('/experts', asyncRoute(handleSeoPage));
+app.get('/inspirations', asyncRoute(handleSeoPage));
+app.get('/agent/:agentId', asyncRoute(handleSeoPage));
+app.get('/expert/:expertId', asyncRoute(handleSeoPage));
+app.get('/inspiration/:inspirationId', asyncRoute(handleSeoPage));
+
+const distDir = path.resolve(process.cwd(), 'dist');
+const isProd = process.env.NODE_ENV === 'production';
+app.use(
+  express.static(distDir, {
+    index: false,
+    maxAge: isProd ? '1y' : 0,
+    immutable: isProd
+  })
+);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
@@ -78,3 +108,5 @@ start().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+
+

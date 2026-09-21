@@ -18,6 +18,7 @@ import {
   listExpertTags
 } from '../services/expertTags';
 import { listExpertTitles } from '../services/expertTitles';
+import { listActiveOfficialTemplates } from '../services/officialProducts';
 import { isAgentAuthor, listAgentShowcases, listPublicInspirations, getPublicInspiration, toggleShowcaseLike } from '../services/agentShowcases';
 import { createComment, listComments } from '../services/agentComments';
 import { recommendAgents } from '../services/agentRecommend';
@@ -195,7 +196,7 @@ publicRouter.post('/agents/:id/share-link', async (req, res) => {
   return ok(res, {
     public: isPublic,
     token,
-    path: `/#/agent/${encodeURIComponent(agent.id)}?share=${token}`
+    path: `/agent/${encodeURIComponent(agent.id)}?share=${token}`
   });
 });
 
@@ -205,8 +206,17 @@ publicRouter.get('/expert-tags', async (_req, res) => {
 });
 
 publicRouter.get('/expert-titles', async (_req, res) => {
-  const titles = await listExpertTitles({ status: 'active' });
-  return ok(res, titles.map((t) => ({ id: t.id, name: t.name, sortOrder: t.sortOrder })));
+  try {
+    const titles = await listExpertTitles({ status: 'active' });
+    return ok(res, titles.map((t) => ({ id: t.id, name: t.name, sortOrder: t.sortOrder })));
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '加载头衔失败', 500, 'INTERNAL');
+  }
+});
+
+publicRouter.get('/official-products', async (_req, res) => {
+  const items = await listActiveOfficialTemplates();
+  return ok(res, items);
 });
 
 publicRouter.get('/experts', async (_req, res) => {

@@ -52,6 +52,12 @@ import {
   validateActiveExpertTitle
 } from '../services/expertTitles';
 import { listAdminShowcases, listAllAgentShowcases, moderateAgentShowcase } from '../services/agentShowcases';
+import {
+  createOfficialProduct,
+  listCustomProductsFromAgents,
+  listOfficialProducts,
+  updateOfficialProduct
+} from '../services/officialProducts';
 
 export const adminRouter = Router();
 
@@ -2727,3 +2733,87 @@ adminRouter.get('/audit-logs', async (_req, res) => {
   });
   return ok(res, logs.map((log) => ({ ...log, diff: parseJson(log.diff, {}) })));
 });
+
+adminRouter.get('/official-products', async (_req, res) => {
+  const items = await listOfficialProducts({ status: 'all' });
+  return ok(res, items);
+});
+
+const officialProductSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional().default(''),
+  suggestedPrice: z.number().int().min(0).optional(),
+  sortOrder: z.number().int().optional()
+});
+
+adminRouter.post('/official-products', async (req, res) => {
+  const parsed = officialProductSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const item = await createOfficialProduct(parsed.data);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'create_official_product',
+      targetType: 'official_product',
+      targetId: item.id,
+      diff: parsed.data
+    });
+    return ok(res, item);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '创建失败');
+  }
+});
+
+adminRouter.patch('/official-products/:id', async (req, res) => {
+  const parsed = officialProductSchema.partial().safeParse(req.body);
+  if (!parsed.success) return fail(res, '参数不合法');
+  try {
+    const item = await updateOfficialProduct(req.params.id, parsed.data);
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'update_official_product',
+      targetType: 'official_product',
+      targetId: item.id,
+      diff: parsed.data
+    });
+    return ok(res, item);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '更新失败');
+  }
+});
+
+adminRouter.post('/official-products/:id/offline', async (req, res) => {
+  try {
+    const item = await updateOfficialProduct(req.params.id, { status: 'offline' });
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'offline_official_product',
+      targetType: 'official_product',
+      targetId: item.id
+    });
+    return ok(res, item);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '下架失败');
+  }
+});
+
+adminRouter.post('/official-products/:id/online', async (req, res) => {
+  try {
+    const item = await updateOfficialProduct(req.params.id, { status: 'active' });
+    await writeAudit({
+      actorId: actorId(req),
+      action: 'online_official_product',
+      targetType: 'official_product',
+      targetId: item.id
+    });
+    return ok(res, item);
+  } catch (error) {
+    return fail(res, error instanceof Error ? error.message : '上架失败');
+  }
+});
+
+adminRouter.get('/custom-products', async (_req, res) => {
+  const items = await listCustomProductsFromAgents();
+  return ok(res, items);
+});
+

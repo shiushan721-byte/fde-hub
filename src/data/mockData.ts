@@ -46,7 +46,8 @@ function listedCustomProjects(
       description: flowDescription,
       price: 200,
       active: true,
-      sortOrder: 0
+      sortOrder: 0,
+      source: 'custom'
     },
     {
       id: extra.id,
@@ -54,7 +55,8 @@ function listedCustomProjects(
       description: extra.description,
       price: extra.price,
       active: true,
-      sortOrder: 1
+      sortOrder: 1,
+      source: 'custom'
     }
   ];
 }

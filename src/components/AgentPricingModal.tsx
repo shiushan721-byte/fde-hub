@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { CreatorAgentItem } from '../types/creator';
 import { AGENT_PRICE_CHANGE_NOTICE } from '../lib/agentLifecycle';
-import { api, ApiError } from '../lib/api';
+import { api } from '../lib/api';
 import { catalogPriceYuan, normalizePricingPlans, pricingFromAgent, validatePaidPlans } from '../../shared/pricingPlans';
 import {
   adapterPackageIsFree,
@@ -12,6 +12,7 @@ import {
   type AgentAdapterPackage
 } from '../../shared/adapterPackages';
 import { normalizeCustomProjects, validateCustomProjects, type AgentCustomProject } from '../../shared/customProjects';
+import { applyOfficialProductDefaults } from '../lib/useOfficialProducts';
 import { AgentPricingFields } from './AgentPricingFields';
 import { AgentCustomProjectsFields } from './AgentCustomProjectsFields';
 
@@ -43,6 +44,19 @@ export const AgentPricingModal: React.FC<AgentPricingModalProps> = ({ agent, onC
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void applyOfficialProductDefaults(
+      normalizeCustomProjects(agent.customProjects || []),
+      agent.omittedOfficialProductIds || []
+    ).then((next) => {
+      if (!cancelled) setProjects(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [agent.id, agent.customProjects, agent.omittedOfficialProductIds]);
 
   useEffect(() => {
     setError('');
@@ -85,7 +99,12 @@ export const AgentPricingModal: React.FC<AgentPricingModalProps> = ({ agent, onC
         method: 'PUT',
         body: JSON.stringify(plans)
       });
-      await api(`/api/me/agents/${agent.id}/custom-projects`, {
+      const saved = await api<{
+        id: string;
+        canFDECustom: boolean;
+        customProjects: AgentCustomProject[];
+        omittedOfficialProductIds?: string[];
+      }>(`/api/me/agents/${agent.id}/custom-projects`, {
         method: 'PUT',
         body: JSON.stringify({ enabled: customEnabled, projects: normalizedProjects })
       });
@@ -95,32 +114,28 @@ export const AgentPricingModal: React.FC<AgentPricingModalProps> = ({ agent, onC
           body: JSON.stringify({ packages: adapterPackages })
         });
       }
+      onSaved({
+        ...agent,
+        pricingType: plans.isFree ? 'free' : 'paid',
+        price: catalogPriceYuan(plans),
+        pricingPlans: plans,
+        fdeCustomEnabled: saved.canFDECustom,
+        customProjects: saved.customProjects,
+        omittedOfficialProductIds: saved.omittedOfficialProductIds || agent.omittedOfficialProductIds,
+        adapterPackages,
+        updatedAt: '刚刚'
+      });
     } catch (err) {
-      const status = err instanceof ApiError ? err.status : undefined;
-      const code = err instanceof ApiError ? err.code : '';
-      if (status !== 401 && status !== 403 && status !== 404 && code !== 'NETWORK_ERROR') {
-        setError(err instanceof Error ? err.message : '定价更新失败');
-        setSaving(false);
-        return;
-      }
+      setError(err instanceof Error ? err.message : '定价更新失败');
+    } finally {
+      setSaving(false);
     }
-    onSaved({
-      ...agent,
-      pricingType: plans.isFree ? 'free' : 'paid',
-      price: catalogPriceYuan(plans),
-      pricingPlans: plans,
-      fdeCustomEnabled: customEnabled,
-      customProjects: normalizedProjects,
-      adapterPackages,
-      updatedAt: '刚刚'
-    });
-    setSaving(false);
   };
 
   const tabs: Array<{ id: PricingTab; label: string }> = [
     { id: 'usage', label: '智能体使用权' },
-    { id: 'custom', label: '定制项目' },
-    { id: 'adapter', label: 'Skill 下载' }
+    { id: 'custom', label: '标准服务项目' },
+    { id: 'adapter', label: '适配版本下载' }
   ];
 
   return (

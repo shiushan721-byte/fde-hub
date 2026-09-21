@@ -139,6 +139,7 @@ function buildProfile(
     .join(' ');
   const jobs = [...capabilities, ...tags].slice(0, 8);
   const doesText = [
+    compactText(payload.recommendDoes, 200),
     row.title,
     row.desc,
     row.category,
@@ -156,7 +157,9 @@ function buildProfile(
     .toLowerCase();
 
   const description =
-    compactText(payload.description, 220) || compactText(row.desc, 220);
+    compactText(payload.recommendDoes, 220) ||
+    compactText(payload.description, 220) ||
+    compactText(row.desc, 220);
   const blurb = compactText(payload.subtitle, 80) || compactText(row.desc, 80);
 
   return {

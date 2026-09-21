@@ -203,7 +203,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <ChevronRight size={12} className="text-slate-400" />
             <span className="text-blue-700 font-bold flex items-center gap-1.5">
               <Sparkles size={14} className="text-blue-600" />
-              <span>AI 专家中心 · 经营与认证体系</span>
+              <span>FDE 工作台 · 资产、交付与收益</span>
             </span>
           </div>
         ) : currentRoute === 'fde-intro' ? (

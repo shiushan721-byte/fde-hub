@@ -153,10 +153,16 @@ export interface CreatorAgentItem {
   agentKind?: 'universal';
   /** 客户端平台适配：Mac / Windows / 双端 */
   platformSupport?: 'mac' | 'windows' | 'both';
+  /** 平台 AI 推荐用：它可以帮用户做什么 */
+  recommendDoes?: string;
+  /** 平台 AI 推荐用：核心能力标签 */
+  recommendTags?: string[];
   /** 外部工具适配分发包 */
   adapterPackages?: AgentAdapterPackage[];
   /** FDE 可维护的标准定制项目 */
   customProjects?: AgentCustomProject[];
+  /** 创作者已从该智能体移除的官方商品 */
+  omittedOfficialProductIds?: string[];
   /** 当前线上标准版本号，普通用户始终使用最新可用标准版 */
   currentStandardVersion?: string;
   /** 标准版历史版本列表 */

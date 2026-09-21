@@ -364,7 +364,7 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
 
   return (
     <div id="account-view" className={`space-y-5 ${embedded ? 'pb-4' : 'pb-16'}`}>
-      {!embedded && <h1 className="text-2xl font-black text-slate-900 font-display">我的收益</h1>}
+      {!embedded && <h1 className="text-2xl font-black text-slate-900 font-display">收益管理</h1>}
 
       {loading && !wallet && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
@@ -422,7 +422,7 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs min-h-[148px] flex flex-col">
-              <div className="text-sm text-slate-500">总收入</div>
+              <div className="text-sm text-slate-500">累计收益</div>
               <div className="text-[28px] leading-tight font-extrabold text-slate-900 font-display mt-3 tabular-nums">
                 {yuanDisplay(wallet.totalIncomeCents)}
               </div>
@@ -430,7 +430,7 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs min-h-[148px] flex flex-col">
-              <div className="text-sm text-slate-500">待入账</div>
+              <div className="text-sm text-slate-500">结算中金额</div>
               <div className="text-[28px] leading-tight font-extrabold text-slate-900 font-display mt-3 tabular-nums">
                 {yuanDisplay(wallet.pendingCents)}
               </div>
@@ -454,14 +454,33 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                 <div className="flex items-center gap-6">
                   <button
                     type="button"
-                    onClick={() => setLedgerTab('income')}
+                    onClick={() => {
+                      setLedgerTab('income');
+                      setIncomeKind('agent');
+                    }}
                     className={`text-sm cursor-pointer pb-1 border-b-2 ${
-                      ledgerTab === 'income'
+                      ledgerTab === 'income' && incomeKind === 'agent'
                         ? 'font-bold text-slate-900 border-slate-900'
                         : 'font-medium text-slate-400 border-transparent hover:text-slate-700'
                     }`}
                   >
-                    交易流水
+                    智能体交易
+                    <span className="ml-1.5 tabular-nums text-slate-400">{incomeKindCounts.agent}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLedgerTab('income');
+                      setIncomeKind('custom');
+                    }}
+                    className={`text-sm cursor-pointer pb-1 border-b-2 ${
+                      ledgerTab === 'income' && incomeKind === 'custom'
+                        ? 'font-bold text-slate-900 border-slate-900'
+                        : 'font-medium text-slate-400 border-transparent hover:text-slate-700'
+                    }`}
+                  >
+                    定制服务交易
+                    <span className="ml-1.5 tabular-nums text-slate-400">{incomeKindCounts.custom}</span>
                   </button>
                   <button
                     type="button"
@@ -475,38 +494,6 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                     提现记录
                   </button>
                 </div>
-                {ledgerTab === 'income' && (
-                  <div className="flex flex-wrap gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-200 w-fit">
-                    <button
-                      type="button"
-                      onClick={() => setIncomeKind('agent')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        incomeKind === 'agent'
-                          ? 'bg-slate-900 text-white shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-                      }`}
-                    >
-                      智能体订单交易
-                      <span className={`ml-1.5 tabular-nums ${incomeKind === 'agent' ? 'text-slate-300' : 'text-slate-400'}`}>
-                        {incomeKindCounts.agent}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIncomeKind('custom')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        incomeKind === 'custom'
-                          ? 'bg-slate-900 text-white shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-                      }`}
-                    >
-                      定制订单交易
-                      <span className={`ml-1.5 tabular-nums ${incomeKind === 'custom' ? 'text-slate-300' : 'text-slate-400'}`}>
-                        {incomeKindCounts.custom}
-                      </span>
-                    </button>
-                  </div>
-                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -568,7 +555,7 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                     {filteredIncomes.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="px-5 py-16 text-center text-xs text-slate-400">
-                          {incomeKind === 'custom' ? '暂无定制订单交易' : '暂无智能体订单交易'}
+                          {incomeKind === 'custom' ? '暂无定制服务交易' : '暂无智能体交易'}
                         </td>
                       </tr>
                     ) : (

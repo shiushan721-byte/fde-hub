@@ -9,6 +9,7 @@ import { ensureSampleCommentReports } from './seedCommentReports';
 import { ensureSampleInboxNotifications } from './seedInboxNotifications';
 import { ensureExpertTags } from '../services/expertTags';
 import { ensureExpertTitles } from '../services/expertTitles';
+import { ensureOfficialProducts } from '../services/officialProducts';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { toJson, parseJson } from '../lib/json';
@@ -34,6 +35,7 @@ export async function seedDatabase(force = false) {
     await ensureFinanceSynced();
     await ensureExpertTags();
     await ensureExpertTitles();
+    await ensureOfficialProducts();
     await ensureSampleInReviewAgents();
     await ensureSampleCreatorDeletedAgents();
     await ensureExpertDomainTagsAligned();
@@ -61,6 +63,7 @@ export async function seedDatabase(force = false) {
     await prisma.financeAccount.deleteMany();
     await prisma.expertTag.deleteMany();
     await prisma.expertTitle.deleteMany();
+    await prisma.officialProduct.deleteMany();
     await prisma.userNotification.deleteMany();
     await prisma.agentLike.deleteMany();
     await prisma.agentFavorite.deleteMany();
@@ -71,6 +74,8 @@ export async function seedDatabase(force = false) {
     await prisma.customOrder.deleteMany();
     await prisma.consultationMessage.deleteMany();
     await prisma.consultationLead.deleteMany();
+    await prisma.dmMessage.deleteMany();
+    await prisma.dmThread.deleteMany();
     await prisma.expertCertificationEvent.deleteMany();
     await prisma.expertApplication.deleteMany();
     await prisma.expertCertification.deleteMany();
@@ -342,6 +347,7 @@ export async function seedDatabase(force = false) {
   await ensureFinanceSynced();
   await ensureExpertTags();
   await ensureExpertTitles();
+  await ensureOfficialProducts();
   await ensureSampleInReviewAgents();
   await ensureSampleCreatorDeletedAgents();
   await ensureExpertDomainTagsAligned();

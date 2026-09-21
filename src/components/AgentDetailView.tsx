@@ -47,6 +47,7 @@ interface AgentDetailViewProps {
   onToast?: (message: string) => void;
   enableAuthorShowcaseTools?: boolean;
   onOpenInspiration?: (item: PublicInspiration) => void;
+  onMessageCreator?: (expertId: string) => void;
 }
 
 type CatalogLicense = {
@@ -88,7 +89,8 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   onToggleFollowAuthor,
   onToast,
   enableAuthorShowcaseTools = false,
-  onOpenInspiration
+  onOpenInspiration,
+  onMessageCreator
 }) => {
   const [commentDraft, setCommentDraft] = useState('');
   const [comments, setComments] = useState<PublicComment[]>([]);
@@ -503,13 +505,24 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                     <span>粉丝 {Math.max(12, Math.round((authorExpert.ordersCount || 1) * 3))}</span>
                   </div>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setContactOpen(true)}
-                  className="mt-1.5 text-[12px] font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
-                >
-                  联系方式
-                </button>
+                <div className="mt-1.5 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setContactOpen(true)}
+                    className="text-[12px] font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
+                  >
+                    联系方式
+                  </button>
+                  {onMessageCreator && (
+                    <button
+                      type="button"
+                      onClick={() => onMessageCreator(agent.authorId || authorExpert.id)}
+                      className="text-[12px] font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
+                    >
+                      发私信
+                    </button>
+                  )}
+                </div>
               </div>
               <button
                 type="button"

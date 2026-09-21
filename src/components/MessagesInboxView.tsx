@@ -10,10 +10,14 @@ import {
 import { useInboxNotifications } from '../lib/useInboxNotifications';
 import type { NotificationNavigationTarget } from '../lib/notificationNavigation';
 import { ConsultInboxItem } from './ConsultInboxItem';
+import { DirectMessagePanel } from './DirectMessagePanel';
+import { useDmInbox } from '../lib/useDmInbox';
 
 interface MessagesInboxViewProps {
   leads: CustomerLeadItem[];
   initialTab?: InboxChannel;
+  initialExpertId?: string | null;
+  initialThreadId?: string | null;
   onNavigate?: (target: NotificationNavigationTarget) => void;
   onUnreadChange?: () => void;
 }
@@ -35,6 +39,8 @@ function sameDay(iso: string | undefined, ymd: string) {
 export const MessagesInboxView: React.FC<MessagesInboxViewProps> = ({
   leads,
   initialTab = 'activity',
+  initialExpertId = null,
+  initialThreadId = null,
   onNavigate,
   onUnreadChange
 }) => {
@@ -43,6 +49,8 @@ export const MessagesInboxView: React.FC<MessagesInboxViewProps> = ({
   const [query, setQuery] = useState('');
   const [date, setDate] = useState('');
   const { notifications, unreadByChannel, markRead } = useInboxNotifications(true, leads);
+  const { unread: dmUnread, refresh: refreshDm } = useDmInbox(true);
+  const tabUnread = { ...unreadByChannel, dm: dmUnread };
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -72,11 +80,11 @@ export const MessagesInboxView: React.FC<MessagesInboxViewProps> = ({
   };
 
   return (
-    <div className="min-h-full bg-white">
+    <div className="min-h-full bg-white flex flex-col">
       <div className="px-6 lg:px-10 pt-5">
         <div className="flex items-end gap-6">
           {INBOX_TABS.map((tab) => {
-            const unread = unreadByChannel[tab.key];
+            const unread = tabUnread[tab.key];
             const active = activeTab === tab.key;
             return (
               <button
@@ -105,6 +113,21 @@ export const MessagesInboxView: React.FC<MessagesInboxViewProps> = ({
         <div className="border-b border-slate-200" />
       </div>
 
+      {activeTab === 'dm' ? (
+        <div className="flex-1 min-h-[calc(100vh-9.5rem)] flex flex-col">
+          <DirectMessagePanel
+            key={`${initialExpertId || ''}:${initialThreadId || ''}`}
+            variant="page"
+            initialExpertId={initialExpertId}
+            initialThreadId={initialThreadId}
+            onUnreadChange={() => {
+              void refreshDm();
+              onUnreadChange?.();
+            }}
+          />
+        </div>
+      ) : (
+        <>
       <div className="px-6 lg:px-10 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           {READ_FILTERS.map((item) => {
@@ -191,6 +214,8 @@ export const MessagesInboxView: React.FC<MessagesInboxViewProps> = ({
             )
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );

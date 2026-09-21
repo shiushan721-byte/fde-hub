@@ -23,6 +23,7 @@ interface FDEProfileViewProps {
   isFavorite?: boolean;
   favoriteAgentIds?: string[];
   onToggleFavoriteAgent?: (agentId: string) => void;
+  onMessageCreator?: (expertId: string) => void;
 }
 
 export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
@@ -36,7 +37,8 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
   onToggleFavorite,
   isFavorite = false,
   favoriteAgentIds = [],
-  onToggleFavoriteAgent
+  onToggleFavoriteAgent,
+  onMessageCreator
 }) => {
   const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
   const [contactOpen, setContactOpen] = useState(false);
@@ -91,6 +93,15 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
               <MessageSquare size={14} />
               <span>咨询 AI 专家</span>
             </button>
+            {onMessageCreator && (
+              <button
+                type="button"
+                onClick={() => onMessageCreator(expert.id)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:text-blue-700 hover:border-blue-200 text-xs font-semibold cursor-pointer"
+              >
+                发私信
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -150,6 +161,15 @@ export const FDEProfileView: React.FC<FDEProfileViewProps> = ({
               >
                 联系方式
               </button>
+              {onMessageCreator && (
+                <button
+                  type="button"
+                  onClick={() => onMessageCreator(expert.id)}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-white hover:bg-slate-50 text-slate-800 rounded-xl text-xs font-bold border border-slate-200 shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  发私信
+                </button>
+              )}
               <button
                 onClick={() => onConsult(expert)}
                 className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"

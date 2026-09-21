@@ -186,7 +186,130 @@ export function isConsultingStageDeal(deal: {
   return false;
 }
 
-/** 买家已确认交付方案之后的订单 */
+/** 已付款、进入履约的订单（咨询单在付款后转入这里） */
+export function isPaidFulfillmentDeal(deal: {
+  stageKey?: string;
+  order?: { status?: string; paymentStatus?: string } | null;
+}) {
+  const status = deal.order?.status || '';
+  if (isBuyerPaid(deal.order?.paymentStatus)) return true;
+  return [
+    'paid_pending_start',
+    'escrowed',
+    'in_development',
+    'in_review',
+    'revision',
+    'pending_acceptance',
+    'dispute',
+    'pending_settlement',
+    'completed'
+  ].includes(status);
+}
+
+export type ConsultFilterKey =
+  | 'all'
+  | 'pending_accept'
+  | 'talking'
+  | 'pending_proposal'
+  | 'pending_confirm'
+  | 'pending_pay'
+  | 'converted'
+  | 'closed';
+
+export const CONSULT_FILTERS: { key: ConsultFilterKey; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'pending_accept', label: '待接单' },
+  { key: 'talking', label: '沟通中' },
+  { key: 'pending_proposal', label: '待提交方案' },
+  { key: 'pending_confirm', label: '待用户确认' },
+  { key: 'pending_pay', label: '待支付' },
+  { key: 'converted', label: '已转订单' },
+  { key: 'closed', label: '已关闭' }
+];
+
+export function consultListStatus(deal: {
+  stageKey?: string;
+  contacted?: boolean;
+  leadStatus?: string;
+  order?: { status?: string; paymentStatus?: string; closeReason?: string } | null;
+}): { key: ConsultFilterKey; label: string } {
+  if (isPaidFulfillmentDeal(deal)) return { key: 'converted', label: '已转订单' };
+  const status = deal.order?.status || '';
+  if (status === 'closed' || deal.stageKey === 'closed') return { key: 'closed', label: '已关闭' };
+  if (status === 'awaiting_payment' || deal.stageKey === 'awaiting_payment') {
+    return { key: 'pending_pay', label: '待支付' };
+  }
+  if (status === 'awaiting_proposal_confirm' || deal.stageKey === 'awaiting_proposal_confirm') {
+    return { key: 'pending_confirm', label: '待用户确认' };
+  }
+  if (status === 'pending_quote') return { key: 'pending_proposal', label: '待提交方案' };
+  if (
+    deal.leadStatus === 'new' ||
+    (!deal.contacted && (!status || status === 'consulting') && deal.stageKey === 'consulting')
+  ) {
+    return { key: 'pending_accept', label: '待接单' };
+  }
+  return { key: 'talking', label: '沟通中' };
+}
+
+export function matchesConsultFilter(deal: Parameters<typeof consultListStatus>[0], filter: ConsultFilterKey) {
+  if (filter === 'all') return true;
+  return consultListStatus(deal).key === filter;
+}
+
+export type FulfillmentFilterKey =
+  | 'all'
+  | 'pending_start'
+  | 'in_progress'
+  | 'pending_delivery'
+  | 'in_review'
+  | 'pending_acceptance'
+  | 'completed'
+  | 'aftersale'
+  | 'cancelled';
+
+export const FULFILLMENT_FILTERS: { key: FulfillmentFilterKey; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'pending_start', label: '待启动' },
+  { key: 'in_progress', label: '进行中' },
+  { key: 'pending_delivery', label: '待交付' },
+  { key: 'in_review', label: '待平台审核' },
+  { key: 'pending_acceptance', label: '待用户验收' },
+  { key: 'completed', label: '已完成' },
+  { key: 'aftersale', label: '售后 / 平台介入' },
+  { key: 'cancelled', label: '已取消 / 已退款' }
+];
+
+export function fulfillmentListStatus(status?: string): { key: FulfillmentFilterKey; label: string } {
+  switch (status) {
+    case 'paid_pending_start':
+      return { key: 'pending_start', label: '待启动' };
+    case 'escrowed':
+    case 'in_development':
+      return { key: 'in_progress', label: '进行中' };
+    case 'revision':
+      return { key: 'pending_delivery', label: '待交付' };
+    case 'in_review':
+      return { key: 'in_review', label: '待平台审核' };
+    case 'pending_acceptance':
+      return { key: 'pending_acceptance', label: '待用户验收' };
+    case 'completed':
+    case 'pending_settlement':
+      return { key: 'completed', label: '已完成' };
+    case 'dispute':
+      return { key: 'aftersale', label: '售后 / 平台介入' };
+    case 'closed':
+      return { key: 'cancelled', label: '已取消 / 已退款' };
+    default:
+      return { key: 'in_progress', label: status || '进行中' };
+  }
+}
+
+export function matchesFulfillmentFilter(status: string | undefined, filter: FulfillmentFilterKey) {
+  if (filter === 'all') return true;
+  return fulfillmentListStatus(status).key === filter;
+}
+
 export function isConfirmedCustomDeal(deal: {
   stageKey?: string;
   order?: { status?: string; closeReason?: string; proposalConfirmedAt?: string } | null;

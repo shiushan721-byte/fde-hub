@@ -115,7 +115,8 @@ export const mockCreatorAgentsList: CreatorAgentItem[] = [
         description: '按店铺售后路径改工单分流、回复话术和客服工作台。',
         price: 200,
         active: true,
-        sortOrder: 0
+        sortOrder: 0,
+        source: 'custom'
       },
       {
         id: 'cprj_ecom_feishu',
@@ -123,7 +124,8 @@ export const mockCreatorAgentsList: CreatorAgentItem[] = [
         description: '售后记录与质检结果同步到飞书文档/多维表格。',
         price: 100,
         active: true,
-        sortOrder: 1
+        sortOrder: 1,
+        source: 'custom'
       }
     ],
     status: 'published',

@@ -55,8 +55,12 @@ export async function ensureSampleCustomProjects() {
 
     const existing = normalizeCustomProjects(parseJson(row.customProjects, []));
     const byId = new Map(existing.map((item) => [item.id, item]));
+    let added = false;
     for (const item of mockProjects) {
-      byId.set(item.id, item);
+      if (!byId.has(item.id)) {
+        byId.set(item.id, item);
+        added = true;
+      }
     }
 
     await prisma.agent.update({
@@ -65,7 +69,7 @@ export async function ensureSampleCustomProjects() {
         canFDECustom: agent.canFDECustom ?? row.canFDECustom,
         price: agent.price ?? null,
         pricingPlans: toJson(catalogPricingPlans(agent)),
-        customProjects: toJson([...byId.values()]),
+        ...(added ? { customProjects: toJson([...byId.values()]) } : {}),
         showOnHome: true,
         sortOrder: index + 1
       }

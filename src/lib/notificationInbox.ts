@@ -6,13 +6,14 @@ import {
   NOTICE_NOTIFICATION_TYPES
 } from '../../shared/inboxNotificationTypes';
 
-export type InboxChannel = 'activity' | 'notice' | 'consult';
+export type InboxChannel = 'activity' | 'notice' | 'consult' | 'dm';
 export type InboxReadFilter = 'all' | 'unread' | 'read';
 
 export const INBOX_TABS: Array<{ key: InboxChannel; label: string }> = [
   { key: 'activity', label: '动态' },
   { key: 'notice', label: '通知' },
-  { key: 'consult', label: '咨询' }
+  { key: 'consult', label: '咨询' },
+  { key: 'dm', label: '私信' }
 ];
 
 export interface UserNotificationItem {
@@ -208,7 +209,7 @@ export function mergeInboxItems(
 }
 
 export function unreadByChannel(items: UserNotificationItem[]): Record<InboxChannel, number> {
-  const counts: Record<InboxChannel, number> = { activity: 0, notice: 0, consult: 0 };
+  const counts: Record<InboxChannel, number> = { activity: 0, notice: 0, consult: 0, dm: 0 };
   for (const item of items) {
     if (item.unread) counts[item.channel] += 1;
   }

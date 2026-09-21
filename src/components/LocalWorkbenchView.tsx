@@ -52,6 +52,7 @@ interface LocalWorkbenchViewProps {
   onOpenAuthor?: (authorId: string) => void;
   onOpenAgentDetail?: (agent: HellomeAgentItem) => void;
   onToast?: (message: string) => void;
+  onMessageCreator?: (expertId: string) => void;
 }
 
 const FEATURED_IDS = ['hz-canvas', 'img-compress', 'geo-helper', 'doc-emergency'];
@@ -74,7 +75,8 @@ export const LocalWorkbenchView: React.FC<LocalWorkbenchViewProps> = ({
   onCustomize,
   onOpenAuthor,
   onOpenAgentDetail,
-  onToast
+  onToast,
+  onMessageCreator
 }) => {
   const active = tabs.find((tab) => tab.id === activeTabId) || tabs[0] || null;
   const suggestions = useMemo(() => featuredAgents(agents), [agents]);
@@ -96,6 +98,7 @@ export const LocalWorkbenchView: React.FC<LocalWorkbenchViewProps> = ({
           onOpenAuthor={onOpenAuthor}
           onOpenAgentDetail={onOpenAgentDetail}
           onToast={onToast}
+          onMessageCreator={onMessageCreator}
         />
       ) : (
         <div className="flex-1 min-h-0 relative overflow-auto">
@@ -169,7 +172,8 @@ const AgentWorkbenchPane: React.FC<{
   onOpenAuthor?: (authorId: string) => void;
   onOpenAgentDetail?: (agent: HellomeAgentItem) => void;
   onToast?: (message: string) => void;
-}> = ({ agent, infoExpanded, onToggleInfo, onCustomize, onOpenAuthor, onOpenAgentDetail, onToast }) => {
+  onMessageCreator?: (expertId: string) => void;
+}> = ({ agent, infoExpanded, onToggleInfo, onCustomize, onOpenAuthor, onOpenAgentDetail, onToast, onMessageCreator }) => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([
     {
@@ -279,6 +283,7 @@ const AgentWorkbenchPane: React.FC<{
         onOpenAuthor={onOpenAuthor}
         onOpenAgentDetail={onOpenAgentDetail}
         onToast={onToast}
+        onMessageCreator={onMessageCreator}
       />
       <div className="absolute bottom-4 right-4 flex items-center gap-1 rounded-full bg-white/90 border border-slate-200 px-2 py-1 text-[11px] text-slate-500 shadow-xs">
         <ZoomOut size={12} />
@@ -297,7 +302,8 @@ const WorkbenchAgentInfoCard: React.FC<{
   onOpenAuthor?: (authorId: string) => void;
   onOpenAgentDetail?: (agent: HellomeAgentItem) => void;
   onToast?: (message: string) => void;
-}> = ({ agent, expanded, onToggle, onCustomize, onOpenAuthor, onOpenAgentDetail, onToast }) => {
+  onMessageCreator?: (expertId: string) => void;
+}> = ({ agent, expanded, onToggle, onCustomize, onOpenAuthor, onOpenAgentDetail, onToast, onMessageCreator }) => {
   const catalog = useCatalog();
   const [checkout, setCheckout] = useState<{
     id: string;
@@ -421,6 +427,15 @@ const WorkbenchAgentInfoCard: React.FC<{
                 >
                   联系方式
                 </button>
+                {onMessageCreator && (
+                  <button
+                    type="button"
+                    onClick={() => onMessageCreator(agent.authorId || expert.id)}
+                    className="h-6 px-1.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 rounded-md cursor-pointer"
+                  >
+                    发私信
+                  </button>
+                )}
               </div>
             </div>
 

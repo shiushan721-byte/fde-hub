@@ -41,12 +41,14 @@ import {
   ArrowLeft,
   Plus,
   Wallet,
-  X
+  X,
+  MessageSquare
 } from 'lucide-react';
 import {
   CreatorTierLevel,
   CreatorAgentItem,
   CustomerLeadItem,
+  CustomerAgentInstance,
   RealNameVerifyStatus,
   FDECertStatus,
   FDE_CERT_DISCLAIMER,
@@ -62,28 +64,14 @@ import { mockCaseStudies } from '../data/mockData';
 import { CaseStudy, getCaseStudyImages } from '../types';
 import { AgentPublishWizardModal } from './AgentPublishWizardModal';
 import { AgentPricingModal } from './AgentPricingModal';
-import { CustomerInstancesPanel } from './CustomerInstancesPanel';
-import { CreatorCustomOrdersPanel } from './CustomOrderPanels';
 import { mockCustomerAgentInstances } from '../data/agentInstanceMockData';
-import { CustomerAgentInstance } from '../types/creator';
 import { isExpertRole } from '../utils/expertIdentity';
 import { AccountView } from './AccountView';
+import { FdeAgentWorkbenchPanel } from './FdeAgentWorkbenchPanel';
+import { CreatorConsultationsPanel, CreatorCustomOrdersPanel } from './CustomOrderPanels';
 import { api, ApiError } from '../lib/api';
 import { ensureAgentAuthorSession } from '../lib/marketplaceAuth';
-import { creatorAgentHasBeenUsed, creatorListingBadgeClass, creatorListingLabel } from '../lib/agentLifecycle';
-import { pricingLabel } from '../../shared/pricingPlans';
-
-function platformSupportLabel(support: CreatorAgentItem['platformSupport']) {
-  switch (support) {
-    case 'mac':
-      return '适配 macOS';
-    case 'windows':
-      return '适配 Windows';
-    case 'both':
-    default:
-      return '适配macOS和Windows';
-  }
-}
+import { creatorAgentHasBeenUsed } from '../lib/agentLifecycle';
 
 function agentDeletePrompt(agent: CreatorAgentItem) {
   if (agent.status === 'under_review') {
@@ -95,29 +83,18 @@ function agentDeletePrompt(agent: CreatorAgentItem) {
   return '删除后，该智能体及内容将无法恢复，请谨慎操作。';
 }
 
-function platformSupportBadgeClass(support: CreatorAgentItem['platformSupport']) {
-  switch (support) {
-    case 'mac':
-      return 'bg-violet-50 text-violet-700 border-violet-200';
-    case 'windows':
-      return 'bg-sky-50 text-sky-700 border-sky-200';
-    case 'both':
-    default:
-      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  }
-}
-
 export type CreatorCenterTab =
-  | 'profile-editor'   // 1. 主页编辑
-  | 'my-agents'        // 2. 智能体管理（含通用 / 专属子 Tab）
-  | 'custom-services'  // 3. 定制服务（确认方案后的订单）
-  | 'account'          // 4. 我的收益（可提现 / 总收入 / 待入账 / 提现中）
-  | 'customer-leads'   // 兼容旧入口：映射到定制服务
-  | 'orders'           // 兼容旧入口：映射到定制服务
-  | 'customer-instances' // 兼容旧入口：映射到智能体管理 · 专属
+  | 'profile-editor'   // 公开主页编辑（不在四模块导航内）
+  | 'my-agents'        // 智能体管理
+  | 'consultations'    // 咨询单管理
+  | 'orders'           // 订单管理
+  | 'account'          // 收益管理
+  | 'custom-services'  // 兼容旧入口：映射到订单管理
+  | 'customer-leads'   // 兼容旧入口：映射到咨询单
+  | 'customer-instances' // 兼容旧入口：映射到智能体管理 · 已交付
   | 'realname-verify'; // 兼容旧入口：打开实名弹窗
 
-type AgentMgmtSubTab = 'universal' | 'private';
+type AgentListTab = 'all' | 'owned' | 'delivered';
 
 interface CreatorCenterViewProps {
   onOpenOnboardingModal: () => void;
@@ -153,13 +130,16 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
   onFocusConsumed
 }) => {
   const [activeTab, setActiveTab] = useState<CreatorCenterTab>(() => {
-    if (initialTab === 'realname-verify' || initialTab === 'customer-instances') return 'my-agents';
-    if (initialTab === 'customer-leads' || initialTab === 'orders') return 'custom-services';
+    if (initialTab === 'realname-verify') return 'my-agents';
+    if (initialTab === 'customer-instances') return 'my-agents';
+    if (initialTab === 'customer-leads') return 'consultations';
+    if (initialTab === 'custom-services') return 'orders';
     return initialTab;
   });
-  const [agentMgmtSubTab, setAgentMgmtSubTab] = useState<AgentMgmtSubTab>(
-    initialTab === 'customer-instances' ? 'private' : 'universal'
+  const [agentListTab, setAgentListTab] = useState<AgentListTab>(
+    initialTab === 'customer-instances' ? 'delivered' : 'all'
   );
+  const [localFocusOrderId, setLocalFocusOrderId] = useState(focusOrderId || '');
   const [showRealNameModal, setShowRealNameModal] = useState(initialTab === 'realname-verify');
 
   useEffect(() => {
@@ -170,15 +150,23 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     }
     if (initialTab === 'customer-instances') {
       setActiveTab('my-agents');
-      setAgentMgmtSubTab('private');
+      setAgentListTab('delivered');
       return;
     }
-    if (initialTab === 'customer-leads' || initialTab === 'orders') {
-      setActiveTab('custom-services');
+    if (initialTab === 'customer-leads') {
+      setActiveTab('consultations');
+      return;
+    }
+    if (initialTab === 'custom-services') {
+      setActiveTab('orders');
       return;
     }
     setActiveTab(initialTab);
   }, [initialTab]);
+
+  useEffect(() => {
+    if (focusOrderId) setLocalFocusOrderId(focusOrderId);
+  }, [focusOrderId]);
 
   // 4.2 创作者实名认证 7 种状态: 'unverified' | 'in_progress' | 'verified' | 'failed' | 'manual_review' | 'expired' | 'revoked'
   const [verifyStatus, setVerifyStatus] = useState<RealNameVerifyStatus>('verified');
@@ -250,8 +238,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
         await ensureAgentAuthorSession('fde-linran');
         const items = await api<CreatorAgentItem[]>('/api/me/agents');
         if (cancelled || !Array.isArray(items) || items.length === 0) return;
-        const liveById = new Map(items.map((item) => [item.id, item]));
-        setAgentsList((prev) => prev.map((item) => liveById.get(item.id) ?? item));
+        setAgentsList(items);
       } catch {
         /* keep mock fallback */
       }
@@ -504,7 +491,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
           <div>
             <div className="flex items-center gap-2.5 flex-wrap">
               <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-                {profileData.name} · AI 专家中心
+                FDE 工作台
               </h1>
               {verifyStatus === 'in_progress' || verifyStatus === 'manual_review' ? (
                 <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs font-bold border border-blue-200 flex items-center gap-1">
@@ -519,7 +506,9 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
               ) : null}
             </div>
             {profileData.expertNo && (
-              <p className="text-xs font-mono text-slate-500 mt-1">{profileData.expertNo}</p>
+              <p className="text-xs font-mono text-slate-500 mt-1">
+                {profileData.name} · {profileData.expertNo}
+              </p>
             )}
           </div>
         </div>
@@ -540,6 +529,15 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
                   ? '实名认证审核中'
                   : '实名认证'}
             </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('profile-editor')}
+            className="px-3 py-2 rounded-xl bg-white text-slate-700 text-xs font-bold border border-slate-200 flex items-center gap-1.5 shrink-0 cursor-pointer hover:bg-slate-50 transition-colors"
+          >
+            <Edit3 size={13} />
+            <span>编辑公开主页</span>
           </button>
 
           <button
@@ -585,10 +583,10 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       {/* 4-Module Navigation Tabs */}
       <div className="bg-white rounded-2xl border border-slate-200 p-2 shadow-2xs flex items-center gap-1.5 overflow-x-auto no-scrollbar">
         {[
-          { key: 'profile-editor', label: '1. 主页编辑', icon: Edit3, count: null },
-          { key: 'my-agents', label: '2. 智能体管理', icon: Bot, count: agentsList.length + instancesList.length },
-          { key: 'custom-services', label: '3. 定制服务', icon: Package, count: leadsList.filter((l) => l.status === 'new').length, badgeColor: 'bg-rose-500 text-white' },
-          { key: 'account', label: '4. 我的收益', icon: Wallet, count: null }
+          { key: 'my-agents', label: '智能体管理', icon: Bot, count: agentsList.length + instancesList.length },
+          { key: 'consultations', label: '咨询单管理', icon: MessageSquare, count: leadsList.filter((l) => l.status === 'new').length, badgeColor: 'bg-rose-500 text-white' },
+          { key: 'orders', label: '订单管理', icon: Package, count: null },
+          { key: 'account', label: '收益管理', icon: Wallet, count: null }
         ].map((tab) => {
           const Icon = tab.icon;
           const isCurrent = activeTab === tab.key;
@@ -616,10 +614,17 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
         })}
       </div>
 
-      {/* ========================================================= */}
-      {/* MODULE 1: 主页编辑 (Profile, Bio, Domain Tags)    */}
-      {/* ========================================================= */}
+      {/* MODULE: 公开主页编辑（非导航一级模块） */}
       {activeTab === 'profile-editor' && (
+        <div className="space-y-4">
+          <button
+            type="button"
+            onClick={() => setActiveTab('my-agents')}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-blue-700 cursor-pointer"
+          >
+            <ArrowLeft size={14} />
+            返回工作台
+          </button>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left 2 Cols: Form */}
           <div className="lg:col-span-2 space-y-6">
@@ -874,242 +879,58 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
             </div>
           </div>
         </div>
+        </div>
       )}
 
-      {/* ========================================================= */}
-      {/* MODULE 2: 智能体管理（通用 / 专属）                          */}
-      {/* ========================================================= */}
+      {/* MODULE: 智能体管理 */}
       {activeTab === 'my-agents' && (
-        <div className="space-y-6">
-          <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl w-full sm:w-fit">
-            {[
-              { key: 'universal' as const, label: '通用智能体管理', count: agentsList.length },
-              { key: 'private' as const, label: '专属智能体管理', count: instancesList.length }
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setAgentMgmtSubTab(tab.key)}
-                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  agentMgmtSubTab === tab.key
-                    ? 'bg-white text-blue-700 shadow-xs ring-1 ring-slate-200'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <span>{tab.label}</span>
-                <span
-                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                    agentMgmtSubTab === tab.key ? 'bg-blue-50 text-blue-700' : 'bg-slate-200 text-slate-600'
-                  }`}
-                >
-                  {tab.count}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          {agentMgmtSubTab === 'universal' && (
-        <div className="space-y-6">
-          <div>
-            <h2 className="text-lg font-extrabold text-slate-900">已维护的智能体列表 ({agentsList.length})</h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {agentsList.map((agent) => (
-              <div
-                key={agent.id}
-                className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-4"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={agent.coverImage || 'https://images.unsplash.com/photo-1556740758-90de374c12ad?w=600&auto=format&fit=crop&q=80'}
-                        alt={agent.title}
-                        referrerPolicy="no-referrer"
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?w=600&auto=format&fit=crop&q=80';
-                        }}
-                        className="w-12 h-12 rounded-2xl object-cover ring-1 ring-slate-100 shrink-0"
-                      />
-                      <div>
-                        <h4 className="font-bold text-slate-900 text-sm line-clamp-1">{agent.title}</h4>
-                        <span
-                          className={`inline-flex mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${platformSupportBadgeClass(agent.platformSupport)}`}
-                        >
-                          {platformSupportLabel(agent.platformSupport)}
-                        </span>
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          <span
-                            className={`inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold border ${creatorListingBadgeClass(agent.status)}`}
-                          >
-                            {creatorListingLabel(agent.status)}
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-mono">
-                            v{agent.version || '1.0.0'}
-                          </span>
-                          <span className="text-[10px] font-bold text-blue-700">
-                            · {pricingLabel({
-                              isFree: agent.pricingType === 'free' || agent.pricingPlans?.isFree,
-                              price: agent.pricingPlans?.price || agent.price,
-                              monthlyPrice: agent.pricingPlans?.monthlyPrice
-                            })}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">{agent.desc}</p>
-
-                  {/* 收藏 · 点赞 统计框 */}
-                  <div className="py-2 px-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between text-xs text-slate-600">
-                    <div className="flex items-center gap-1.5" title="收藏数">
-                      <Bookmark size={13} className="text-amber-500 fill-amber-50" />
-                      <span className="text-slate-500 text-[11px]">收藏:</span>
-                      <span className="font-bold text-slate-800 text-xs">
-                        {(agent.favoritesCount ?? (agent.id === 'agent_ecommerce_cs' ? 1240 : agent.id === 'agent_geo_helper' ? 3890 : agent.id === 'agent_doc_emergency' ? 5120 : 6)).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="h-3 w-px bg-slate-200" />
-                    <div className="flex items-center gap-1.5" title="点赞数">
-                      <ThumbsUp size={13} className="text-rose-500" />
-                      <span className="text-slate-500 text-[11px]">点赞:</span>
-                      <span className="font-bold text-slate-800 text-xs">
-                        {(agent.likesCount ?? (agent.id === 'agent_ecommerce_cs' ? 6420 : agent.id === 'agent_geo_helper' ? 34200 : agent.id === 'agent_doc_emergency' ? 58600 : 18)).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Agent Card Actions */}
-                <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
-                  {agent.status === 'published' ? (
-                    <button
-                      type="button"
-                      onClick={() => handleUnpublishAgent(agent.id)}
-                      className="flex-1 py-2 px-3 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      下架为私有
-                    </button>
-                  ) : agent.status === 'under_review' ? (
-                    <button
-                      type="button"
-                      onClick={() => handleUnpublishAgent(agent.id)}
-                      className="flex-1 py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      撤回为私有
-                    </button>
-                  ) : agent.status === 'draft' ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setInstanceForSkillReplacement(null);
-                        setAgentForSkillReplacement(agent);
-                        setShowPublishModal(true);
-                      }}
-                      className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-colors cursor-pointer"
-                    >
-                      继续发布
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleSubmitPublicAgent(agent.id)}
-                      className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-colors cursor-pointer"
-                      title="私有转公开必须提交平台审核"
-                    >
-                      申请公开上架
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setPricingTarget(agent)}
-                    className="flex-1 py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1"
-                  >
-                    <DollarSign size={12} />
-                    <span>定价</span>
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  {agent.status === 'published' || agent.status === 'under_review' ? (
-                    <button
-                      type="button"
-                      disabled
-                      title={
-                        agent.status === 'under_review'
-                          ? '审核中请先撤回为私有，再更新 Skill 包'
-                          : '请先下架为私有后再更新 Skill 包'
-                      }
-                      className="flex-1 py-2 px-3 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold cursor-not-allowed flex items-center justify-center gap-1 opacity-75"
-                    >
-                      <RefreshCw size={12} />
-                      <span>更新 Skill 包</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setInstanceForSkillReplacement(null);
-                        setAgentForSkillReplacement(agent);
-                        setShowPublishModal(true);
-                      }}
-                      className="flex-1 py-2 px-3 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1"
-                    >
-                      <RefreshCw size={12} />
-                      <span>更新 Skill 包</span>
-                    </button>
-                  )}
-                  {creatorAgentHasBeenUsed(agent) ? (
-                    <button
-                      type="button"
-                      onClick={() => setBlockedDeleteTarget(agent)}
-                      className="flex-1 py-2 px-3 text-[11px] font-bold text-slate-400 hover:text-slate-600 cursor-pointer"
-                      title="已有用户使用，无法删除"
-                    >
-                      无法删除
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setDeleteTarget(agent)}
-                      className="flex-1 py-2 px-3 text-[11px] font-bold text-rose-600 hover:text-rose-700 cursor-pointer"
-                    >
-                      删除智能体
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-          )}
-
-          {agentMgmtSubTab === 'private' && (
-            <CustomerInstancesPanel
-              instances={instancesList}
-              leads={leadsList}
-              onUpdateSkill={(instance) => {
-                setAgentForSkillReplacement(null);
-                setInstanceForSkillReplacement(instance);
-                setShowPublishModal(true);
-              }}
-            />
-          )}
-        </div>
+        <FdeAgentWorkbenchPanel
+          agents={agentsList}
+          instances={instancesList}
+          leads={leadsList}
+          initialListTab={agentListTab}
+          onUnpublish={handleUnpublishAgent}
+          onSubmitPublic={handleSubmitPublicAgent}
+          onContinuePublish={(agent) => {
+            setInstanceForSkillReplacement(null);
+            setAgentForSkillReplacement(agent);
+            setShowPublishModal(true);
+          }}
+          onUpdateSkill={(agent) => {
+            setInstanceForSkillReplacement(null);
+            setAgentForSkillReplacement(agent);
+            setShowPublishModal(true);
+          }}
+          onUpdateInstanceSkill={(instance) => {
+            setAgentForSkillReplacement(null);
+            setInstanceForSkillReplacement(instance);
+            setShowPublishModal(true);
+          }}
+          onOpenPricing={setPricingTarget}
+          onDelete={setDeleteTarget}
+          onBlockedDelete={setBlockedDeleteTarget}
+        />
       )}
 
-      {/* ========================================================= */}
-      {/* MODULE 3: 定制服务（确认方案后的订单）                  */}
-      {/* ========================================================= */}
-      {activeTab === 'custom-services' && (
-        <div className="space-y-6">
-          <CreatorCustomOrdersPanel
-            sessionLeads={sessionLeads}
-            focusOrderId={focusOrderId}
-            onFocusConsumed={onFocusConsumed}
-          />
-        </div>
+      {activeTab === 'consultations' && (
+        <CreatorConsultationsPanel
+          sessionLeads={sessionLeads}
+          onOpenOrder={(orderId) => {
+            setLocalFocusOrderId(orderId);
+            setActiveTab('orders');
+          }}
+        />
+      )}
+
+      {activeTab === 'orders' && (
+        <CreatorCustomOrdersPanel
+          sessionLeads={sessionLeads}
+          focusOrderId={localFocusOrderId || focusOrderId}
+          onFocusConsumed={() => {
+            setLocalFocusOrderId('');
+            onFocusConsumed?.();
+          }}
+        />
       )}
 
       {activeTab === 'account' && (

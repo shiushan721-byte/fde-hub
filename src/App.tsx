@@ -54,6 +54,7 @@ import {
   type NavigationFocus,
   type NotificationNavigationTarget
 } from './lib/notificationNavigation';
+import { homeSeo, parsePublicRoute, setPublicPath, SITE_NAME, updatePageSeo } from './lib/pageSeo';
 
 export default function App() {
   const catalog = useCatalog();
@@ -86,6 +87,8 @@ export default function App() {
   const [consultDealId, setConsultDealId] = useState<string | null>(null);
   const [isMessagesDrawerOpen, setIsMessagesDrawerOpen] = useState(false);
   const [messagesInitialTab, setMessagesInitialTab] = useState<InboxChannel>('activity');
+  const [messagesInitialExpertId, setMessagesInitialExpertId] = useState<string | null>(null);
+  const [messagesInitialThreadId, setMessagesInitialThreadId] = useState<string | null>(null);
   const [apiUnreadCount, setApiUnreadCount] = useState(0);
   const [saveToastVisible, setSaveToastVisible] = useState(false);
   const [saveToastMessage, setSaveToastMessage] = useState('操作已完成');
@@ -126,8 +129,11 @@ export default function App() {
   const refreshUnreadCount = async () => {
     try {
       await ensureMarketplaceSession();
-      const items = await api<Array<{ read: boolean }>>('/api/me/notifications');
-      setApiUnreadCount(items.filter((n) => !n.read).length);
+      const [items, dm] = await Promise.all([
+        api<Array<{ read: boolean }>>('/api/me/notifications'),
+        api<{ count: number }>('/api/dm/unread').catch(() => ({ count: 0 }))
+      ]);
+      setApiUnreadCount(items.filter((n) => !n.read).length + (dm.count || 0));
     } catch {
       setApiUnreadCount(0);
     }
@@ -190,29 +196,17 @@ export default function App() {
     setActiveInspiration(item);
     setCurrentRoute('inspiration-detail');
     if (!item.id.startsWith('mock_')) {
-      const nextHash = inspirationHash(item.id);
-      if (window.location.hash.replace(/^#/, '') !== nextHash) {
-        ignoreAgentHashRef.current = true;
-        window.location.hash = nextHash;
-      }
+      setPublicPath(`/inspiration/${encodeURIComponent(item.id)}`);
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const restoreInspirationHash = (id: string) => {
-    const nextHash = inspirationHash(id);
-    if (window.location.hash.replace(/^#/, '') !== nextHash) {
-      ignoreAgentHashRef.current = true;
-      window.location.hash = nextHash;
-    }
+    setPublicPath(`/inspiration/${encodeURIComponent(id)}`, true);
   };
 
   const restoreAgentHash = (agentId: string) => {
-    const nextHash = agentShareHash(agentId);
-    if (window.location.hash.replace(/^#/, '') !== nextHash) {
-      ignoreAgentHashRef.current = true;
-      window.location.hash = nextHash;
-    }
+    setPublicPath(`/agent/${encodeURIComponent(agentId)}`, true);
   };
 
   const handleBackFromInspiration = () => {
@@ -234,6 +228,7 @@ export default function App() {
     }
     setCurrentRoute('hellome-home');
     leaveInspirationRoute();
+    setPublicPath('/');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -264,7 +259,21 @@ export default function App() {
     leaveAgentDetailRoute();
     setActiveAuthorId(authorId);
     setCurrentRoute('author-profile');
+    setPublicPath(`/expert/${encodeURIComponent(authorId)}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleOpenDirectMessage = (opts: { expertId?: string; threadId?: string }) => {
+    void ensureMarketplaceSession();
+    setMessagesInitialTab('dm');
+    setMessagesInitialExpertId(opts.expertId || null);
+    setMessagesInitialThreadId(opts.threadId || null);
+    setIsMessagesDrawerOpen(false);
+    setActiveAuthorId(null);
+    leaveAgentDetailRoute();
+    leaveInspirationRoute();
+    setCurrentRoute('messages');
+    window.scrollTo({ top: 0 });
   };
 
   // Open Agent Detail page in main content
@@ -279,13 +288,10 @@ export default function App() {
     detailAgentIdRef.current = agent.id;
     setActiveDetailAgent(agent);
     setCurrentRoute('agent-detail');
-    const existing = parseAgentShareHash(window.location.hash);
-    const share = shareToken || (existing?.id === agent.id ? existing.share : '');
-    const nextHash = agentShareHash(agent.id, share);
-    if (window.location.hash.replace(/^#/, '') !== nextHash) {
-      ignoreAgentHashRef.current = true;
-      window.location.hash = nextHash;
-    }
+    const route = parsePublicRoute();
+    const share = shareToken || (route?.type === 'agent' && route.id === agent.id ? route.share : '');
+    const qs = share ? `?share=${encodeURIComponent(share)}` : '';
+    setPublicPath(`/agent/${encodeURIComponent(agent.id)}${qs}`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -299,6 +305,7 @@ export default function App() {
     }
     setCurrentRoute(agentDetailBackRoute);
     leaveAgentDetailRoute();
+    setPublicPath(agentDetailBackRoute === 'fde-experts' ? '/experts' : '/');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -325,7 +332,7 @@ export default function App() {
         break;
       case 'creator-center':
         if (!isExpertRole(userRole)) {
-          showToast('请切换到 AI 专家身份后查看创作者中心');
+          showToast('请切换到 AI 专家身份后查看 FDE 工作台');
           return;
         }
         setCreatorCenterTab(target.tab);
@@ -374,13 +381,17 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
 
-    const openFromHash = async () => {
+    const openFromLocation = async () => {
       if (ignoreAgentHashRef.current) {
         ignoreAgentHashRef.current = false;
         return;
       }
 
-      const inspirationParsed = parseInspirationHash(window.location.hash);
+      const publicRoute = parsePublicRoute();
+      const inspirationParsed =
+        publicRoute?.type === 'inspiration'
+          ? { id: publicRoute.id }
+          : parseInspirationHash(window.location.hash);
       if (inspirationParsed) {
         if (
           inspirationIdRef.current === inspirationParsed.id &&
@@ -403,7 +414,31 @@ export default function App() {
         return;
       }
 
-      const parsed = parseAgentShareHash(window.location.hash);
+      if (publicRoute?.type === 'expert') {
+        if (activeAuthorId !== publicRoute.id || routeRef.current !== 'author-profile') {
+          setActiveAuthorId(publicRoute.id);
+          setCurrentRoute('author-profile');
+        }
+        return;
+      }
+      if (publicRoute?.type === 'experts') {
+        setCurrentRoute('fde-experts');
+        return;
+      }
+      if (publicRoute?.type === 'agents') {
+        setHomeCatalogueTab('agents');
+        setCurrentRoute('hellome-home');
+        return;
+      }
+      if (publicRoute?.type === 'inspirations') {
+        setHomeCatalogueTab('inspiration');
+        setCurrentRoute('hellome-home');
+        return;
+      }
+      const parsed =
+        publicRoute?.type === 'agent'
+          ? { id: publicRoute.id, share: publicRoute.share }
+          : parseAgentShareHash(window.location.hash);
       if (!parsed) {
         if (inspirationIdRef.current && routeRef.current === 'inspiration-detail') {
           inspirationIdRef.current = null;
@@ -437,14 +472,16 @@ export default function App() {
       }
     };
 
-    const onHashChange = () => {
-      void openFromHash();
+    const onLocationChange = () => {
+      void openFromLocation();
     };
-    void openFromHash();
-    window.addEventListener('hashchange', onHashChange);
+    void openFromLocation();
+    window.addEventListener('hashchange', onLocationChange);
+    window.addEventListener('popstate', onLocationChange);
     return () => {
       cancelled = true;
-      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('hashchange', onLocationChange);
+      window.removeEventListener('popstate', onLocationChange);
     };
     // catalog.homeAgents: retry local fallback after catalog loads
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -518,8 +555,79 @@ export default function App() {
     setActiveAuthorId(null);
     leaveAgentDetailRoute();
     leaveInspirationRoute();
+    setPublicPath('/');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  const syncMainRoutePath = (route: MainNavRoute) => {
+    if (route === 'fde-experts') setPublicPath('/experts');
+    else if (route === 'hellome-home') setPublicPath('/');
+    else setPublicPath('/');
+  };
+
+  useEffect(() => {
+    if (currentRoute === 'agent-detail' && activeDetailAgent) {
+      updatePageSeo({
+        title: `${activeDetailAgent.title}｜${activeDetailAgent.category || 'AI 智能体'}｜${SITE_NAME}`,
+        description: activeDetailAgent.desc,
+        path: `/agent/${encodeURIComponent(activeDetailAgent.id)}`,
+        image: activeDetailAgent.coverImage
+      });
+      return;
+    }
+    if (currentRoute === 'author-profile' && activeAuthor) {
+      updatePageSeo({
+        title: `${activeAuthor.name}｜${activeAuthor.title || 'AI 专家'}｜${SITE_NAME}`,
+        description: activeAuthor.bio,
+        path: `/expert/${encodeURIComponent(activeAuthor.id)}`,
+        image: activeAuthor.avatar
+      });
+      return;
+    }
+    if (currentRoute === 'inspiration-detail' && activeInspiration) {
+      updatePageSeo({
+        title: `${activeInspiration.title}｜AI 创作案例｜${SITE_NAME}`,
+        description: activeInspiration.description,
+        path: `/inspiration/${encodeURIComponent(activeInspiration.id)}`,
+        image: activeInspiration.imageUrl
+      });
+      return;
+    }
+    if (currentRoute === 'fde-experts') {
+      updatePageSeo({
+        title: `AI 专家库｜${SITE_NAME}`,
+        description: '发现 HelloMe 认证 AI 专家，查看擅长领域、智能体产品、项目案例和定制服务。',
+        path: '/experts'
+      });
+      return;
+    }
+    if (currentRoute === 'hellome-home') {
+      if (window.location.pathname === '/agents') {
+        updatePageSeo({
+          title: `AI 智能体市场｜${SITE_NAME}`,
+          description: '浏览 HelloMe 已公开的交互应用智能体，按业务场景发现可直接使用或联系专家定制的 AI 工具。',
+          path: '/agents'
+        });
+        return;
+      }
+      if (window.location.pathname === '/inspirations') {
+        updatePageSeo({
+          title: `AI 创作案例与灵感｜${SITE_NAME}`,
+          description: '浏览由 HelloMe 智能体创作的图片、视频、网页及其他真实成果案例。',
+          path: '/inspirations'
+        });
+        return;
+      }
+      updatePageSeo(homeSeo());
+      return;
+    }
+    updatePageSeo({
+      title: `${SITE_NAME} 工作台`,
+      description: 'HelloMe 用户工作台',
+      path: window.location.pathname,
+      noindex: true
+    });
+  }, [activeAuthor, activeDetailAgent, activeInspiration, currentRoute]);
 
   const solutionToHellomeItem = (agent: AgentSolution): HellomeAgentItem => {
     const existing = catalog.homeAgents.find((item) => item.id === agent.id);
@@ -742,10 +850,12 @@ export default function App() {
             setActiveAuthorId(null);
             leaveAgentDetailRoute();
             leaveInspirationRoute();
+            setPublicPath('/');
             window.scrollTo({ top: 0, behavior: 'smooth' });
             return;
           }
           setCurrentRoute(route);
+          syncMainRoutePath(route);
           setActiveAuthorId(null);
           leaveAgentDetailRoute();
           leaveInspirationRoute();
@@ -781,9 +891,11 @@ export default function App() {
               setActiveAuthorId(null);
               leaveAgentDetailRoute();
               leaveInspirationRoute();
+              setPublicPath('/');
               return;
             }
             setCurrentRoute(route);
+            syncMainRoutePath(route);
             setActiveAuthorId(null);
             leaveAgentDetailRoute();
             leaveInspirationRoute();
@@ -843,6 +955,7 @@ export default function App() {
               onOpenAuthor={handleOpenAuthorProfile}
               onOpenAgentDetail={handleOpenAgentDetail}
               onToast={showToast}
+              onMessageCreator={(expertId) => handleOpenDirectMessage({ expertId })}
             />
           )}
 
@@ -972,6 +1085,7 @@ export default function App() {
               onToast={showToast}
               enableAuthorShowcaseTools={isExpertRole(userRole)}
               onOpenInspiration={(item) => handleOpenInspiration(item, 'agent')}
+              onMessageCreator={(expertId) => handleOpenDirectMessage({ expertId })}
             />
           )}
 
@@ -989,6 +1103,7 @@ export default function App() {
               isFavorite={favoriteExpertIds.includes(activeAuthor.id)}
               favoriteAgentIds={favoriteAgentIds}
               onToggleFavoriteAgent={handleToggleFavoriteAgent}
+              onMessageCreator={(expertId) => handleOpenDirectMessage({ expertId })}
             />
           )}
 
@@ -996,12 +1111,14 @@ export default function App() {
             <MessagesInboxView
               leads={sessionConsultationLeads}
               initialTab={messagesInitialTab}
+              initialExpertId={messagesInitialExpertId}
+              initialThreadId={messagesInitialThreadId}
               onNavigate={handleNotificationNavigate}
               onUnreadChange={() => void refreshUnreadCount()}
             />
           )}
 
-          {/* ROUTE 3: AI 专家中心（智能体管理 / 定制服务 / 收益） */}
+          {/* ROUTE 3: FDE 工作台（智能体 / 咨询单 / 订单 / 收益） */}
           {currentRoute === 'creator-center' && isExpertRole(userRole) && (
             <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
               <CreatorCenterView
@@ -1135,8 +1252,10 @@ export default function App() {
         leads={sessionConsultationLeads}
         onNavigate={handleNotificationNavigate}
         onUnreadChange={() => void refreshUnreadCount()}
-        onOpenAllMessages={(tab) => {
+        onOpenAllMessages={(tab, opts) => {
           setMessagesInitialTab(tab);
+          setMessagesInitialExpertId(opts?.expertId || null);
+          setMessagesInitialThreadId(opts?.threadId || null);
           setIsMessagesDrawerOpen(false);
           setActiveAuthorId(null);
           leaveAgentDetailRoute();

@@ -9,6 +9,8 @@ import {
 import { useInboxNotifications } from '../lib/useInboxNotifications';
 import { type NotificationNavigationTarget } from '../lib/notificationNavigation';
 import { ConsultInboxItem } from './ConsultInboxItem';
+import { DirectMessagePanel } from './DirectMessagePanel';
+import { useDmInbox } from '../lib/useDmInbox';
 
 export type { UserNotificationItem };
 
@@ -18,7 +20,7 @@ interface ConsultationMessagesDrawerProps {
   leads: CustomerLeadItem[];
   onNavigate?: (target: NotificationNavigationTarget) => void;
   onUnreadChange?: () => void;
-  onOpenAllMessages?: (tab: InboxChannel) => void;
+  onOpenAllMessages?: (tab: InboxChannel, opts?: { threadId?: string; expertId?: string }) => void;
 }
 
 export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProps> = ({
@@ -31,9 +33,11 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
 }) => {
   const [activeTab, setActiveTab] = useState<InboxChannel>('activity');
   const { notifications, unreadByChannel, markRead } = useInboxNotifications(isOpen, leads);
+  const { unread: dmUnread } = useDmInbox(isOpen);
+  const tabUnread = { ...unreadByChannel, dm: dmUnread };
 
   const visible = notifications.filter((item) => item.channel === activeTab);
-  const tabUnread = unreadByChannel[activeTab];
+  const currentTabUnread = activeTab === 'dm' ? dmUnread : unreadByChannel[activeTab];
 
   const handleItemClick = async (item: UserNotificationItem) => {
     if (item.unread) {
@@ -61,9 +65,9 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
       <div className="relative w-full max-w-[420px] h-full bg-white shadow-2xl flex flex-col border-l border-slate-200">
         <div className="px-5 pt-4 pb-0 shrink-0">
           <div className="flex items-center justify-between">
-            <div className="flex items-end gap-5">
+            <div className="flex items-end gap-3.5 overflow-x-auto">
               {INBOX_TABS.map((tab) => {
-                const unread = unreadByChannel[tab.key];
+                const unread = tabUnread[tab.key];
                 const active = activeTab === tab.key;
                 return (
                   <button
@@ -100,7 +104,16 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
           <div className="border-b border-slate-200" />
         </div>
 
-        {visible.length === 0 ? (
+        {activeTab === 'dm' ? (
+          <DirectMessagePanel
+            variant="drawer"
+            onUnreadChange={onUnreadChange}
+            onOpenInPage={(opts) => {
+              onOpenAllMessages?.('dm', opts);
+              onClose();
+            }}
+          />
+        ) : visible.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-8 text-slate-400">
             <p className="text-sm font-medium text-slate-600">
               暂无{INBOX_TABS.find((t) => t.key === activeTab)?.label}
@@ -151,11 +164,12 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
           </div>
         )}
 
+        {activeTab !== 'dm' && (
         <div className="px-5 py-3.5 border-t border-slate-200 flex items-center justify-between shrink-0">
           <button
             type="button"
             onClick={() => void markTabRead()}
-            disabled={tabUnread === 0}
+            disabled={currentTabUnread === 0}
             className="text-[13px] text-slate-500 hover:text-slate-800 font-medium cursor-pointer disabled:text-slate-300 disabled:cursor-default"
           >
             全部已读
@@ -168,6 +182,7 @@ export const ConsultationMessagesDrawer: React.FC<ConsultationMessagesDrawerProp
             全部消息 &gt;
           </button>
         </div>
+        )}
       </div>
     </div>
   );

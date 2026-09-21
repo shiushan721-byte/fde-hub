@@ -99,7 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   menuItems.push({
     key: 'creator-center',
-    label: isExpert ? 'AI 专家中心' : '个人中心',
+    label: isExpert ? 'FDE 工作台' : '个人中心',
     icon: Crown
   });
 
@@ -249,7 +249,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
             </div>
             <p className="text-[10px] text-slate-400 group-hover:text-slate-300">
-              {!isExpert ? '完成实名核验与入驻审核' : '管理作品、咨询与专家主页'}
+              {!isExpert ? '完成实名核验与入驻审核' : '管理资产、客户需求、交付和收益'}
             </p>
           </div>
         ) : (

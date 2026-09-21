@@ -36,7 +36,9 @@ import {
   Download,
   Plus,
   Trash2,
-  Globe
+  Globe,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import {
   SkillPackageManifest,
@@ -62,11 +64,17 @@ import {
   AGENT_PUBLIC_PUBLISH_HINT,
   visibilityFromCreatorStatus
 } from '../lib/agentLifecycle';
-import { api, ApiError } from '../lib/api';
+import { api } from '../lib/api';
 import { AgentPricingFields } from './AgentPricingFields';
 import { AgentCustomProjectsFields } from './AgentCustomProjectsFields';
 import { normalizePricingPlans, validatePaidPlans } from '../../shared/pricingPlans';
 import { normalizeCustomProjects, validateCustomProjects, type AgentCustomProject } from '../../shared/customProjects';
+import { applyOfficialProductDefaults } from '../lib/useOfficialProducts';
+import {
+  inferRecommendDoes,
+  inferRecommendTags,
+  normalizeRecommendTags
+} from '../../shared/agentRecommendProfile';
 
 interface AgentPublishWizardModalProps {
   isOpen: boolean;
@@ -361,6 +369,12 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
   const [publishVisibility, setPublishVisibility] = useState<'private' | 'public'>(
     visibilityFromCreatorStatus(agentToUpdate?.status)
   );
+  const [scopePickerOpen, setScopePickerOpen] = useState(false);
+  const [scopePickerVisibility, setScopePickerVisibility] = useState<'private' | 'public'>('public');
+  const [scopePickerBusy, setScopePickerBusy] = useState(false);
+  const [recommendDoes, setRecommendDoes] = useState('');
+  const [recommendTags, setRecommendTags] = useState<string[]>([]);
+  const [recommendTagDraft, setRecommendTagDraft] = useState('');
   const [showSkillDocModal, setShowSkillDocModal] = useState(false);
   const [hostPrecheck, setHostPrecheck] = useState<HostPrecheckStatus>('idle');
   const [hostDebugOutcome, setHostDebugOutcome] = useState<'passed' | 'failed'>('passed');
@@ -376,6 +390,15 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       setLifecycleAck(false);
       setIsAuditPassed(false);
       setPublishVisibility(visibilityFromCreatorStatus(agentToUpdate?.status));
+      setScopePickerOpen(false);
+      setScopePickerVisibility('public');
+      setScopePickerBusy(false);
+      setRecommendDoes('');
+      setRecommendTags([]);
+      setRecommendTagDraft('');
+      if (!agentToUpdate) {
+        void applyOfficialProductDefaults([], []).then(setCustomProjects);
+      }
     }
   }, [isOpen, agentToUpdate?.status]);
 
@@ -392,7 +415,11 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       }
       setAdapterPackages(agentToUpdate.adapterPackages || []);
       setEnableEnterpriseCustomization(agentToUpdate.fdeCustomEnabled ?? true);
-      setCustomProjects(normalizeCustomProjects(agentToUpdate.customProjects || []));
+      const currentProjects = normalizeCustomProjects(agentToUpdate.customProjects || []);
+      setCustomProjects(currentProjects);
+      void applyOfficialProductDefaults(currentProjects, agentToUpdate.omittedOfficialProductIds || []).then(
+        setCustomProjects
+      );
       setPricingModel(
         agentToUpdate.pricingType === 'free' || agentToUpdate.pricingPlans?.isFree ? 'free' : 'paid'
       );
@@ -694,16 +721,21 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
     return publishVisibility;
   };
 
-  const persistAgent = async (status: CreatorAgentItem['status']) => {
+  const persistAgent = async (
+    status: CreatorAgentItem['status'],
+    visibilityOverride?: 'private' | 'public'
+  ) => {
     const payload = buildAgentPayload(status);
     if (mode === 'custom_delivery') {
       await Promise.resolve(onSuccessPublish(payload));
       return;
     }
+    const visibility =
+      status === 'draft' ? 'draft' : visibilityOverride || persistVisibility();
     const body = {
       title: agentTitle.trim(),
       desc: agentDesc.trim(),
-      visibility: persistVisibility() === 'draft' || status === 'draft' ? 'draft' : persistVisibility(),
+      visibility,
       coverImage: payload.coverImage,
       version: agentVersion,
       platformSupport,
@@ -712,38 +744,58 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       enableEnterpriseCustomization,
       customProjects,
       adapterPackages,
-      skillFileName: uploadedFileName
+      skillFileName: uploadedFileName,
+      recommendDoes: recommendDoes.trim(),
+      recommendTags
     };
-    try {
-      const saved = agentToUpdate?.id
-        ? await api<CreatorAgentItem>(`/api/me/agents/${encodeURIComponent(agentToUpdate.id)}`, {
-            method: 'PUT',
-            body: JSON.stringify(body)
-          })
-        : await api<CreatorAgentItem>('/api/me/agents', {
-            method: 'POST',
-            body: JSON.stringify(body)
-          });
-      await Promise.resolve(onSuccessPublish({ ...payload, ...saved }));
-    } catch (err) {
-      if (err instanceof ApiError && (err.status === 404 || err.code === 'NETWORK_ERROR')) {
-        await Promise.resolve(onSuccessPublish(payload));
-        return;
-      }
-      throw err;
-    }
+    const saved = agentToUpdate?.id
+      ? await api<CreatorAgentItem>(`/api/me/agents/${encodeURIComponent(agentToUpdate.id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(body)
+        })
+      : await api<CreatorAgentItem>('/api/me/agents', {
+          method: 'POST',
+          body: JSON.stringify(body)
+        });
+    await Promise.resolve(onSuccessPublish({ ...payload, ...saved }));
   };
 
-  const handleSaveDraft = async () => {
+  const addRecommendTag = (raw: string) => {
+    const tag = raw.trim().slice(0, 16);
+    if (!tag) return;
+    setRecommendTags((prev) => normalizeRecommendTags([...prev, tag]));
+    setRecommendTagDraft('');
+  };
+
+  const handleSaveDraft = () => {
     if (!agentTitle.trim()) {
       alert('请先填写智能体名称');
       return;
     }
+    const existingDoes = agentToUpdate?.recommendDoes?.trim();
+    const existingTags = normalizeRecommendTags(agentToUpdate?.recommendTags || []);
+    setRecommendDoes(existingDoes || inferRecommendDoes(agentTitle, agentDesc));
+    setRecommendTags(
+      existingTags.length ? existingTags : inferRecommendTags(agentTitle, agentDesc, agentToUpdate?.category)
+    );
+    setRecommendTagDraft('');
+    setScopePickerVisibility('public');
+    setScopePickerOpen(true);
+  };
+
+  const handleConfirmScopePublish = async () => {
+    setScopePickerBusy(true);
+    const nextStatus: CreatorAgentItem['status'] =
+      scopePickerVisibility === 'public' ? 'under_review' : 'offline';
     try {
-      await persistAgent('draft');
+      await persistAgent(nextStatus, scopePickerVisibility);
+      setPublishVisibility(scopePickerVisibility);
+      setScopePickerOpen(false);
       onClose();
     } catch (err) {
-      alert(err instanceof Error ? err.message : '保存草稿失败');
+      alert(err instanceof Error ? err.message : '发布失败');
+    } finally {
+      setScopePickerBusy(false);
     }
   };
 
@@ -953,56 +1005,6 @@ your-skill-v1.0.0/
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 outline-none resize-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                   />
                 </div>
-
-                {mode !== 'custom_delivery' && (
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-800">发布范围</label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPublishVisibility('private')}
-                        className={`p-3.5 rounded-2xl text-left border transition-all cursor-pointer ${
-                          publishVisibility === 'private'
-                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-400'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5 text-xs font-bold">
-                          <Lock size={14} />
-                          私有发布
-                        </span>
-                        <p
-                          className={`text-[11px] leading-relaxed mt-1.5 ${
-                            publishVisibility === 'private' ? 'text-slate-300' : 'text-slate-500'
-                          }`}
-                        >
-                          无需平台审核，立即仅自己可用。之后若要进入市场，必须提审。
-                        </p>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPublishVisibility('public')}
-                        className={`p-3.5 rounded-2xl text-left border transition-all cursor-pointer ${
-                          publishVisibility === 'public'
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-blue-300 hover:text-blue-700'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5 text-xs font-bold">
-                          <Globe size={14} />
-                          公开上架
-                        </span>
-                        <p
-                          className={`text-[11px] leading-relaxed mt-1.5 ${
-                            publishVisibility === 'public' ? 'text-blue-100' : 'text-slate-500'
-                          }`}
-                        >
-                          进入智能体市场，须通过平台审核后才会公开展示。
-                        </p>
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-800">客户端平台适配</label>
@@ -2200,6 +2202,170 @@ your-skill-v1.0.0/
                 className="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
               >
                 {adapterSaving ? '上传中…' : '确认添加'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {scopePickerOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-slate-900/40 flex items-center justify-center p-4"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!scopePickerBusy) setScopePickerOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-[480px] max-h-[90vh] overflow-y-auto rounded-[28px] bg-white shadow-2xl px-6 pt-6 pb-5"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="选择发布范围"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-[18px] font-extrabold text-slate-900">选择发布范围</h3>
+              <button
+                type="button"
+                disabled={scopePickerBusy}
+                onClick={() => setScopePickerOpen(false)}
+                className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-50 cursor-pointer inline-flex items-center justify-center disabled:opacity-50"
+                aria-label="关闭"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              <button
+                type="button"
+                onClick={() => setScopePickerVisibility('public')}
+                className={`w-full text-left rounded-2xl border px-4 py-3.5 cursor-pointer transition-all ${
+                  scopePickerVisibility === 'public'
+                    ? 'border-slate-300 bg-white shadow-xs'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                <span className="flex items-start gap-3">
+                  <Eye size={18} className="text-slate-500 mt-0.5 shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[14px] font-bold text-slate-900">公开到市场</span>
+                    <span className="block text-[12px] text-slate-400 leading-5 mt-0.5">
+                      审核通过后将在智能体市场展示，其他用户可搜索并使用。
+                    </span>
+                  </span>
+                  {scopePickerVisibility === 'public' && (
+                    <Check size={18} className="text-slate-800 shrink-0 mt-0.5" />
+                  )}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setScopePickerVisibility('private')}
+                className={`w-full text-left rounded-2xl border px-4 py-3.5 cursor-pointer transition-all ${
+                  scopePickerVisibility === 'private'
+                    ? 'border-slate-300 bg-white shadow-xs'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                <span className="flex items-start gap-3">
+                  <EyeOff size={18} className="text-slate-500 mt-0.5 shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[14px] font-bold text-slate-900">仅自己可用</span>
+                    <span className="block text-[12px] text-slate-400 leading-5 mt-0.5">
+                      审核通过后仅您自己可使用，不会在智能体市场展示。
+                    </span>
+                  </span>
+                  {scopePickerVisibility === 'private' && (
+                    <Check size={18} className="text-slate-800 shrink-0 mt-0.5" />
+                  )}
+                </span>
+              </button>
+            </div>
+
+            {scopePickerVisibility === 'public' && (
+              <div className="mt-5 pt-4 border-t border-slate-100 space-y-4">
+                <div>
+                  <h4 className="text-[14px] font-extrabold text-slate-900">请确认下面的推荐信息</h4>
+                  <p className="mt-1 text-[12px] text-slate-400 leading-5">
+                    平台会在用户搜索时按这些内容推荐该智能体。
+                  </p>
+                </div>
+
+                <label className="block space-y-1.5">
+                  <span className="text-[13px] font-bold text-slate-800">它可以帮用户做什么</span>
+                  <textarea
+                    rows={3}
+                    value={recommendDoes}
+                    onChange={(e) => setRecommendDoes(e.target.value.slice(0, 120))}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] text-slate-800 leading-6 outline-none focus:bg-white focus:border-slate-400 resize-none"
+                  />
+                  <span className="block text-[11px] text-slate-400">
+                    可编辑文本框，建议 60–100 字以内。{recommendDoes.trim().length} 字
+                  </span>
+                </label>
+
+                <div className="space-y-1.5">
+                  <span className="text-[13px] font-bold text-slate-800">识别到的核心能力</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {recommendTags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700 text-[12px] font-semibold pl-2.5 pr-1.5 py-1"
+                      >
+                        {tag}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRecommendTags((prev) => prev.filter((item) => item !== tag))
+                          }
+                          className="w-4 h-4 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 cursor-pointer inline-flex items-center justify-center"
+                          aria-label={`删除 ${tag}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={recommendTagDraft}
+                    onChange={(e) => setRecommendTagDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addRecommendTag(recommendTagDraft);
+                      }
+                    }}
+                    placeholder="补充能力标签，回车添加"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 outline-none focus:border-slate-400"
+                  />
+                  <span className="block text-[11px] text-slate-400">
+                    标签可删除、补充，建议保留 3–5 个。
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <p className="mt-4 text-[12px] text-slate-400">
+              *发布范围可在后续调整；公开到市场前需通过平台审核
+            </p>
+
+            <div className="mt-5 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={scopePickerBusy}
+                onClick={() => setScopePickerOpen(false)}
+                className="h-10 px-5 rounded-full border border-slate-200 bg-white text-[13px] font-bold text-slate-800 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={scopePickerBusy}
+                onClick={() => void handleConfirmScopePublish()}
+                className="h-10 px-5 rounded-full bg-slate-950 text-white text-[13px] font-bold hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+              >
+                {scopePickerBusy ? '发布中…' : '确认发布'}
               </button>
             </div>
           </div>

@@ -10,7 +10,8 @@ import {
   Download,
   ChevronDown,
   Banknote,
-  Landmark
+  Landmark,
+  Package
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import {
@@ -36,6 +37,8 @@ import {
 } from './FinancePages';
 import { ExpertTagsPage } from './ExpertTagsPage';
 import { ExpertTitlesPage } from './ExpertTitlesPage';
+import { OfficialProductsPage } from './OfficialProductsPage';
+import { CustomProductsPage } from './CustomProductsPage';
 import { CommentReportsPage } from './CommentReportsPage';
 import { RecommendCategoryDialog, ShowcasesPage } from './ShowcasesPage';
 import { guessInspirationCategory } from '../../shared/inspirationCategories';
@@ -79,7 +82,9 @@ type AdminPage =
   | 'escrows'
   | 'finance-rules'
   | 'finance-balances'
-  | 'finance-ledger';
+  | 'finance-ledger'
+  | 'official-products'
+  | 'custom-products';
 
 type AdminUser = { id: string; email: string; name: string; role: string };
 
@@ -111,6 +116,16 @@ const nav: NavEntry[] = [
       { key: 'deliveries', label: '智能体审核' },
       { key: 'comment-reports', label: '评论举报' },
       { key: 'leads', label: '咨询线索' }
+    ]
+  },
+  {
+    type: 'group',
+    id: 'product-mgmt',
+    label: '商品管理',
+    icon: Package,
+    children: [
+      { key: 'official-products', label: '官方商品' },
+      { key: 'custom-products', label: '自定义商品' }
     ]
   },
   {
@@ -153,6 +168,7 @@ const nav: NavEntry[] = [
 
 const GROUP_PAGE_KEYS: Record<string, AdminPage[]> = {
   'agent-mgmt': ['agents', 'showcases', 'custom-agents', 'deliveries', 'comment-reports', 'leads'],
+  'product-mgmt': ['official-products', 'custom-products'],
   'expert-mgmt': ['experts', 'expert-tags', 'expert-titles', 'applications'],
   'fund-mgmt': ['expert-accounts', 'settlements', 'finance-rules'],
   'finance-mgmt': ['finance-balances', 'finance-ledger', 'withdrawals', 'escrows']
@@ -202,6 +218,7 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const [nonAdminHint, setNonAdminHint] = useState('');
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     'agent-mgmt': true,
+    'product-mgmt': true,
     'expert-mgmt': true,
     'fund-mgmt': true,
     'finance-mgmt': true
@@ -264,7 +281,7 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex">
-      <aside className="w-56 bg-slate-950 text-slate-100 flex flex-col shrink-0">
+      <aside className="w-56 bg-slate-950 text-slate-100 flex flex-col shrink-0 h-screen sticky top-0 overflow-y-auto">
         <div className="px-4 py-5 border-b border-white/10">
           <div className="text-xs font-black tracking-wide">Hellome 后台</div>
           <div className="text-[11px] text-slate-400 mt-1">{me.name} · {me.role === 'super_admin' ? '超级管理员' : '运营'}</div>
@@ -383,6 +400,8 @@ export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         {page === 'expert-titles' && <ExpertTitlesPage />}
         {page === 'applications' && <ApplicationsPage />}
         {page === 'leads' && <LeadsPage />}
+        {page === 'official-products' && <OfficialProductsPage />}
+        {page === 'custom-products' && <CustomProductsPage />}
         {page === 'expert-accounts' && <ExpertAccountsPage />}
         {page === 'settlements' && <SettlementsPage />}
         {page === 'withdrawals' && <WithdrawalsPage />}

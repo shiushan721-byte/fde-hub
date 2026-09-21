@@ -512,7 +512,9 @@ const upsertAgentSchema = z.object({
   enableEnterpriseCustomization: z.boolean().optional(),
   customProjects: z.unknown().optional(),
   adapterPackages: z.unknown().optional(),
-  skillFileName: z.string().max(200).optional()
+  skillFileName: z.string().max(200).optional(),
+  recommendDoes: z.string().max(200).optional(),
+  recommendTags: z.array(z.string().trim().min(1).max(16)).max(8).optional()
 });
 
 meRouter.get('/agents', async (req, res) => {
@@ -743,7 +745,8 @@ meRouter.put('/agents/:id/custom-projects', async (req, res) => {
     return ok(res, {
       id: agent.id,
       canFDECustom: agent.canFDECustom,
-      customProjects: normalizeCustomProjects(parseJson(agent.customProjects, []))
+      customProjects: normalizeCustomProjects(parseJson(agent.customProjects, [])),
+      omittedOfficialProductIds: parseJson<string[]>(agent.omittedOfficialProductIds, [])
     });
   } catch (error) {
     const status = (error as Error & { status?: number }).status;

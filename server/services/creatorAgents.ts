@@ -11,10 +11,12 @@ import {
   type PricingPlansPayload
 } from '../../shared/pricingPlans';
 import { normalizeCustomProjects, validateCustomProjects } from '../../shared/customProjects';
+import { computeOmittedOfficialIds } from './officialProducts';
 import {
   normalizeAdapterPackages,
   validateAdapterPackagePricing
 } from '../../shared/adapterPackages';
+import { normalizeRecommendTags } from '../../shared/agentRecommendProfile';
 
 const DEFAULT_COVER =
   'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80';
@@ -35,6 +37,8 @@ type UpsertAgentInput = {
   customProjects?: unknown;
   adapterPackages?: unknown;
   skillFileName?: string;
+  recommendDoes?: string;
+  recommendTags?: string[];
 };
 
 function newAgentId() {
@@ -89,10 +93,16 @@ export function toCreatorAgentItem(agent: Agent) {
     tokenRebateEnabled: true,
     fdeCustomEnabled: agent.canFDECustom,
     customProjects: normalizeCustomProjects(parseJson(agent.customProjects, [])),
+    omittedOfficialProductIds: parseJson<string[]>(agent.omittedOfficialProductIds, []),
     adapterPackages: normalizeAdapterPackages(parseJson(agent.adapterPackages, [])),
     status: uiStatusFromDb(agent.status),
     version,
     platformSupport,
+    recommendDoes:
+      typeof payload.recommendDoes === 'string' ? payload.recommendDoes.trim() : '',
+    recommendTags: Array.isArray(payload.capabilities)
+      ? payload.capabilities.filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
+      : [],
     skillPackage: skillFileName
       ? {
           fileName: skillFileName,
@@ -232,11 +242,18 @@ export async function creatorUpdateCustomProjects(
   const invalid = validateCustomProjects(projects);
   if (invalid) throw httpError(invalid, 400);
 
+  const enabled = input.enabled ?? agent.canFDECustom;
+  const omittedOfficialProductIds =
+    enabled === false
+      ? agent.omittedOfficialProductIds
+      : toJson(await computeOmittedOfficialIds(projects));
+
   return prisma.agent.update({
     where: { id: agent.id },
     data: {
-      canFDECustom: input.enabled ?? agent.canFDECustom,
-      customProjects: toJson(projects)
+      canFDECustom: enabled,
+      customProjects: toJson(projects),
+      omittedOfficialProductIds
     }
   });
 }
@@ -297,6 +314,16 @@ export async function creatorUpsertAgent(userId: string, input: UpsertAgentInput
   if (input.platformSupport) metaPatch.platformSupport = input.platformSupport;
   if (input.version) metaPatch.version = input.version;
   if (input.skillFileName) metaPatch.skillFileName = input.skillFileName;
+  if (input.recommendDoes !== undefined) metaPatch.recommendDoes = input.recommendDoes.trim().slice(0, 200);
+  if (input.recommendTags !== undefined) {
+    metaPatch.capabilities = normalizeRecommendTags(input.recommendTags);
+  }
+
+  const enabled = input.enableEnterpriseCustomization ?? existing?.canFDECustom ?? true;
+  const omittedOfficialProductIds =
+    enabled === false
+      ? existing?.omittedOfficialProductIds || '[]'
+      : toJson(await computeOmittedOfficialIds(projects));
 
   const data = {
     title,
@@ -304,8 +331,9 @@ export async function creatorUpsertAgent(userId: string, input: UpsertAgentInput
     coverImage: input.coverImage?.trim() || existing?.coverImage || DEFAULT_COVER,
     price: catalogPriceYuan(plans),
     pricingPlans: toJson(plans),
-    canFDECustom: input.enableEnterpriseCustomization ?? existing?.canFDECustom ?? true,
+    canFDECustom: enabled,
     customProjects: toJson(projects),
+    omittedOfficialProductIds,
     adapterPackages:
       input.adapterPackages !== undefined
         ? toJson(packages)

@@ -16,17 +16,19 @@ export type NavigationFocus = {
 };
 
 function normalizeCreatorTab(tab: string | null | undefined): CreatorCenterTab {
-  if (!tab) return 'custom-services';
-  if (tab === 'orders' || tab === 'customer-leads') return 'custom-services';
+  if (!tab) return 'my-agents';
+  if (tab === 'customer-leads') return 'consultations';
+  if (tab === 'custom-services') return 'orders';
   if (tab === 'customer-instances') return 'my-agents';
   if (tab === 'realname-verify') return 'my-agents';
   const allowed: CreatorCenterTab[] = [
     'profile-editor',
     'my-agents',
-    'custom-services',
+    'consultations',
+    'orders',
     'account'
   ];
-  return allowed.includes(tab as CreatorCenterTab) ? (tab as CreatorCenterTab) : 'custom-services';
+  return allowed.includes(tab as CreatorCenterTab) ? (tab as CreatorCenterTab) : 'my-agents';
 }
 
 function parsePathAndQuery(raw: string) {
@@ -139,7 +141,7 @@ function inferTargetFromContext(
     ]);
 
     if (creatorTypes.has(type)) {
-      return { route: 'creator-center', tab: 'custom-services', orderId };
+      return { route: 'creator-center', tab: 'orders', orderId };
     }
 
     if (type === 'delivery_review_rejected') {

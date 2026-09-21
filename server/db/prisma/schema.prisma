@@ -37,6 +37,9 @@ model User {
   agentLikes            AgentLike[]
   agentFavorites        AgentFavorite[]
   expertFollows         ExpertFollow[]
+  dmThreadsAsUser       DmThread[]             @relation("DmThreadUser")
+  dmThreadsAsCreator    DmThread[]             @relation("DmThreadCreator")
+  dmMessages            DmMessage[]
 }
 
 model Session {
@@ -105,8 +108,10 @@ model Agent {
   solutionPayload String   @default("")
   /** 外部工具适配分发包：[{ platformName, fileName, url, size, isFree, price }] */
   adapterPackages String   @default("[]")
-  /** FDE 标准定制项目：[{ id, title, description, price, active }]，价格单位元 */
+  /** FDE 标准定制项目：[{ id, title, description, price, active, source, officialProductId }]，价格单位元 */
   customProjects  String   @default("[]")
+  /** 创作者从该智能体移除的官方商品 id 列表 */
+  omittedOfficialProductIds String @default("[]")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   comments        AgentComment[]
@@ -329,6 +334,7 @@ model Expert {
   updatedAt       DateTime @updatedAt
   certification   ExpertCertification?
   follows         ExpertFollow[]
+  dmThreads       DmThread[]
 }
 
 /** 平台统一维护的专家领域分类标签（上架才在前台展示/可选） */
@@ -351,6 +357,19 @@ model ExpertTitle {
   status    String   @default("active")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/** 平台官方商品：默认出现在每个智能体的定制项目里，建议价仅供参考 */
+model OfficialProduct {
+  id              String   @id
+  title           String
+  description     String   @default("")
+  suggestedPrice  Int      @default(0)
+  sortOrder       Int      @default(0)
+  /** active | offline */
+  status          String   @default("active")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model ExpertCase {
@@ -633,6 +652,42 @@ model UserNotification {
   payload   String   @default("{}")
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
+}
+
+/** 登录用户与创作者的一对一私信，不与咨询/定制订单混用 */
+model DmThread {
+  id            String      @id
+  userId        String
+  user          User        @relation("DmThreadUser", fields: [userId], references: [id], onDelete: Cascade)
+  creatorUserId String
+  creator       User        @relation("DmThreadCreator", fields: [creatorUserId], references: [id], onDelete: Cascade)
+  expertId      String
+  expert        Expert      @relation(fields: [expertId], references: [id], onDelete: Cascade)
+  lastMessageAt DateTime?
+  lastPreview   String      @default("")
+  userUnread    Int         @default(0)
+  creatorUnread Int         @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  messages      DmMessage[]
+
+  @@unique([userId, creatorUserId])
+  @@index([userId, lastMessageAt])
+  @@index([creatorUserId, lastMessageAt])
+  @@index([expertId])
+}
+
+model DmMessage {
+  id        String   @id
+  threadId  String
+  thread    DmThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime @default(now())
+  readAt    DateTime?
+
+  @@index([threadId, createdAt])
 }
 
 /** 专家资金账户：待提现 / 可提现 */

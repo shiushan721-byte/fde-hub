@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Handshake, X, FileText, Loader2, CreditCard } from 'lucide-react';
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
-import { formatOrderTime } from '../lib/customOrderLabels';
+import { formatOrderTime, isPaidFulfillmentDeal } from '../lib/customOrderLabels';
 import { CustomServiceDeal, CustomServiceOrder } from '../types/customService';
 import { CustomerLeadItem } from '../types/creator';
 import { DeliveryProposal } from '../types/deliveryProposal';
@@ -125,7 +125,7 @@ export const ConsultDealDrawer: React.FC<ConsultDealDrawerProps> = ({
   };
 
   const closeConsult = async () => {
-    if (!window.confirm('确认关闭该咨询？关闭后不会进入定制订单。')) return;
+    if (!window.confirm('确认拒绝并关闭该咨询？关闭后不会进入订单。')) return;
     setBusy('close');
     try {
       await api(`/api/custom-services/${encodeURIComponent(dealId)}/close`, {
@@ -169,7 +169,7 @@ export const ConsultDealDrawer: React.FC<ConsultDealDrawerProps> = ({
   };
 
   const startProposal = async () => {
-    if (order && canPropose(order.status)) {
+    if (order && (canPropose(order.status) || awaitingProposal)) {
       setProposalOrder(order);
       return;
     }
@@ -222,11 +222,12 @@ export const ConsultDealDrawer: React.FC<ConsultDealDrawerProps> = ({
 
   const nextHint = (() => {
     if (!deal || isClosed) return '';
-    if (awaitingPayment) return '方案已确认，下一步请完成付款。付款后订单进入「我的定制」。';
+    if (isPaidFulfillmentDeal(deal)) return '用户已付款，咨询单已转入订单管理。';
+    if (awaitingPayment) return isCreator ? '方案已确认，等待用户付款后自动生成订单。' : '方案已确认，下一步请完成付款。付款后进入订单履约。';
     if (awaitingProposal) {
-      return isCreator ? '已发起方案，等待用户确认后才会进入定制订单。' : '请确认交付方案。确认后进入「我的定制」付款。';
+      return isCreator ? '已提交方案，等待用户确认。' : '请确认交付方案。确认后进入付款。';
     }
-    if (isCreator) return '查看需求后，去联系或直接发起定制交付方案；关闭则不成单。';
+    if (isCreator) return '接受咨询后沟通需求，再提交定制方案与报价；也可拒绝或关闭咨询。';
     return '创作者跟进后会发起交付方案。若不再需要，可以关闭咨询。';
   })();
 
@@ -236,7 +237,7 @@ export const ConsultDealDrawer: React.FC<ConsultDealDrawerProps> = ({
       <div className="relative w-full max-w-[520px] h-full bg-white shadow-2xl flex flex-col border-l border-slate-200">
         <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
           <div>
-            <div className="text-[11px] font-bold text-slate-400 tracking-wide">咨询待办</div>
+            <div className="text-[11px] font-bold text-slate-400 tracking-wide">咨询单</div>
             <h2 className="text-base font-black text-slate-900 mt-0.5">
               {deal?.agentTitle || '定制咨询'}
             </h2>
@@ -343,7 +344,18 @@ export const ConsultDealDrawer: React.FC<ConsultDealDrawerProps> = ({
         {deal && !isClosed && (
           <div className="px-5 py-4 border-t border-slate-100 shrink-0">
             <div className="flex flex-wrap gap-2">
-              {stillConsulting && !deal.contacted && (
+              {stillConsulting && isCreator && !deal.contacted && (
+                <button
+                  type="button"
+                  disabled={Boolean(busy)}
+                  onClick={() => void markContacted()}
+                  className="px-3.5 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+                >
+                  <Handshake size={14} />
+                  {busy === 'contact' ? '处理中…' : '接受咨询'}
+                </button>
+              )}
+              {stillConsulting && !isCreator && !deal.contacted && (
                 <button
                   type="button"
                   disabled={Boolean(busy)}
@@ -354,7 +366,7 @@ export const ConsultDealDrawer: React.FC<ConsultDealDrawerProps> = ({
                   {busy === 'contact' ? '处理中…' : '去联系'}
                 </button>
               )}
-              {stillConsulting && isCreator && (
+              {(stillConsulting || (awaitingProposal && isCreator)) && isCreator && (
                 <button
                   type="button"
                   disabled={Boolean(busy)}
@@ -362,10 +374,10 @@ export const ConsultDealDrawer: React.FC<ConsultDealDrawerProps> = ({
                   className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
                 >
                   <FileText size={14} />
-                  {busy === 'propose' ? '处理中…' : '发起定制交付方案'}
+                  {busy === 'propose' ? '处理中…' : awaitingProposal ? '修改方案' : '提交方案和报价'}
                 </button>
               )}
-              {awaitingPayment && order && (
+              {awaitingPayment && order && !isCreator && (
                 <button
                   type="button"
                   onClick={() => onBecameOrder?.(order.id)}
@@ -375,6 +387,15 @@ export const ConsultDealDrawer: React.FC<ConsultDealDrawerProps> = ({
                   去支付
                 </button>
               )}
+              {isPaidFulfillmentDeal(deal) && (deal.orderId || order?.id) && (
+                <button
+                  type="button"
+                  onClick={() => onBecameOrder?.(deal.orderId || order!.id)}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer"
+                >
+                  查看对应订单
+                </button>
+              )}
               {stillConsulting && (
                 <button
                   type="button"
@@ -382,7 +403,7 @@ export const ConsultDealDrawer: React.FC<ConsultDealDrawerProps> = ({
                   onClick={() => void closeConsult()}
                   className="px-3.5 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold cursor-pointer disabled:opacity-60"
                 >
-                  关闭咨询
+                  {isCreator && !deal.contacted ? '拒绝咨询' : '关闭咨询'}
                 </button>
               )}
             </div>
@@ -391,7 +412,7 @@ export const ConsultDealDrawer: React.FC<ConsultDealDrawerProps> = ({
 
         {deal && isClosed && (
           <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-500">
-            该咨询已关闭，不会进入定制订单。
+            该咨询已关闭，不会进入订单。
           </div>
         )}
       </div>

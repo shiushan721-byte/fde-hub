@@ -1,6 +1,6 @@
-/** 铃铛消息三类：动态 / 通知 / 咨询。前后台共用，新增 type 时同步补这里。 */
+/** 铃铛消息：动态 / 通知 / 咨询 / 私信。私信走独立会话，不写入 UserNotification type。前后台共用，新增 type 时同步补这里。 */
 
-export type InboxChannel = 'activity' | 'notice' | 'consult';
+export type InboxChannel = 'activity' | 'notice' | 'consult' | 'dm';
 
 export const ACTIVITY_NOTIFICATION_TYPES = [
   'agent_like',
