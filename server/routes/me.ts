@@ -20,6 +20,7 @@ import {
   creatorUnpublishAgent,
   creatorUpdateCustomProjects,
   creatorUpdatePricing,
+  creatorUpdateProfile,
   creatorUpsertAgent,
   findExpertForUser,
   listMyAgents,
@@ -554,6 +555,29 @@ meRouter.put('/agents/:id', async (req, res) => {
   }
 });
 
+const updateProfileSchema = z.object({
+  title: z.string().trim().min(1, '请填写智能体名称').max(20, '名称最多 20 字'),
+  desc: z.string().trim().min(1, '请填写智能体描述').max(100, '描述最多 100 字'),
+  galleryImages: z.array(z.string().trim().min(1)).min(1, '请上传展示图片').max(6),
+  platformSupport: z.enum(['mac', 'windows', 'both'])
+});
+
+meRouter.patch('/agents/:id/profile', async (req, res) => {
+  const parsed = updateProfileSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, parsed.error.issues[0]?.message || '参数不合法');
+  try {
+    const item = await creatorUpdateProfile(req.user!.id, req.params.id, parsed.data);
+    return ok(res, item);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '保存失败',
+      status === 403 || status === 404 ? status : 400
+    );
+  }
+});
+
 meRouter.post('/agents/:id/unpublish', async (req, res) => {
   try {
     const item = await creatorUnpublishAgent(req.user!.id, req.params.id);
@@ -613,8 +637,34 @@ meRouter.post(
 );
 
 meRouter.post(
+  '/uploads/attachment',
+  express.raw({ type: '*/*', limit: '40mb' }),
+  async (req, res) => {
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+    if (!buf.length) return fail(res, '未收到文件');
+    const fileName = decodeURIComponent(String(req.headers['x-file-name'] || 'attachment.bin'));
+    if (
+      !/\.(zip|tar\.gz|tgz|pdf|docx?|pptx?|xlsx?|png|jpe?g|webp|gif|txt|md)$/i.test(fileName)
+    ) {
+      return fail(res, '附件仅支持 zip / pdf / office / 图片 / 文本');
+    }
+    const stored = await localStorageAdapter.upload({
+      fileName,
+      buffer: buf,
+      mimeType: 'application/octet-stream'
+    });
+    return ok(res, {
+      fileKey: stored.fileKey,
+      url: stored.url,
+      fileName,
+      size: formatUploadSize(buf.length)
+    });
+  }
+);
+
+meRouter.post(
   '/uploads/image',
-  express.raw({ type: '*/*', limit: '8mb' }),
+  express.raw({ type: '*/*', limit: '10mb' }),
   async (req, res) => {
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
     if (!buf.length) return fail(res, '未收到图片');

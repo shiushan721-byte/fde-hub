@@ -110,6 +110,8 @@ export interface CreatorAgentItem {
   desc: string;
   category: string;
   coverImage: string;
+  /** 智能体展示图，第一张为封面，最多 6 张 */
+  galleryImages?: string[];
   pricingType: 'free' | 'freemium' | 'paid';
   price?: number; // 默认/基准价格 (元)
   pricingPlans?: AgentPricingPlans;

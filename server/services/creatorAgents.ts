@@ -17,6 +17,7 @@ import {
   validateAdapterPackagePricing
 } from '../../shared/adapterPackages';
 import { normalizeRecommendTags } from '../../shared/agentRecommendProfile';
+import { normalizeGalleryImages } from '../../shared/agentGallery';
 
 const DEFAULT_COVER =
   'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80';
@@ -87,6 +88,7 @@ export function toCreatorAgentItem(agent: Agent) {
     desc: agent.desc,
     category: agent.category,
     coverImage: agent.coverImage,
+    galleryImages: normalizeGalleryImages(payload.galleryImages, agent.coverImage),
     pricingType: plans.isFree ? 'free' : 'paid',
     price: plans.price,
     pricingPlans: plans,
@@ -222,6 +224,45 @@ export async function creatorUpdatePricing(
   });
 }
 
+export async function creatorUpdateProfile(
+  userId: string,
+  agentId: string,
+  input: {
+    title: string;
+    desc: string;
+    galleryImages: string[];
+    platformSupport: 'mac' | 'windows' | 'both';
+  }
+) {
+  const expert = await findExpertForUser(userId);
+  if (!expert) throw httpError('仅认证专家可编辑智能体资料', 403);
+  const agent = await prisma.agent.findFirst({
+    where: { id: agentId, authorId: expert.id, creatorDeletedAt: null }
+  });
+  if (!agent) throw httpError('智能体不存在或无权操作', 404);
+
+  const title = input.title.trim();
+  const desc = input.desc.trim();
+  if (!title) throw httpError('请填写智能体名称', 400);
+  if (!desc) throw httpError('请填写智能体描述', 400);
+  const galleryImages = normalizeGalleryImages(input.galleryImages);
+  if (!galleryImages.length) throw httpError('请上传展示图片', 400);
+
+  const updated = await prisma.agent.update({
+    where: { id: agent.id },
+    data: {
+      title,
+      desc,
+      coverImage: galleryImages[0],
+      solutionPayload: mergeSolutionMeta(agent.solutionPayload || '', {
+        galleryImages,
+        platformSupport: input.platformSupport
+      })
+    }
+  });
+  return toCreatorAgentItem(updated);
+}
+
 export async function creatorUpdateCustomProjects(
   userId: string,
   agentId: string,
@@ -239,7 +280,8 @@ export async function creatorUpdateCustomProjects(
   }
 
   const projects = normalizeCustomProjects(input.projects);
-  const invalid = validateCustomProjects(projects);
+  const previousCount = normalizeCustomProjects(parseJson(agent.customProjects, [])).length;
+  const invalid = validateCustomProjects(projects, { previousCount });
   if (invalid) throw httpError(invalid, 400);
 
   const enabled = input.enabled ?? agent.canFDECustom;
@@ -286,10 +328,6 @@ export async function creatorUpsertAgent(userId: string, input: UpsertAgentInput
     if (invalidPlans) throw httpError(invalidPlans, 400);
   }
 
-  const projects = normalizeCustomProjects(input.customProjects);
-  const invalidProjects = validateCustomProjects(projects);
-  if (invalidProjects) throw httpError(invalidProjects, 400);
-
   const packages = normalizeAdapterPackages(input.adapterPackages || []);
   for (const pack of packages) {
     const invalid = validateAdapterPackagePricing(pack);
@@ -304,6 +342,11 @@ export async function creatorUpsertAgent(userId: string, input: UpsertAgentInput
   if (input.id && !existing) {
     throw httpError('智能体不存在或无权操作', 404);
   }
+
+  const projects = normalizeCustomProjects(input.customProjects);
+  const previousCount = existing ? normalizeCustomProjects(parseJson(existing.customProjects, [])).length : 0;
+  const invalidProjects = validateCustomProjects(projects, { previousCount });
+  if (invalidProjects) throw httpError(invalidProjects, 400);
 
   const status = existing
     ? nextStatusForVisibility(existing.status, input.visibility)

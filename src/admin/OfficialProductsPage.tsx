@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { api } from '../lib/api';
+import { SERVICE_SCOPE_FOOTER } from '../../shared/officialProductCatalog';
 
 function useAdminQuery<T>(path: string) {
   const [data, setData] = useState<T | null>(null);
@@ -28,10 +29,24 @@ function useAdminQuery<T>(path: string) {
 type OfficialProductRow = {
   id: string;
   title: string;
+  description?: string;
   suggestedPrice: number;
   sortOrder: number;
   status: string;
 };
+
+const DESCRIPTION_PLACEHOLDER = [
+  '服务说明',
+  '',
+  '服务包含',
+  '- ',
+  '',
+  '交付内容',
+  '',
+  '不包含',
+  '',
+  SERVICE_SCOPE_FOOTER
+].join('\n');
 
 export const OfficialProductsPage = () => {
   const { data, error, loading, reload } = useAdminQuery<OfficialProductRow[]>('/api/admin/official-products');
@@ -40,6 +55,7 @@ export const OfficialProductsPage = () => {
   const [busy, setBusy] = useState('');
   const [editTarget, setEditTarget] = useState<OfficialProductRow | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
   const [editPrice, setEditPrice] = useState(0);
 
   const rows = useMemo(() => data || [], [data]);
@@ -80,6 +96,7 @@ export const OfficialProductsPage = () => {
         method: 'PATCH',
         body: JSON.stringify({
           title: editTitle.trim(),
+          description: editDescription.trim(),
           suggestedPrice: Number(editPrice) || 0
         })
       });
@@ -106,6 +123,13 @@ export const OfficialProductsPage = () => {
     }
   };
 
+  const openEdit = (row: OfficialProductRow) => {
+    setEditTarget(row);
+    setEditTitle(row.title);
+    setEditDescription(row.description || '');
+    setEditPrice(row.suggestedPrice);
+  };
+
   const inputClass = 'px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white min-w-0';
 
   return (
@@ -121,7 +145,7 @@ export const OfficialProductsPage = () => {
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="如：标准流程与界面调整"
+            placeholder="如：网页部署服务"
             className={`${inputClass} w-full`}
           />
         </label>
@@ -153,9 +177,9 @@ export const OfficialProductsPage = () => {
           <thead className="bg-slate-50 text-[11px] text-slate-500">
             <tr>
               <th className="text-left font-semibold px-4 py-2">名称</th>
-              <th className="text-left font-semibold px-4 py-2">参考价格</th>
-              <th className="text-left font-semibold px-4 py-2">状态</th>
-              <th className="text-right font-semibold px-4 py-2">操作</th>
+              <th className="text-left font-semibold px-4 py-2 w-28">参考价格</th>
+              <th className="text-left font-semibold px-4 py-2 w-24">状态</th>
+              <th className="text-right font-semibold px-4 py-2 w-36">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -172,15 +196,11 @@ export const OfficialProductsPage = () => {
                     {row.status === 'active' ? '已上架' : '已下架'}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-right space-x-2">
+                <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
                   <button
                     type="button"
                     className="text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
-                    onClick={() => {
-                      setEditTarget(row);
-                      setEditTitle(row.title);
-                      setEditPrice(row.suggestedPrice);
-                    }}
+                    onClick={() => openEdit(row)}
                   >
                     编辑
                   </button>
@@ -219,7 +239,7 @@ export const OfficialProductsPage = () => {
 
       {editTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white w-full max-w-md rounded-2xl p-5 space-y-3">
+          <div className="bg-white w-full max-w-lg rounded-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto">
             <h2 className="text-sm font-black">编辑官方商品</h2>
             <label className="block space-y-1">
               <span className="text-[11px] text-slate-500">名称</span>
@@ -227,6 +247,16 @@ export const OfficialProductsPage = () => {
                 value={editTitle}
                 onChange={(e) => setEditTitle(e.target.value)}
                 className={`${inputClass} w-full`}
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-[11px] text-slate-500">详情介绍</span>
+              <textarea
+                rows={12}
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder={DESCRIPTION_PLACEHOLDER}
+                className={`${inputClass} w-full resize-y leading-relaxed`}
               />
             </label>
             <label className="block space-y-1">

@@ -207,10 +207,13 @@ function agentAdminStatusLabel(agent: { status: string; creatorDeletedAt?: strin
   return statusLabel[agent.status] || agent.status;
 }
 
-export const AdminApp: React.FC<{ onExit: () => void }> = ({ onExit }) => {
+export const AdminApp: React.FC<{ onExit: () => void; initialPage?: AdminPage }> = ({
+  onExit,
+  initialPage = 'agents'
+}) => {
   const [me, setMe] = useState<AdminUser | null>(null);
   const [checking, setChecking] = useState(true);
-  const [page, setPage] = useState<AdminPage>('agents');
+  const [page, setPage] = useState<AdminPage>(initialPage);
   const [agentsAuthorFilter, setAgentsAuthorFilter] = useState<{
     authorId: string;
     label: string;

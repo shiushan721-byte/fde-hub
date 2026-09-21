@@ -1,3 +1,5 @@
+import { MAX_STANDARD_SERVICES, RETIRED_OFFICIAL_PRODUCT_IDS } from './officialProductCatalog';
+
 export type OfficialProductTemplate = {
   id: string;
   title: string;
@@ -5,6 +7,14 @@ export type OfficialProductTemplate = {
   /** 建议售价（元），仅供创作者参考，不构成成交价 */
   suggestedPrice: number;
   sortOrder: number;
+};
+
+export type ProductAttachment = {
+  id: string;
+  fileName: string;
+  size: string;
+  url: string;
+  fileKey?: string;
 };
 
 export type AgentCustomProject = {
@@ -19,7 +29,12 @@ export type AgentCustomProject = {
   officialProductId?: string;
   suggestedPrice?: number;
   createdAt?: string;
+  attachments?: ProductAttachment[];
 };
+
+export function newProductAttachmentId() {
+  return `att_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function toNonNegInt(raw: unknown, fallback = 0) {
   const n = Number(raw);
@@ -59,6 +74,7 @@ export function normalizeCustomProjects(raw: unknown): AgentCustomProject[] {
       const suggestedPrice = toNonNegInt(row.suggestedPrice ?? row.suggested_price, 0);
       const id = String(row.id || newCustomProjectId());
       const createdMs = customProjectCreatedAtMs(id, String(row.createdAt || ''));
+      const attachments = normalizeProductAttachments(row.attachments);
       return {
         id,
         title,
@@ -69,7 +85,8 @@ export function normalizeCustomProjects(raw: unknown): AgentCustomProject[] {
         source,
         ...(officialProductId ? { officialProductId } : {}),
         ...(suggestedPrice > 0 ? { suggestedPrice } : {}),
-        ...(createdMs > 0 ? { createdAt: new Date(createdMs).toISOString() } : {})
+        ...(createdMs > 0 ? { createdAt: new Date(createdMs).toISOString() } : {}),
+        ...(attachments.length ? { attachments } : {})
       };
     })
     .filter((item): item is AgentCustomProject => Boolean(item))
@@ -80,7 +97,13 @@ export function activeCustomProjects(raw: unknown): AgentCustomProject[] {
   return normalizeCustomProjects(raw).filter((item) => item.active && item.price >= 0);
 }
 
-export function validateCustomProjects(projects: AgentCustomProject[]): string | null {
+export function validateCustomProjects(
+  projects: AgentCustomProject[],
+  options?: { previousCount?: number }
+): string | null {
+  if (projects.length > MAX_STANDARD_SERVICES && projects.length > (options?.previousCount ?? 0)) {
+    return `标准服务最多 ${MAX_STANDARD_SERVICES} 项`;
+  }
   for (const item of projects) {
     if (!item.title.trim()) return '请填写定制项目名称';
     if (item.price < 1) return `「${item.title}」售价须大于 0`;
@@ -102,6 +125,26 @@ export function snapshotCustomProjects(projects: AgentCustomProject[]) {
   }));
 }
 
+export function normalizeProductAttachments(raw: unknown): ProductAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const row = item as Record<string, unknown>;
+      const url = String(row.url || '').trim();
+      const fileName = String(row.fileName || row.name || '').trim();
+      if (!url || !fileName) return null;
+      return {
+        id: String(row.id || newProductAttachmentId()),
+        fileName,
+        size: String(row.size || ''),
+        url,
+        fileKey: row.fileKey ? String(row.fileKey) : undefined
+      };
+    })
+    .filter((item): item is ProductAttachment => Boolean(item));
+}
+
 export function isOfficialProject(item: AgentCustomProject) {
   return item.source === 'official' || Boolean(item.officialProductId);
 }
@@ -112,15 +155,19 @@ export function mergeOfficialProducts(
   omittedIds: string[] = []
 ): AgentCustomProject[] {
   const omitted = new Set(omittedIds.filter(Boolean));
-  const current = normalizeCustomProjects(existing);
+  const current = normalizeCustomProjects(existing).filter(
+    (item) => !item.officialProductId || !RETIRED_OFFICIAL_PRODUCT_IDS.includes(item.officialProductId)
+  );
   const used = new Set(
     current
       .map((item) => item.officialProductId)
       .filter((id): id is string => Boolean(id))
   );
 
+  const room = Math.max(0, MAX_STANDARD_SERVICES - current.length);
   const injected: AgentCustomProject[] = official
     .filter((item) => !omitted.has(item.id) && !used.has(item.id))
+    .slice(0, room)
     .map((item, index) => ({
       id: newCustomProjectId(),
       title: item.title,
@@ -137,7 +184,13 @@ export function mergeOfficialProducts(
     if (!item.officialProductId) return item;
     const tmpl = official.find((row) => row.id === item.officialProductId);
     if (!tmpl) return item;
-    return { ...item, source: 'official' as const, suggestedPrice: tmpl.suggestedPrice };
+    return {
+      ...item,
+      title: tmpl.title,
+      description: tmpl.description,
+      source: 'official' as const,
+      suggestedPrice: tmpl.suggestedPrice
+    };
   });
 
   return [...injected, ...withHints].map((item, index) => ({ ...item, sortOrder: index }));

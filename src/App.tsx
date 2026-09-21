@@ -826,10 +826,15 @@ export default function App() {
   };
 
   if (showAdmin) {
-    return <AdminApp onExit={() => {
-      setShowAdmin(false);
-      catalog.refresh();
-    }} />;
+    return (
+      <AdminApp
+        initialPage="official-products"
+        onExit={() => {
+          setShowAdmin(false);
+          catalog.refresh();
+        }}
+      />
+    );
   }
 
   return (

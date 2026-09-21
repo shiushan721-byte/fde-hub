@@ -4,20 +4,16 @@ import {
   Bookmark,
   Bot,
   Box,
-  DollarSign,
-  Download,
   Layers,
-  Package,
   RefreshCw,
   Search,
-  ThumbsUp,
-  Wrench
+  ThumbsUp
 } from 'lucide-react';
 import { CreatorAgentItem, CustomerAgentInstance, CustomerLeadItem } from '../types/creator';
 import { creatorAgentHasBeenUsed, creatorListingBadgeClass, creatorListingLabel } from '../lib/agentLifecycle';
 import { pricingLabel } from '../../shared/pricingPlans';
-import { normalizeAdapterPackages, adapterPackageIsFree, adapterPackagePriceYuan } from '../../shared/adapterPackages';
-import { normalizeCustomProjects } from '../../shared/customProjects';
+import { AgentProductListEditor } from './AgentProductListEditor';
+import { AgentProfileEditor } from './AgentProfileEditor';
 
 type ListTab = 'all' | 'owned' | 'delivered';
 type OwnedDetailTab = 'profile' | 'versions' | 'products';
@@ -62,7 +58,7 @@ export const FdeAgentWorkbenchPanel: React.FC<{
   onContinuePublish: (agent: CreatorAgentItem) => void;
   onUpdateSkill: (agent: CreatorAgentItem) => void;
   onUpdateInstanceSkill: (instance: CustomerAgentInstance) => void;
-  onOpenPricing: (agent: CreatorAgentItem) => void;
+  onAgentUpdated: (agent: CreatorAgentItem) => void;
   onDelete: (agent: CreatorAgentItem) => void;
   onBlockedDelete: (agent: CreatorAgentItem) => void;
 }> = ({
@@ -75,7 +71,7 @@ export const FdeAgentWorkbenchPanel: React.FC<{
   onContinuePublish,
   onUpdateSkill,
   onUpdateInstanceSkill,
-  onOpenPricing,
+  onAgentUpdated,
   onDelete,
   onBlockedDelete
 }) => {
@@ -133,7 +129,7 @@ export const FdeAgentWorkbenchPanel: React.FC<{
         onSubmitPublic={onSubmitPublic}
         onContinuePublish={onContinuePublish}
         onUpdateSkill={onUpdateSkill}
-        onOpenPricing={onOpenPricing}
+        onAgentUpdated={onAgentUpdated}
         onDelete={onDelete}
         onBlockedDelete={onBlockedDelete}
       />
@@ -312,7 +308,7 @@ function OwnedAgentDetail({
   onSubmitPublic,
   onContinuePublish,
   onUpdateSkill,
-  onOpenPricing,
+  onAgentUpdated,
   onDelete,
   onBlockedDelete
 }: {
@@ -324,12 +320,10 @@ function OwnedAgentDetail({
   onSubmitPublic: (agentId: string) => void;
   onContinuePublish: (agent: CreatorAgentItem) => void;
   onUpdateSkill: (agent: CreatorAgentItem) => void;
-  onOpenPricing: (agent: CreatorAgentItem) => void;
+  onAgentUpdated: (agent: CreatorAgentItem) => void;
   onDelete: (agent: CreatorAgentItem) => void;
   onBlockedDelete: (agent: CreatorAgentItem) => void;
 }) {
-  const adapters = normalizeAdapterPackages(agent.adapterPackages || []);
-  const projects = normalizeCustomProjects(agent.customProjects || []);
   const canUpdateSkill = agent.status === 'draft' || agent.status === 'offline';
 
   return (
@@ -353,9 +347,6 @@ function OwnedAgentDetail({
                 {creatorListingLabel(agent.status)}
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-1">
-              {agent.category || '未分类'} · v{agent.version || '1.0.0'} · {platformSupportLabel(agent.platformSupport)}
-            </p>
             <p className="text-xs text-slate-600 mt-2 leading-relaxed">{agent.desc}</p>
           </div>
         </div>
@@ -436,33 +427,8 @@ function OwnedAgentDetail({
 
       {activeTab === 'profile' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
-            <h3 className="text-sm font-bold text-slate-900">基础资料</h3>
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <InfoCell label="名称" value={agent.title} />
-              <InfoCell label="分类" value={agent.category || '未分类'} />
-              <InfoCell label="发布状态" value={creatorListingLabel(agent.status)} />
-              <InfoCell label="适配平台" value={platformSupportLabel(agent.platformSupport)} />
-            </dl>
-            <div>
-              <div className="text-[11px] font-bold text-slate-400 mb-1">简介</div>
-              <p className="text-sm text-slate-700 leading-relaxed">{agent.desc || '暂无简介'}</p>
-            </div>
-            <div>
-              <div className="text-[11px] font-bold text-slate-400 mb-1">AI 检索信息</div>
-              <p className="text-sm text-slate-700 leading-relaxed">{agent.recommendDoes || '尚未填写「它可以帮用户做什么」'}</p>
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {(agent.recommendTags || []).length === 0 ? (
-                  <span className="text-[11px] text-slate-400">暂无能力标签</span>
-                ) : (
-                  agent.recommendTags!.map((tag) => (
-                    <span key={tag} className="px-2 py-0.5 rounded-md bg-slate-50 border border-slate-200 text-[11px] text-slate-600">
-                      {tag}
-                    </span>
-                  ))
-                )}
-              </div>
-            </div>
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
+            <AgentProfileEditor agent={agent} onSaved={onAgentUpdated} />
           </div>
           <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
             <h3 className="text-sm font-bold text-slate-900">市场数据</h3>
@@ -532,78 +498,7 @@ function OwnedAgentDetail({
         </div>
       )}
 
-      {activeTab === 'products' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">商品管理</h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">基于该智能体配置的标准化收费项目，不是客户专属交付物</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => onOpenPricing(agent)}
-              className="px-3 py-2 rounded-xl bg-blue-50 text-blue-700 text-xs font-bold cursor-pointer inline-flex items-center gap-1.5"
-            >
-              <DollarSign size={12} />
-              编辑商品
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <ProductCard
-              icon={<Package size={14} />}
-              title="智能体使用权"
-              hint="用户解锁并使用智能体"
-            >
-              <div className="text-lg font-extrabold text-slate-900">
-                {pricingLabel({
-                  isFree: agent.pricingType === 'free' || agent.pricingPlans?.isFree,
-                  price: agent.pricingPlans?.price || agent.price,
-                  monthlyPrice: agent.pricingPlans?.monthlyPrice
-                })}
-              </div>
-            </ProductCard>
-            <ProductCard
-              icon={<Download size={14} />}
-              title="适配版本下载"
-              hint="WorkBuddy、Codex 等平台安装包"
-            >
-              {adapters.length === 0 ? (
-                <p className="text-xs text-slate-400">尚未配置适配包</p>
-              ) : (
-                <ul className="space-y-1.5 text-xs text-slate-700">
-                  {adapters.map((pack) => (
-                    <li key={pack.id} className="flex items-center justify-between gap-2">
-                      <span className="truncate">{pack.platformName}</span>
-                      <span className="font-bold">
-                        {adapterPackageIsFree(pack) ? '免费' : `¥${adapterPackagePriceYuan(pack)}`}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </ProductCard>
-            <ProductCard
-              icon={<Wrench size={14} />}
-              title="标准服务项目"
-              hint="HTML 部署、流程改造、内部数据对接"
-            >
-              {projects.length === 0 ? (
-                <p className="text-xs text-slate-400">尚未配置标准服务</p>
-              ) : (
-                <ul className="space-y-1.5 text-xs text-slate-700">
-                  {projects.map((item) => (
-                    <li key={item.id} className="flex items-center justify-between gap-2">
-                      <span className="truncate">{item.title}</span>
-                      <span className="font-bold">¥{item.price}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </ProductCard>
-          </div>
-        </div>
-      )}
+      {activeTab === 'products' && <AgentProductListEditor agent={agent} onSaved={onAgentUpdated} />}
     </div>
   );
 }
@@ -705,31 +600,6 @@ function InfoCell({ label, value }: { label: string; value: string }) {
     <div className="space-y-1">
       <div className="text-[11px] font-bold text-slate-400">{label}</div>
       <div className="text-sm font-semibold text-slate-800 break-all">{value}</div>
-    </div>
-  );
-}
-
-function ProductCard({
-  icon,
-  title,
-  hint,
-  children
-}: {
-  icon: React.ReactNode;
-  title: string;
-  hint: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
-      <div>
-        <div className="text-sm font-bold text-slate-900 inline-flex items-center gap-1.5">
-          {icon}
-          {title}
-        </div>
-        <p className="text-[11px] text-slate-500 mt-0.5">{hint}</p>
-      </div>
-      {children}
     </div>
   );
 }

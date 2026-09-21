@@ -6,32 +6,7 @@ import {
   normalizeCustomProjects,
   type OfficialProductTemplate
 } from '../../shared/customProjects';
-
-const DEFAULT_OFFICIAL_PRODUCTS: Array<{
-  id: string;
-  title: string;
-  description: string;
-  suggestedPrice: number;
-}> = [
-  {
-    id: 'oprod_flow_ui',
-    title: '标准流程与界面调整',
-    description: '按你的业务路径改提示词、SOP 和关键界面，做成可重复交付的标准项。',
-    suggestedPrice: 200
-  },
-  {
-    id: 'oprod_knowledge',
-    title: '对接企业知识库',
-    description: '接入指定文档/知识库，并约定更新方式和权限范围。',
-    suggestedPrice: 150
-  },
-  {
-    id: 'oprod_training',
-    title: '交付培训与验收陪跑',
-    description: '交付后陪跑一次验收，培训使用方式并整理操作说明。',
-    suggestedPrice: 300
-  }
-];
+import { DEFAULT_OFFICIAL_PRODUCTS, RETIRED_OFFICIAL_PRODUCT_IDS } from '../../shared/officialProductCatalog';
 
 function newOfficialProductId() {
   return `oprod_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -54,18 +29,32 @@ function toTemplate(row: {
 }
 
 export async function ensureOfficialProducts() {
-  const existing = await prisma.officialProduct.count();
-  if (existing > 0) return;
-  await prisma.officialProduct.createMany({
-    data: DEFAULT_OFFICIAL_PRODUCTS.map((item, index) => ({
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      suggestedPrice: item.suggestedPrice,
-      sortOrder: index + 1,
-      status: 'active'
-    }))
-  });
+  for (const [index, item] of DEFAULT_OFFICIAL_PRODUCTS.entries()) {
+    await prisma.officialProduct.upsert({
+      where: { id: item.id },
+      create: {
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        suggestedPrice: item.suggestedPrice,
+        sortOrder: index + 1,
+        status: 'active'
+      },
+      update: {
+        title: item.title,
+        description: item.description,
+        suggestedPrice: item.suggestedPrice,
+        sortOrder: index + 1,
+        status: 'active'
+      }
+    });
+  }
+  if (RETIRED_OFFICIAL_PRODUCT_IDS.length) {
+    await prisma.officialProduct.updateMany({
+      where: { id: { in: RETIRED_OFFICIAL_PRODUCT_IDS } },
+      data: { status: 'offline' }
+    });
+  }
 }
 
 export async function listOfficialProducts(input?: { status?: 'active' | 'offline' | 'all' }) {
@@ -192,6 +181,7 @@ export async function listCustomProductsFromAgents() {
   const items: Array<{
     id: string;
     title: string;
+    description: string;
     price: number;
     source: 'official' | 'custom';
     agentId: string;
@@ -211,6 +201,7 @@ export async function listCustomProductsFromAgents() {
       items.push({
         id: `${agent.id}:${project.id}`,
         title: project.title,
+        description: project.description || '',
         price: project.price,
         source,
         agentId: agent.id,

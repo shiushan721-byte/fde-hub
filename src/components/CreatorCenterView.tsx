@@ -906,7 +906,9 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
             setInstanceForSkillReplacement(instance);
             setShowPublishModal(true);
           }}
-          onOpenPricing={setPricingTarget}
+          onAgentUpdated={(updated) => {
+            setAgentsList((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
+          }}
           onDelete={setDeleteTarget}
           onBlockedDelete={setBlockedDeleteTarget}
         />

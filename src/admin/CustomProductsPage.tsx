@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { api } from '../lib/api';
+import { standardServiceSummary } from '../../shared/officialProductCatalog';
 
 function useAdminQuery<T>(path: string) {
   const [data, setData] = useState<T | null>(null);
@@ -35,6 +36,7 @@ function formatTime(value?: string | null) {
 type CustomProductRow = {
   id: string;
   title: string;
+  description?: string;
   price: number;
   source?: 'official' | 'custom';
   agentId: string;
@@ -83,8 +85,7 @@ export const CustomProductsPage = () => {
           <thead className="bg-slate-50 text-[11px] text-slate-500">
             <tr>
               <th className="text-left font-semibold px-4 py-2 w-14">序号</th>
-              <th className="text-left font-semibold px-4 py-2">名称</th>
-              <th className="text-left font-semibold px-4 py-2">来源</th>
+              <th className="text-left font-semibold px-4 py-2">名称 / 详情介绍</th>
               <th className="text-left font-semibold px-4 py-2">价格</th>
               <th className="text-left font-semibold px-4 py-2">所属智能体</th>
               <th className="text-left font-semibold px-4 py-2">创作者</th>
@@ -95,17 +96,11 @@ export const CustomProductsPage = () => {
             {rows.map((row, index) => (
               <tr key={row.id} className="border-t border-slate-100">
                 <td className="px-4 py-3 text-slate-500 tabular-nums">{rows.length - index}</td>
-                <td className="px-4 py-3 font-bold text-slate-900">{row.title}</td>
                 <td className="px-4 py-3">
-                  <span
-                    className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                      row.source === 'official'
-                        ? 'bg-indigo-50 text-indigo-700'
-                        : 'bg-slate-100 text-slate-600'
-                    }`}
-                  >
-                    {row.source === 'official' ? '官方' : '自定义'}
-                  </span>
+                  <div className="font-bold text-slate-900">{row.title}</div>
+                  <div className="mt-0.5 text-[11px] text-slate-500 truncate max-w-md">
+                    {standardServiceSummary(row.description || '') || '—'}
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-slate-800">¥{row.price}</td>
                 <td className="px-4 py-3">
@@ -121,7 +116,7 @@ export const CustomProductsPage = () => {
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">
+                <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
                   暂无自定义商品
                 </td>
               </tr>
