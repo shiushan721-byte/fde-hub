@@ -19,6 +19,8 @@ interface AccountViewProps {
   embedded?: boolean;
   /** summary 只显示金额卡；ledger 只显示流水 */
   section?: 'all' | 'summary' | 'ledger';
+  /** 嵌入收益管理时，只展示交易或只展示提现 */
+  ledgerView?: 'income' | 'withdraw';
 }
 
 type PayChannel = 'alipay';
@@ -189,14 +191,15 @@ function inDateRange(iso: string, from: string, to: string) {
 export const AccountView: React.FC<AccountViewProps> = ({
   userRole = 'normal',
   embedded = false,
-  section = 'all'
+  section = 'all',
+  ledgerView
 }) => {
   const isExpert = isExpertRole(userRole);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [wallet, setWallet] = useState<WalletOverview | null>(null);
   const [rebateCents, setRebateCents] = useState(0);
-  const [ledgerTab, setLedgerTab] = useState<LedgerTab>('income');
+  const [ledgerTab, setLedgerTab] = useState<LedgerTab>(ledgerView === 'withdraw' ? 'withdraw' : 'income');
   const [incomeKind, setIncomeKind] = useState<IncomeKind>('agent');
   const [alipayAccount, setAlipayAccount] = useState('');
   const [editingAccount, setEditingAccount] = useState(false);
@@ -480,6 +483,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs">
             <div className="px-5 pt-4 pb-3 flex flex-col xl:flex-row xl:items-center gap-3 justify-between">
               <div className="flex flex-col gap-3">
+                {ledgerView !== 'withdraw' && (
                 <div className="flex items-center gap-6">
                   <button
                     type="button"
@@ -511,18 +515,21 @@ export const AccountView: React.FC<AccountViewProps> = ({
                     定制服务交易
                     <span className="ml-1.5 tabular-nums text-slate-400">{incomeKindCounts.custom}</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setLedgerTab('withdraw')}
-                    className={`text-sm cursor-pointer pb-1 border-b-2 ${
-                      ledgerTab === 'withdraw'
-                        ? 'font-bold text-slate-900 border-slate-900'
-                        : 'font-medium text-slate-400 border-transparent hover:text-slate-700'
-                    }`}
-                  >
-                    提现记录
-                  </button>
+                  {ledgerView !== 'income' && (
+                    <button
+                      type="button"
+                      onClick={() => setLedgerTab('withdraw')}
+                      className={`text-sm cursor-pointer pb-1 border-b-2 ${
+                        ledgerTab === 'withdraw'
+                          ? 'font-bold text-slate-900 border-slate-900'
+                          : 'font-medium text-slate-400 border-transparent hover:text-slate-700'
+                      }`}
+                    >
+                      提现记录
+                    </button>
+                  )}
                 </div>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">

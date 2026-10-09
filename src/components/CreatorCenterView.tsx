@@ -139,15 +139,16 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     if (initialTab === 'realname-verify') return 'my-agents';
     if (initialTab === 'customer-instances') return 'my-agents';
     if (initialTab === 'customer-leads') return 'consultations';
-    if (initialTab === 'custom-services' || initialTab === 'rebate-income') return 'orders';
+    if (initialTab === 'custom-services') return 'orders';
+    if (initialTab === 'rebate-income') return 'account';
     return initialTab;
   });
   const [agentListTab, setAgentListTab] = useState<AgentListTab>(
     initialTab === 'customer-instances' ? 'delivered' : 'all'
   );
   const [localFocusOrderId, setLocalFocusOrderId] = useState(focusOrderId || '');
-  const [earningsPane, setEarningsPane] = useState<'orders' | 'rebate'>(
-    initialTab === 'rebate-income' ? 'rebate' : 'orders'
+  const [incomePane, setIncomePane] = useState<'income' | 'rebate' | 'withdraw'>(
+    initialTab === 'rebate-income' ? 'rebate' : 'income'
   );
   const [showRealNameModal, setShowRealNameModal] = useState(initialTab === 'realname-verify');
 
@@ -166,9 +167,13 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       setActiveTab('consultations');
       return;
     }
-    if (initialTab === 'custom-services' || initialTab === 'rebate-income') {
+    if (initialTab === 'custom-services') {
       setActiveTab('orders');
-      setEarningsPane(initialTab === 'rebate-income' ? 'rebate' : 'orders');
+      return;
+    }
+    if (initialTab === 'rebate-income') {
+      setActiveTab('account');
+      setIncomePane('rebate');
       return;
     }
     setActiveTab(initialTab);
@@ -582,12 +587,12 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
         {[
           { key: 'my-agents', label: '智能体管理' },
           { key: 'consultations', label: '咨询单管理' },
-          { key: 'orders', label: '收益管理' },
-          { key: 'account', label: '交易记录' },
+          { key: 'orders', label: '订单管理' },
+          { key: 'account', label: '收益管理' },
           { key: 'rebate-usage', label: '用户使用记录' }
         ].map((tab) => {
-          const isCurrent = tab.key === 'orders'
-            ? activeTab === 'orders' || activeTab === 'rebate-income'
+          const isCurrent = tab.key === 'account'
+            ? activeTab === 'account' || activeTab === 'rebate-income'
             : activeTab === tab.key;
           return (
             <button
@@ -911,26 +916,37 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
           sessionLeads={sessionLeads}
           onOpenOrder={(orderId) => {
             setLocalFocusOrderId(orderId);
-            setEarningsPane('orders');
             setActiveTab('orders');
           }}
         />
       )}
 
-      {(activeTab === 'orders' || activeTab === 'rebate-income') && (
+      {activeTab === 'orders' && (
+        <CreatorCustomOrdersPanel
+          sessionLeads={sessionLeads}
+          focusOrderId={localFocusOrderId || focusOrderId}
+          onFocusConsumed={() => {
+            setLocalFocusOrderId('');
+            onFocusConsumed?.();
+          }}
+        />
+      )}
+
+      {(activeTab === 'account' || activeTab === 'rebate-income') && (
         <div className="space-y-4">
           <div className="flex items-center gap-8 border-b border-slate-200">
             {([
-              ['orders', '智能体订单'],
-              ['rebate', '返点收入']
+              ['income', '智能体收益'],
+              ['rebate', '返点收益'],
+              ['withdraw', '提现记录']
             ] as const).map(([key, label]) => (
               <button
                 key={key}
                 type="button"
-                onClick={() => setEarningsPane(key)}
+                onClick={() => setIncomePane(key)}
                 title={key === 'rebate' ? '只有按词元计费的模型才能返点，比例按模型分别配置' : undefined}
                 className={`pb-3 text-sm cursor-pointer border-b-2 -mb-px inline-flex items-center gap-1.5 ${
-                  earningsPane === key
+                  incomePane === key
                     ? 'border-slate-900 font-semibold text-slate-900'
                     : 'border-transparent font-medium text-slate-400 hover:text-slate-700'
                 }`}
@@ -942,28 +958,19 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
               </button>
             ))}
           </div>
-          {earningsPane === 'orders' ? (
-            <CreatorCustomOrdersPanel
-              sessionLeads={sessionLeads}
-              focusOrderId={localFocusOrderId || focusOrderId}
-              onFocusConsumed={() => {
-                setLocalFocusOrderId('');
-                onFocusConsumed?.();
-              }}
-            />
-          ) : (
+          {incomePane === 'rebate' ? (
             <RebateDeskPanel mode="income" />
+          ) : (
+            <AccountView
+              key={incomePane}
+              onOpenRecharge={onOpenRecharge}
+              userRole={userRole}
+              embedded
+              section="ledger"
+              ledgerView={incomePane === 'withdraw' ? 'withdraw' : 'income'}
+            />
           )}
         </div>
-      )}
-
-      {activeTab === 'account' && (
-        <AccountView
-          onOpenRecharge={onOpenRecharge}
-          userRole={userRole}
-          embedded
-          section="ledger"
-        />
       )}
 
       {activeTab === 'rebate-usage' && <RebateDeskPanel mode="usage" />}
