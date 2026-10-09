@@ -110,180 +110,61 @@ export const RebateCampaignPage: React.FC<{ onBack: () => void }> = ({ onBack })
   return (
     <article className="pb-16">
       <button type="button" onClick={onBack} className="text-sm text-slate-500 hover:text-slate-900 cursor-pointer">
-        返回 AI 专家中心
+        返回创作者空间
       </button>
 
-      <header className="pt-10 pb-16">
-        <p className="text-sm text-slate-500">智能体使用返点计划</p>
-        <h1 className="mt-3 text-3xl sm:text-4xl font-semibold tracking-tight text-slate-950 leading-tight">
-          让你的智能体，带来持续的使用收益
+      <header className="pt-10 pb-14">
+        <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-slate-950 leading-tight">
+          你的智能体被使用，你就有收益
         </h1>
         <p className="mt-5 text-base leading-7 text-slate-600">
-          按 Skill 接入规范重新优化智能体后，用户使用按词元计费的模型产生的消费会被识别。返点比例按模型分别配置，例如 Qwen 3.8 为 10%，DeepSeek 4.1 为 5%。
+          按接入规范优化智能体后，用户使用产生的符合活动规则的词元消费，将按对应模型的比例为你累计返点。
         </p>
-        <div className="mt-8">
-          <button type="button" disabled={busy === 'spec'} onClick={() => void openSpec()} className={primaryBtn}>
-            下载 Skill 接入规范
-          </button>
-        </div>
-        <p className="mt-4 text-sm text-slate-500">先下载规范，再按规范改智能体。示例比例只说明算法。实际参与活动的模型及返点比例以官方公布为准。返点比例可能调整，HelloMe 保留调整权利。</p>
-        {error && <p className="mt-3 text-sm text-rose-600">{error}</p>}
       </header>
 
       <section className="py-14 border-t border-slate-200">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">用户使用你的智能体，你获得词元模型返点</h2>
-        <p className="mt-4 text-base leading-7 text-slate-600">
-          返点只计算按词元计费的模型消费。每个模型有自己的返点比例，消费按当时生效的比例计入对应智能体和 FDE。
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">如何参与</h2>
+        <p className="mt-4 text-base leading-7 text-slate-700">
+          下载接入规范 → 按规范优化智能体 → 在创作者空间查看使用与返点明细
         </p>
-        <ul className="mt-8 space-y-4">
-          {[
-            ['按模型返点', '例如 Qwen 3.8 为 10%，DeepSeek 4.1 为 5%。实际参与活动的模型及返点比例以官方公布为准。返点比例可能调整，HelloMe 保留调整权利。'],
-            ['归属清楚', '消费关联到对应的智能体、模型和 FDE。'],
-            ['收益看得见', '在 AI 专家中心查看用户使用情况、各模型消费和返点明细。']
-          ].map(([title, copy]) => (
-            <li key={title}>
-              <p className="text-sm font-semibold text-slate-950">{title}</p>
-              <p className="mt-1 text-sm leading-6 text-slate-600">{copy}</p>
-            </li>
-          ))}
-        </ul>
+        <button type="button" disabled={busy === 'spec'} onClick={() => void openSpec()} className={`${primaryBtn} mt-8`}>
+          下载接入规范
+        </button>
+        {error && <p className="mt-3 text-sm text-rose-600">{error}</p>}
       </section>
 
       <section className="py-14 border-t border-slate-200">
-        <p className="text-base leading-7 text-slate-600">
-          返点比例跟模型走。下面是说明用的例子。实际参与活动的模型及返点比例以官方公布为准。返点比例可能调整，HelloMe 保留调整权利。
-        </p>
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">返点怎么算？</h2>
+        <p className="mt-5 text-lg text-slate-950">返点金额 = 有效词元消费金额 × 对应模型返点比例</p>
         <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500">
               <tr>
-                <th className="text-left font-medium px-4 py-3">模型</th>
+                <th className="text-left font-medium px-4 py-3">模型示例</th>
                 <th className="text-left font-medium px-4 py-3">返点比例</th>
+                <th className="text-right font-medium px-4 py-3">有效消费 ¥100 可获返点</th>
               </tr>
             </thead>
             <tbody>
               <tr className="border-t border-slate-100">
                 <td className="px-4 py-4 text-slate-800">Qwen 3.8</td>
                 <td className="px-4 py-4 text-slate-600">10%</td>
+                <td className="px-4 py-4 text-right text-slate-800">¥10</td>
               </tr>
               <tr className="border-t border-slate-100">
                 <td className="px-4 py-4 text-slate-800">DeepSeek 4.1</td>
                 <td className="px-4 py-4 text-slate-600">5%</td>
+                <td className="px-4 py-4 text-right text-slate-800">¥5</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p className="mt-4 text-sm leading-6 text-slate-500">
-          示例只说明不同模型可以有不同比例。未按词元计费的模型不计入返点。
-        </p>
-      </section>
-
-      <section className="py-14 border-t border-slate-200">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">先按规范优化，使用才会被识别并返点</h2>
-        <ol className="mt-8 space-y-6">
-          {[
-            ['下载 Skill 接入规范', '规范说明智能体如何接入，以及词元模型的使用如何被记录。'],
-            ['按规范重新优化智能体', '改造完成后，按词元计费的模型使用才会被识别，并按该模型的比例返点。'],
-            ['查看使用与收益', '在收益管理里按模型查看消费和对应返点。']
-          ].map(([title, copy], index) => (
-            <li key={title} className="flex gap-4">
-              <span className="mt-0.5 w-6 shrink-0 text-sm font-semibold text-slate-400">{index + 1}</span>
-              <div>
-                <p className="text-sm font-semibold text-slate-950">{title}</p>
-                <p className="mt-1 text-sm leading-6 text-slate-600">{copy}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-        <button type="button" disabled={busy === 'spec'} onClick={() => void openSpec()} className={`${primaryBtn} mt-8`}>
-          下载 Skill 接入规范
-        </button>
-      </section>
-
-      <section className="py-14 border-t border-slate-200">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">消费归属明确，返点计算透明</h2>
-        <p className="mt-5 text-lg text-slate-950">返点金额＝该模型的词元消费金额 × 该模型的返点比例</p>
-        <p className="mt-4 text-sm leading-7 text-slate-600">
-          例如：Qwen 3.8 产生 ¥100 词元消费，比例 10%，返点 ¥10。同一笔若走 DeepSeek 4.1、比例 5%，返点 ¥5。
+        <p className="mt-4 text-sm leading-6 text-slate-600">
+          仅计入符合活动规则的词元消费，未按规范接入的智能体暂不计入。
         </p>
         <p className="mt-3 text-sm leading-6 text-slate-500">
-          以上仅为计算示例，实际参与活动的模型及返点比例以官方公布为准。返点比例可能调整，HelloMe 保留调整权利。
+          以上仅为计算示例，参与模型及返点比例以官方公布为准。HelloMe 保留调整返点比例的权利。
         </p>
-      </section>
-
-      <section className="py-14 border-t border-slate-200">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">随时了解智能体的使用表现</h2>
-        <p className="mt-4 text-sm text-slate-600">在 AI 专家中心，你可以查看：</p>
-        <ul className="mt-4 space-y-2 text-sm leading-6 text-slate-700 list-disc pl-5">
-          <li>哪些用户使用了你的智能体。</li>
-          <li>按词元计费的各模型用量和消费金额。</li>
-          <li>每个模型当时适用的返点比例。</li>
-          <li>对应返点。</li>
-        </ul>
-        <p className="mt-4 text-sm leading-6 text-slate-500">消费和返点按时间段汇总展示。</p>
-        <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <p className="px-4 py-2 text-xs text-slate-400 bg-slate-50">示意图 · 不是真实收入</p>
-          <table className="w-full text-sm">
-            <thead className="text-slate-400">
-              <tr>
-                <th className="text-left font-medium px-4 py-2">时间段</th>
-                <th className="text-left font-medium px-4 py-2">智能体</th>
-                <th className="text-left font-medium px-4 py-2">模型</th>
-                <th className="text-right font-medium px-4 py-2">词元消费</th>
-                <th className="text-right font-medium px-4 py-2">比例</th>
-                <th className="text-right font-medium px-4 py-2">返点</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-t border-slate-100 text-slate-700">
-                <td className="px-4 py-3">本月</td>
-                <td className="px-4 py-3">示例智能体</td>
-                <td className="px-4 py-3">Qwen 3.8</td>
-                <td className="px-4 py-3 text-right">¥100</td>
-                <td className="px-4 py-3 text-right">10%</td>
-                <td className="px-4 py-3 text-right">¥10</td>
-              </tr>
-              <tr className="border-t border-slate-100 text-slate-700">
-                <td className="px-4 py-3">本月</td>
-                <td className="px-4 py-3">示例智能体</td>
-                <td className="px-4 py-3">DeepSeek 4.1</td>
-                <td className="px-4 py-3 text-right">¥100</td>
-                <td className="px-4 py-3 text-right">5%</td>
-                <td className="px-4 py-3 text-right">¥5</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-4 text-sm text-slate-500">使用记录和返点收入在 AI 专家中心的页签里查看。</p>
-      </section>
-
-      <section className="py-14 border-t border-slate-200">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">常见问题</h2>
-        <dl className="mt-8 space-y-6">
-          {[
-            ['哪些模型能返点？', '只有按词元计费的模型。返点按该模型当时配置的比例计算。'],
-            ['每个模型的比例一样吗？', '不一样。例如 Qwen 3.8 可以是 10%，DeepSeek 4.1 可以是 5%。实际参与活动的模型及返点比例以官方公布为准。返点比例可能调整，HelloMe 保留调整权利。'],
-            ['已有智能体可以参加吗？', '可以。按 Skill 接入规范重新优化后，词元模型的使用就会被识别并计算返点。'],
-            ['下载规范之后就能返点吗？', '下载之后，还要按规范改智能体。改好之后，按词元计费的模型消费才会被识别并计算返点。']
-          ].map(([q, a]) => (
-            <div key={q}>
-              <dt className="text-sm font-semibold text-slate-950">{q}</dt>
-              <dd className="mt-1 text-sm leading-6 text-slate-600">{a}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      <section className="py-14 border-t border-slate-200">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">让更多人用上你的智能体，让每一次有效使用积累价值</h2>
-        <p className="mt-4 text-base leading-7 text-slate-600">
-          下载规范，按规范优化智能体。之后每一次被识别的词元模型使用，都会按该模型的比例积累返点。
-        </p>
-        <div className="mt-8">
-          <button type="button" disabled={busy === 'spec'} onClick={() => void openSpec()} className={primaryBtn}>
-            下载 Skill 接入规范
-          </button>
-        </div>
       </section>
     </article>
   );
