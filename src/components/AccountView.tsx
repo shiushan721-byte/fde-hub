@@ -8,6 +8,7 @@ import {
   X
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { yuanFromRebateMilli } from '../../shared/rebate';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
 import { isExpertRole } from '../utils/expertIdentity';
 import { UserIdentityRole } from '../types/creator';
@@ -16,6 +17,8 @@ interface AccountViewProps {
   onOpenRecharge?: () => void;
   userRole?: UserIdentityRole;
   embedded?: boolean;
+  /** summary 只显示金额卡；ledger 只显示流水 */
+  section?: 'all' | 'summary' | 'ledger';
 }
 
 type PayChannel = 'alipay';
@@ -115,6 +118,10 @@ function yuanDisplay(cents: number) {
   return `¥ ${yuanPlain(cents)}`;
 }
 
+function yuanDisplayRebate(milli: number) {
+  return yuanFromRebateMilli(milli).replace('¥', '¥ ');
+}
+
 function maskAccount(account?: string) {
   const value = (account || '').trim();
   if (!value) return '';
@@ -179,11 +186,16 @@ function inDateRange(iso: string, from: string, to: string) {
   return true;
 }
 
-export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', embedded = false }) => {
+export const AccountView: React.FC<AccountViewProps> = ({
+  userRole = 'normal',
+  embedded = false,
+  section = 'all'
+}) => {
   const isExpert = isExpertRole(userRole);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [wallet, setWallet] = useState<WalletOverview | null>(null);
+  const [rebateCents, setRebateCents] = useState(0);
   const [ledgerTab, setLedgerTab] = useState<LedgerTab>('income');
   const [incomeKind, setIncomeKind] = useState<IncomeKind>('agent');
   const [alipayAccount, setAlipayAccount] = useState('');
@@ -204,6 +216,14 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
       await loginExpertSession();
       const data = await api<WalletOverview>('/api/wallet');
       setWallet(data);
+      if (section !== 'ledger') {
+        try {
+          const income = await api<{ totalCents: number }>('/api/me/rebate/income');
+          setRebateCents(income.totalCents || 0);
+        } catch {
+          setRebateCents(0);
+        }
+      }
       setAlipayAccount(data.payout.alipayAccount || '');
       if (!datesInitialized) {
         const stamps = [...data.incomes, ...data.withdrawals]
@@ -362,16 +382,20 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
   const holdDays = wallet?.pendingHoldDays ?? 7;
   const masked = maskAccount(wallet?.payout.alipayAccount);
 
+  const showSummary = section !== 'ledger';
+  const showLedger = section !== 'summary';
+
   return (
     <div id="account-view" className={`space-y-5 ${embedded ? 'pb-4' : 'pb-16'}`}>
-      {!embedded && <h1 className="text-2xl font-black text-slate-900 font-display">收益管理</h1>}
+      {!embedded && section === 'all' && <h1 className="text-2xl font-black text-slate-900 font-display">收益管理</h1>}
 
       {loading && !wallet && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-rose-600">{error}</p>}
 
       {wallet && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          {showSummary && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs min-h-[148px] flex flex-col">
               <div className="text-sm text-slate-500">可提现金额</div>
               <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
@@ -418,25 +442,28 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                   </button>
                 </div>
               </div>
-              <p className="text-[11px] text-slate-400 mt-auto pt-3">可提现至支付宝，每笔扣除手续费</p>
+              <p className="text-[11px] text-slate-400 mt-auto pt-3">
+                {wallet.pendingCents > 0
+                  ? `另有结算中 ${yuanDisplay(wallet.pendingCents)}，T+${holdDays} 后可提现`
+                  : '添加提现账户'}
+              </p>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs min-h-[148px] flex flex-col">
               <div className="text-sm text-slate-500">累计收益</div>
               <div className="text-[28px] leading-tight font-extrabold text-slate-900 font-display mt-3 tabular-nums">
-                {yuanDisplay(wallet.totalIncomeCents)}
+                {yuanDisplayRebate(wallet.totalIncomeCents * 10 + rebateCents)}
               </div>
-              <p className="text-[11px] text-slate-400 mt-auto pt-3">当前累积赚取的所有收入</p>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs min-h-[148px] flex flex-col">
-              <div className="text-sm text-slate-500">结算中金额</div>
-              <div className="text-[28px] leading-tight font-extrabold text-slate-900 font-display mt-3 tabular-nums">
-                {yuanDisplay(wallet.pendingCents)}
+              <div className="mt-auto pt-3 space-y-1 text-[11px] text-slate-500">
+                <div className="flex items-center justify-between gap-3">
+                  <span>智能体收益</span>
+                  <span className="tabular-nums text-slate-700">{yuanDisplay(wallet.totalIncomeCents)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>返点收益</span>
+                  <span className="tabular-nums text-slate-700">{yuanDisplayRebate(rebateCents)}</span>
+                </div>
               </div>
-              <p className="text-[11px] text-slate-400 mt-auto pt-3">
-                用户已付但未到结算期，T+{holdDays} 后可提现
-              </p>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs min-h-[148px] flex flex-col">
@@ -447,7 +474,9 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
               <p className="text-[11px] text-slate-400 mt-auto pt-3">已申请提现，平台正在审核中</p>
             </div>
           </div>
+          )}
 
+          {showLedger && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs">
             <div className="px-5 pt-4 pb-3 flex flex-col xl:flex-row xl:items-center gap-3 justify-between">
               <div className="flex flex-col gap-3">
@@ -547,14 +576,15 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                       <th className="px-5 py-3 font-medium">
                         {incomeKind === 'custom' ? '定制项目' : '智能体'}
                       </th>
-                      <th className="px-5 py-3 font-medium">客户</th>
+                      <th className="px-5 py-3 font-medium">类型</th>
+                      <th className="px-5 py-3 font-medium">用户</th>
                       <th className="px-5 py-3 font-medium text-right">金额</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredIncomes.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-5 py-16 text-center text-xs text-slate-400">
+                        <td colSpan={6} className="px-5 py-16 text-center text-xs text-slate-400">
                           {incomeKind === 'custom' ? '暂无定制服务交易' : '暂无智能体交易'}
                         </td>
                       </tr>
@@ -572,6 +602,9 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
                                 {tx.sourceProject}
                               </div>
                             )}
+                          </td>
+                          <td className="px-5 py-4 text-slate-600">
+                            {incomeSourceKind(tx) === 'custom' ? '自定义服务' : '标准服务'}
                           </td>
                           <td className="px-5 py-4 text-slate-700">{tx.sourceBuyer || '—'}</td>
                           <td className="px-5 py-4 text-right text-slate-900 font-semibold tabular-nums">
@@ -637,6 +670,7 @@ export const AccountView: React.FC<AccountViewProps> = ({ userRole = 'normal', e
               </div>
             )}
           </div>
+          )}
         </>
       )}
 

@@ -5,7 +5,7 @@ import cors from 'cors';
 import path from 'node:path';
 import { prisma } from './lib/prisma';
 import { fail } from './lib/http';
-import { attachUser, requireAdmin } from './middleware/auth';
+import { attachUser, requireAdmin, requireAuth } from './middleware/auth';
 import { authRouter } from './routes/auth';
 import { publicRouter } from './routes/public';
 import { adminRouter } from './routes/admin';
@@ -20,6 +20,8 @@ import { startCustomOrderJobScheduler } from './services/customOrderJobs';
 import { customServicesRouter } from './routes/customServices';
 import { walletRouter } from './routes/wallet';
 import { handleRobots, handleSeoPage, handleSitemap } from './seo';
+import { rebateAdminRouter, rebateMeRouter } from './routes/rebate';
+import { ensureRebateDemo } from './services/rebateActivity';
 
 
 dotenv.config();
@@ -50,6 +52,7 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/me/rebate', requireAuth, rebateMeRouter);
 app.use('/api/me', meRouter);
 app.use('/api/custom-orders', customOrderRouter);
 app.use('/api/dm', dmRouter);
@@ -58,6 +61,7 @@ app.use('/api/wallet', walletRouter);
 app.use('/api/public', publicRouter);
 app.use('/api/consultations', consultationRouter);
 app.use('/api/expert-applications', expertApplicationRouter);
+app.use('/api/admin/rebate', requireAdmin, rebateAdminRouter);
 app.use('/api/admin', requireAdmin, adminRouter);
 
 // Public pages are rendered on the server so crawlers and link previews receive
@@ -96,6 +100,7 @@ async function start() {
   await seedDatabase(false);
   await ensureExpertApplicationSeed();
   await ensureExpertNos();
+  await ensureRebateDemo();
   startCustomOrderJobScheduler(
     Number(process.env.CUSTOM_ORDER_JOB_INTERVAL_MS || 5 * 60 * 1000)
   );

@@ -41,6 +41,8 @@ import { OfficialProductsPage } from './OfficialProductsPage';
 import { CustomProductsPage } from './CustomProductsPage';
 import { CommentReportsPage } from './CommentReportsPage';
 import { RecommendCategoryDialog, ShowcasesPage } from './ShowcasesPage';
+import { WorkRecommendationsPage } from './WorkRecommendationsPage';
+import { RebateActivityPage, RebateSettingsPage } from './RebateActivityPage';
 import { guessInspirationCategory } from '../../shared/inspirationCategories';
 
 type AdminCaseItem = {
@@ -67,6 +69,7 @@ type ExpertTagRow = {
 type AdminPage =
   | 'agents'
   | 'showcases'
+  | 'work-recommendations'
   | 'custom-agents'
   | 'deliveries'
   | 'comment-reports'
@@ -83,6 +86,8 @@ type AdminPage =
   | 'finance-rules'
   | 'finance-balances'
   | 'finance-ledger'
+  | 'rebate'
+  | 'rebate-settings'
   | 'official-products'
   | 'custom-products';
 
@@ -112,6 +117,7 @@ const nav: NavEntry[] = [
     children: [
       { key: 'agents', label: '通用智能体' },
       { key: 'showcases', label: '作品展示' },
+      { key: 'work-recommendations', label: '作品推荐管理' },
       { key: 'custom-agents', label: '定制智能体' },
       { key: 'deliveries', label: '智能体审核' },
       { key: 'comment-reports', label: '评论举报' },
@@ -148,6 +154,8 @@ const nav: NavEntry[] = [
     children: [
       { key: 'expert-accounts', label: '专家账户余额' },
       { key: 'settlements', label: '订单管理' },
+      { key: 'rebate', label: '返点记录' },
+      { key: 'rebate-settings', label: '返点设置' },
       { key: 'finance-rules', label: '费率与结算规则' }
     ]
   },
@@ -167,10 +175,10 @@ const nav: NavEntry[] = [
 ];
 
 const GROUP_PAGE_KEYS: Record<string, AdminPage[]> = {
-  'agent-mgmt': ['agents', 'showcases', 'custom-agents', 'deliveries', 'comment-reports', 'leads'],
+  'agent-mgmt': ['agents', 'showcases', 'work-recommendations', 'custom-agents', 'deliveries', 'comment-reports', 'leads'],
   'product-mgmt': ['official-products', 'custom-products'],
   'expert-mgmt': ['experts', 'expert-tags', 'expert-titles', 'applications'],
-  'fund-mgmt': ['expert-accounts', 'settlements', 'finance-rules'],
+  'fund-mgmt': ['expert-accounts', 'settlements', 'rebate', 'rebate-settings', 'finance-rules'],
   'finance-mgmt': ['finance-balances', 'finance-ledger', 'withdrawals', 'escrows']
 };
 
@@ -388,6 +396,7 @@ export const AdminApp: React.FC<{ onExit: () => void; initialPage?: AdminPage }>
           />
         )}
         {page === 'showcases' && <ShowcasesPage />}
+        {page === 'work-recommendations' && <WorkRecommendationsPage />}
         {page === 'custom-agents' && <CustomAgentsPage />}
         {page === 'deliveries' && <AgentReviewPage />}
         {page === 'comment-reports' && <CommentReportsPage />}
@@ -407,6 +416,8 @@ export const AdminApp: React.FC<{ onExit: () => void; initialPage?: AdminPage }>
         {page === 'custom-products' && <CustomProductsPage />}
         {page === 'expert-accounts' && <ExpertAccountsPage />}
         {page === 'settlements' && <SettlementsPage />}
+        {page === 'rebate' && <RebateActivityPage />}
+        {page === 'rebate-settings' && <RebateSettingsPage />}
         {page === 'withdrawals' && <WithdrawalsPage />}
         {page === 'escrows' && <EscrowsPage />}
         {page === 'finance-rules' && <FinanceRulesPage />}

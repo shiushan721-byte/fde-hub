@@ -39,16 +39,23 @@ interface HellomeHomeViewProps {
   onToast?: (message: string) => void;
 }
 
-function platformSupportLabel(support?: HellomeAgentItem['platformSupport']) {
-  switch (support) {
-    case 'mac':
-      return '适配 macOS';
-    case 'windows':
-      return '适配 Windows';
-    case 'both':
-    default:
-      return '适配macOS和Windows';
+function offerBadge(pricing: { isFree: boolean; trialDays: number }) {
+  if (pricing.isFree) {
+    return {
+      text: '免费',
+      className: 'bg-emerald-500/95 text-white border-emerald-300/40'
+    };
   }
+  if (pricing.trialDays > 0) {
+    return {
+      text: `${pricing.trialDays}天免费试用`,
+      className: 'bg-amber-500/95 text-white border-amber-200/40'
+    };
+  }
+  return {
+    text: '付费',
+    className: 'bg-black/60 text-white border-white/20'
+  };
 }
 
 export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
@@ -482,6 +489,7 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
               const isFavorited = favoriteAgentIds.includes(agent.id);
               const pricing = pricingFromAgent(agent);
               const priceText = pricingLabel(pricing);
+              const badge = offerBadge(pricing);
 
               return (
                 <div
@@ -503,8 +511,10 @@ export const HellomeHomeView: React.FC<HellomeHomeViewProps> = ({
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-transparent opacity-80" />
 
                     <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
-                      <div className="px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-md text-[10px] font-bold text-white tracking-wide border border-white/20">
-                        {platformSupportLabel(agent.platformSupport)}
+                      <div
+                        className={`px-2 py-0.5 rounded-md backdrop-blur-md text-[10px] font-bold tracking-wide border ${badge.className}`}
+                      >
+                        {badge.text}
                       </div>
                     </div>
 

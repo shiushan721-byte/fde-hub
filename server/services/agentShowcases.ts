@@ -433,7 +433,20 @@ export async function listAdminShowcases(input?: {
           title: true,
           category: true,
           coverImage: true,
-          authorName: true
+          authorName: true,
+          authorId: true
+        }
+      },
+      comments: {
+        where: { source: 'showcase' },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          userName: true,
+          userAvatar: true,
+          content: true,
+          createdAt: true,
+          isAuthor: true
         }
       }
     },
@@ -442,7 +455,15 @@ export async function listAdminShowcases(input?: {
   });
   return rows.map((row) => ({
     ...mapShowcase(row),
-    agent: row.agent
+    agent: row.agent,
+    reviews: row.comments.map((comment) => ({
+      id: comment.id,
+      userName: comment.userName,
+      userAvatar: comment.userAvatar,
+      content: comment.content,
+      isAuthor: comment.isAuthor,
+      createdAt: comment.createdAt.toISOString()
+    }))
   }));
 }
 

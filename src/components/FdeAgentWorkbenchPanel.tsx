@@ -11,11 +11,10 @@ import {
 } from 'lucide-react';
 import { CreatorAgentItem, CustomerAgentInstance, CustomerLeadItem } from '../types/creator';
 import { creatorAgentHasBeenUsed, creatorListingBadgeClass, creatorListingLabel } from '../lib/agentLifecycle';
-import { pricingLabel } from '../../shared/pricingPlans';
 import { AgentProductListEditor } from './AgentProductListEditor';
 import { AgentProfileEditor } from './AgentProfileEditor';
 
-type ListTab = 'all' | 'owned' | 'delivered';
+type ListTab = 'all' | 'public' | 'private' | 'draft' | 'delivered';
 type OwnedDetailTab = 'profile' | 'versions' | 'products';
 
 function platformSupportLabel(support: CreatorAgentItem['platformSupport']) {
@@ -44,6 +43,22 @@ function deliveredStatus(status: CustomerAgentInstance['status']): { label: stri
   }
 }
 
+function shortDate(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}/${month}/${day}`;
+}
+
+function listingTone(status: string) {
+  if (status === 'published') return { label: '已通过', className: 'text-emerald-600' };
+  if (status === 'under_review' || status === 'in_review') return { label: '审核中', className: 'text-slate-500' };
+  if (status === 'draft') return { label: '草稿', className: 'text-slate-400' };
+  return { label: '私有', className: 'text-slate-500' };
+}
+
 function fallbackCover(src?: string) {
   return src || 'https://images.unsplash.com/photo-1556740758-90de374c12ad?w=600&auto=format&fit=crop&q=80';
 }
@@ -52,7 +67,7 @@ export const FdeAgentWorkbenchPanel: React.FC<{
   agents: CreatorAgentItem[];
   instances: CustomerAgentInstance[];
   leads?: CustomerLeadItem[];
-  initialListTab?: ListTab;
+  initialListTab?: 'all' | 'owned' | 'delivered';
   onUnpublish: (agentId: string) => void;
   onSubmitPublic: (agentId: string) => void;
   onContinuePublish: (agent: CreatorAgentItem) => void;
@@ -75,7 +90,7 @@ export const FdeAgentWorkbenchPanel: React.FC<{
   onDelete,
   onBlockedDelete
 }) => {
-  const [listTab, setListTab] = useState<ListTab>(initialListTab);
+  const [listTab, setListTab] = useState<ListTab>(initialListTab === 'delivered' ? 'delivered' : 'all');
   const [query, setQuery] = useState('');
   const [ownedId, setOwnedId] = useState<string | null>(null);
   const [deliveredId, setDeliveredId] = useState<string | null>(null);
@@ -87,13 +102,16 @@ export const FdeAgentWorkbenchPanel: React.FC<{
   const filteredOwned = useMemo(() => {
     const q = query.trim().toLowerCase();
     return agents.filter((agent) => {
+      if (listTab === 'public' && agent.status !== 'published' && agent.status !== 'under_review') return false;
+      if (listTab === 'private' && agent.status !== 'offline') return false;
+      if (listTab === 'draft' && agent.status !== 'draft') return false;
       if (!q) return true;
       return [agent.title, agent.desc, agent.category, creatorListingLabel(agent.status)]
         .join(' ')
         .toLowerCase()
         .includes(q);
     });
-  }, [agents, query]);
+  }, [agents, query, listTab]);
 
   const filteredDelivered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -112,8 +130,8 @@ export const FdeAgentWorkbenchPanel: React.FC<{
     });
   }, [instances, query]);
 
-  const showOwned = listTab === 'all' || listTab === 'owned';
-  const showDelivered = listTab === 'all' || listTab === 'delivered';
+  const showOwned = listTab !== 'delivered';
+  const showDelivered = listTab === 'delivered';
 
   if (ownedAgent) {
     return (
@@ -151,149 +169,144 @@ export const FdeAgentWorkbenchPanel: React.FC<{
   return (
     <div className="space-y-4">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl w-full sm:w-fit">
+        <div className="flex items-center gap-2">
           {(
             [
-              { key: 'all' as const, label: '全部智能体', count: agents.length + instances.length },
-              { key: 'owned' as const, label: '我创建的智能体', count: agents.length },
-              { key: 'delivered' as const, label: '已交付智能体', count: instances.length }
+              { key: 'all' as const, label: '全部' },
+              { key: 'public' as const, label: '公开' },
+              { key: 'private' as const, label: '私有' },
+              { key: 'draft' as const, label: '草稿' },
+              { key: 'delivered' as const, label: '已交付' }
             ] as const
           ).map((tab) => (
             <button
               key={tab.key}
               type="button"
               onClick={() => setListTab(tab.key)}
-              className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                listTab === tab.key
-                  ? 'bg-white text-blue-700 shadow-xs ring-1 ring-slate-200'
-                  : 'text-slate-600 hover:text-slate-900'
+              className={`h-8 px-3 rounded-lg text-xs cursor-pointer ${
+                listTab === tab.key ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-500 hover:bg-slate-50'
               }`}
             >
               {tab.label}
-              <span
-                className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${
-                  listTab === tab.key ? 'bg-blue-50 text-blue-700' : 'bg-slate-200 text-slate-600'
-                }`}
-              >
-                {tab.count}
-              </span>
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 px-3 h-10 rounded-xl border border-slate-200 bg-white min-w-[220px]">
+        <div className="flex items-center gap-2 px-3 h-9 rounded-lg border border-slate-200 bg-white min-w-[200px]">
           <Search size={14} className="text-slate-400 shrink-0" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索名称、客户、状态"
+            placeholder="搜索智能体"
             className="flex-1 bg-transparent outline-none text-xs text-slate-700 placeholder:text-slate-400"
           />
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs">
-        <div className="hidden md:grid grid-cols-12 gap-3 px-4 py-2.5 bg-slate-50 border-b border-slate-100 text-[11px] font-bold text-slate-500">
-          <div className="col-span-4">智能体</div>
-          <div className="col-span-2">类型</div>
-          <div className="col-span-2">状态</div>
-          <div className="col-span-2">版本 / 客户</div>
-          <div className="col-span-2 text-right">操作</div>
-        </div>
-
-        {showOwned &&
-          filteredOwned.map((agent) => (
-            <button
-              key={`owned-${agent.id}`}
-              type="button"
-              onClick={() => setOwnedId(agent.id)}
-              className="w-full text-left grid grid-cols-1 md:grid-cols-12 gap-3 px-4 py-3.5 border-b border-slate-100 hover:bg-slate-50/80 transition-colors cursor-pointer"
-            >
-              <div className="md:col-span-4 flex items-center gap-3 min-w-0">
-                <img
-                  src={fallbackCover(agent.coverImage)}
-                  alt=""
-                  className="w-10 h-10 rounded-xl object-cover ring-1 ring-slate-100 shrink-0"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = fallbackCover();
-                  }}
-                />
-                <div className="min-w-0">
-                  <div className="text-sm font-bold text-slate-900 truncate">{agent.title}</div>
-                  <div className="text-[11px] text-slate-500 truncate mt-0.5">{agent.desc}</div>
-                </div>
-              </div>
-              <div className="md:col-span-2 flex items-center">
-                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                  我创建的
-                </span>
-              </div>
-              <div className="md:col-span-2 flex items-center gap-2 flex-wrap">
-                <span
-                  className={`inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold border ${creatorListingBadgeClass(agent.status)}`}
-                >
-                  {creatorListingLabel(agent.status)}
-                </span>
-                <span className="text-[10px] text-slate-500">{platformSupportLabel(agent.platformSupport)}</span>
-              </div>
-              <div className="md:col-span-2 flex items-center text-[11px] text-slate-600">
-                v{agent.version || '1.0.0'} ·{' '}
-                {pricingLabel({
-                  isFree: agent.pricingType === 'free' || agent.pricingPlans?.isFree,
-                  price: agent.pricingPlans?.price || agent.price,
-                  monthlyPrice: agent.pricingPlans?.monthlyPrice
-                })}
-              </div>
-              <div className="md:col-span-2 flex items-center justify-start md:justify-end text-[11px] font-bold text-blue-700">
-                管理详情 →
-              </div>
-            </button>
-          ))}
-
-        {showDelivered &&
-          filteredDelivered.map((inst) => {
-            const status = deliveredStatus(inst.status);
-            return (
-              <button
-                key={`delivered-${inst.id}`}
-                type="button"
-                onClick={() => setDeliveredId(inst.id)}
-                className="w-full text-left grid grid-cols-1 md:grid-cols-12 gap-3 px-4 py-3.5 border-b border-slate-100 last:border-0 hover:bg-slate-50/80 transition-colors cursor-pointer"
-              >
-                <div className="md:col-span-4 flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0">
-                    <Bot size={16} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-bold text-slate-900 truncate">{inst.title}</div>
-                    <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                      基于 {inst.baseAgentTitle} · {inst.basedOnStandardVersion}
-                    </div>
-                  </div>
-                </div>
-                <div className="md:col-span-2 flex items-center">
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-100">
-                    已交付
-                  </span>
-                </div>
-                <div className="md:col-span-2 flex items-center">
-                  <span className={`inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold border ${status.className}`}>
-                    {status.label}
-                  </span>
-                </div>
-                <div className="md:col-span-2 flex items-center text-[11px] text-slate-600 truncate">
-                  {inst.customerName} · {inst.customerCompany}
-                </div>
-                <div className="md:col-span-2 flex items-center justify-start md:justify-end text-[11px] font-bold text-blue-700">
-                  查看交付 →
-                </div>
-              </button>
-            );
-          })}
-
-        {((showOwned && filteredOwned.length === 0) || !showOwned) &&
-          ((showDelivered && filteredDelivered.length === 0) || !showDelivered) && (
-            <p className="px-4 py-12 text-center text-xs text-slate-400">暂无符合条件的智能体</p>
-          )}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-x-auto">
+        <table className="w-full min-w-[980px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 text-xs text-slate-400">
+              <th className="px-4 py-3 font-medium">智能体</th>
+              <th className="px-4 py-3 font-medium">首次发布</th>
+              <th className="px-4 py-3 font-medium">最新更新</th>
+              <th className="px-4 py-3 font-medium">适配系统</th>
+              <th className="px-4 py-3 font-medium">版本</th>
+              <th className="px-4 py-3 font-medium">数据</th>
+              <th className="px-4 py-3 font-medium">状态</th>
+              <th className="px-4 py-3 font-medium">公开</th>
+              <th className="px-4 py-3 font-medium text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {showOwned &&
+              filteredOwned.map((agent) => {
+                const tone = listingTone(agent.status);
+                const publicOn = agent.status === 'published' || agent.status === 'under_review';
+                return (
+                  <tr key={`owned-${agent.id}`} className="border-b border-slate-50 last:border-0">
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img
+                          src={fallbackCover(agent.coverImage)}
+                          alt=""
+                          className="w-8 h-8 rounded-lg object-cover shrink-0"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src = fallbackCover();
+                          }}
+                        />
+                        <span className="text-sm text-slate-800 truncate">{agent.title}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">{shortDate(agent.createdAt)}</td>
+                    <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">{shortDate(agent.updatedAt)}</td>
+                    <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">{platformSupportLabel(agent.platformSupport)}</td>
+                    <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">v{agent.version || '1.0.0'}</td>
+                    <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap text-xs">
+                      {agent.likesCount || 0} 点赞 / {agent.favoritesCount || 0} 收藏 / {agent.commentsCount || 0} 评论
+                    </td>
+                    <td className={`px-4 py-3.5 whitespace-nowrap ${tone.className}`}>{tone.label}</td>
+                    <td className="px-4 py-3.5">
+                      <button
+                        type="button"
+                        aria-label={publicOn ? '关闭公开' : '申请公开'}
+                        onClick={() => {
+                          if (publicOn) onUnpublish(agent.id);
+                          else if (agent.status === 'draft') onContinuePublish(agent);
+                          else onSubmitPublic(agent.id);
+                        }}
+                        className={`relative w-9 h-5 rounded-full cursor-pointer ${publicOn ? 'bg-emerald-500' : 'bg-slate-200'}`}
+                      >
+                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${publicOn ? 'left-4' : 'left-0.5'}`} />
+                      </button>
+                    </td>
+                    <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                      <button type="button" onClick={() => onContinuePublish(agent)} className="text-xs text-slate-600 hover:text-slate-900 cursor-pointer mr-3">编辑</button>
+                      <button type="button" onClick={() => setOwnedId(agent.id)} className="text-xs text-slate-600 hover:text-slate-900 cursor-pointer mr-3">管理</button>
+                      <button
+                        type="button"
+                        onClick={() => (creatorAgentHasBeenUsed(agent) ? onBlockedDelete(agent) : onDelete(agent))}
+                        className="text-xs text-slate-600 hover:text-rose-600 cursor-pointer"
+                      >
+                        删除
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            {showDelivered &&
+              filteredDelivered.map((inst) => {
+                const status = deliveredStatus(inst.status);
+                return (
+                  <tr key={`delivered-${inst.id}`} className="border-b border-slate-50 last:border-0">
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0">
+                          <Bot size={14} />
+                        </div>
+                        <span className="text-sm text-slate-800 truncate">{inst.title}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">{shortDate(inst.createdAt)}</td>
+                    <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">{shortDate(inst.updatedAt)}</td>
+                    <td className="px-4 py-3.5 text-slate-500">已交付</td>
+                    <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">{inst.basedOnStandardVersion || '—'}</td>
+                    <td className="px-4 py-3.5 text-slate-500 text-xs">{inst.customerName}</td>
+                    <td className={`px-4 py-3.5 ${status.className}`}>{status.label}</td>
+                    <td className="px-4 py-3.5 text-slate-300">—</td>
+                    <td className="px-4 py-3.5 text-right">
+                      <button type="button" onClick={() => setDeliveredId(inst.id)} className="text-xs text-slate-600 hover:text-slate-900 cursor-pointer">管理</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            {((showOwned && filteredOwned.length === 0) || !showOwned) &&
+              ((showDelivered && filteredDelivered.length === 0) || !showDelivered) && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-12 text-center text-xs text-slate-400">暂无符合条件的智能体</td>
+                </tr>
+              )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

@@ -37,6 +37,7 @@ import {
   payCatalogPurchase
 } from '../services/catalogPurchase';
 import { checkoutStandardCustomProject, mapOrder } from '../services/customOrder';
+import { getAgentTrial, startAgentTrial } from '../services/agentTrial';
 import {
   createAgentShowcase,
   deleteAgentShowcase,
@@ -510,6 +511,7 @@ const upsertAgentSchema = z.object({
   platformSupport: z.enum(['mac', 'windows', 'both']).optional(),
   isFree: z.boolean().optional(),
   price: z.coerce.number().optional(),
+  trialDays: z.coerce.number().int().min(0).max(90).optional(),
   enableEnterpriseCustomization: z.boolean().optional(),
   customProjects: z.unknown().optional(),
   adapterPackages: z.unknown().optional(),
@@ -816,6 +818,25 @@ meRouter.get('/purchases', async (req, res) => {
 meRouter.get('/agents/:id/license', async (req, res) => {
   const license = await getActiveLicense(req.user!.id, req.params.id);
   return ok(res, license ? mapPurchase(license) : null);
+});
+
+meRouter.get('/agents/:id/trial', async (req, res) => {
+  const trial = await getAgentTrial(req.user!.id, req.params.id);
+  return ok(res, trial);
+});
+
+meRouter.post('/agents/:id/trial/start', async (req, res) => {
+  try {
+    const trial = await startAgentTrial(req.user!.id, req.params.id);
+    return ok(res, trial);
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status;
+    return fail(
+      res,
+      error instanceof Error ? error.message : '无法开始试用',
+      status === 400 || status === 404 || status === 409 ? status : 400
+    );
+  }
 });
 
 meRouter.get('/agents/:id/adapter-licenses', async (req, res) => {

@@ -33,6 +33,8 @@ model User {
   payments              PaymentRecord[]
   withdrawals           Withdrawal[]
   agentPurchases        AgentPurchase[]
+  agentTrials           AgentTrial[]
+  officialApiKeys       OfficialApiKey[]
   showcaseLikes         AgentShowcaseLike[]
   agentLikes            AgentLike[]
   agentFavorites        AgentFavorite[]
@@ -117,6 +119,8 @@ model Agent {
   comments        AgentComment[]
   shareLinks      AgentShareLink[]
   purchases       AgentPurchase[]
+  trials          AgentTrial[]
+  rebateAccess    AgentRebateAccess?
   showcases       AgentShowcase[]
   likes           AgentLike[]
   favorites       AgentFavorite[]
@@ -159,6 +163,21 @@ model AgentPurchase {
 
   @@index([userId, agentId])
   @@index([userId, agentId, kind])
+  @@index([agentId])
+}
+
+/** 智能体免费试用。计时从用户首次成功启动时写入，同一用户对同一智能体只记一次。 */
+model AgentTrial {
+  id        String   @id
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startedAt DateTime
+  trialDays Int
+  createdAt DateTime @default(now())
+
+  @@unique([userId, agentId])
   @@index([agentId])
 }
 
@@ -335,6 +354,7 @@ model Expert {
   certification   ExpertCertification?
   follows         ExpertFollow[]
   dmThreads       DmThread[]
+  rebateEnrollment RebateEnrollment?
 }
 
 /** 平台统一维护的专家领域分类标签（上架才在前台展示/可选） */
@@ -860,4 +880,118 @@ model FinanceLedgerEntry {
   @@index([accountId, createdAt])
   @@index([createdAt])
   @@index([bizType])
+}
+
+/** FDE 报名使用返点活动。下载规范只记参与，开通资格后才开始计返点。 */
+model RebateEnrollment {
+  id               String    @id
+  expertId         String    @unique
+  expert           Expert    @relation(fields: [expertId], references: [id], onDelete: Cascade)
+  userId           String
+  /** enrolled | spec_downloaded | paused */
+  status           String    @default("enrolled")
+  enrolledAt       DateTime  @default(now())
+  specDownloadedAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+/** HelloMe 发放的官方 Key。前台只保留内部标识和掩码，不把完整密钥给 FDE。 */
+model OfficialApiKey {
+  id         String    @id
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keyPrefix  String
+  secretHash String
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+
+  @@index([userId])
+}
+
+/** 智能体接入检查与返点资格。qualifiedAt 之后的官方消费才计返点。 */
+model AgentRebateAccess {
+  id          String    @id
+  agentId     String    @unique
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  expertId    String
+  /** pending | passed | active | paused */
+  status      String    @default("pending")
+  checkedAt   DateTime?
+  qualifiedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([expertId])
+}
+
+/** 返点比例。优先级：智能体专属 > FDE 专属 > 平台默认。只作用于生效时间之后的消费。 */
+model RebateRate {
+  id            String   @id
+  /** platform | expert | agent */
+  scope         String
+  expertId      String   @default("")
+  agentId       String   @default("")
+  modelId       String
+  /** 万分比，1000 = 10% */
+  rateBps       Int
+  effectiveFrom DateTime
+  /** active | paused */
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+
+  @@index([scope, modelId, effectiveFrom])
+  @@index([expertId, modelId])
+  @@index([agentId, modelId])
+}
+
+/** 一次模型运行。idempotencyKey 保证重复上报不重复计收入。 */
+model ModelUsage {
+  id              String   @id
+  idempotencyKey  String   @unique
+  userId          String
+  userName        String   @default("")
+  officialKeyId   String   @default("")
+  agentId         String
+  expertId        String
+  modelId         String
+  /** official | self */
+  channel         String
+  occurredAt      DateTime
+  tokens          Int      @default(0)
+  amountCents     Int      @default(0)
+  eligible        Boolean  @default(false)
+  rateBps         Int      @default(0)
+  /** 返点，单位厘（0.001 元）。有余数进一位。 */
+  rebateCents     Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  @@index([expertId, occurredAt])
+  @@index([agentId, occurredAt])
+  @@index([userId, agentId])
+}
+
+/** 退款等对返点的冲减，保留原因。 */
+model RebateAdjustment {
+  id          String   @id
+  expertId    String
+  usageId     String   @default("")
+  amountCents Int
+  reason      String
+  createdAt   DateTime @default(now())
+
+  @@index([expertId, createdAt])
+}
+
+/** 按月结算记录。 */
+model RebateSettlement {
+  id          String   @id
+  expertId    String
+  /** YYYY-MM */
+  period      String
+  amountCents Int
+  note        String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@unique([expertId, period])
 }

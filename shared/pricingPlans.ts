@@ -1,9 +1,19 @@
 export type CatalogPlan = 'one_time';
 
+export const MAX_TRIAL_DAYS = 90;
+
 export type PricingPlansPayload = {
   price: number;
   isFree: boolean;
+  /** 0 表示不提供试用。已有智能体缺该字段时视为 0。 */
+  trialDays: number;
 };
+
+function trialDaysFromRaw(raw: unknown) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n);
+}
 
 function toNonNegInt(raw: unknown, fallback = 0) {
   const n = Number(raw);
@@ -24,13 +34,17 @@ export function normalizePricingPlans(raw: unknown): PricingPlansPayload {
   const isFree = Boolean(row.isFree);
   return {
     isFree,
-    price: isFree ? 0 : oneTimePriceFromRaw(row)
+    price: isFree ? 0 : oneTimePriceFromRaw(row),
+    trialDays: isFree ? 0 : trialDaysFromRaw(row.trialDays)
   };
 }
 
 export function validatePaidPlans(plans: PricingPlansPayload): string | null {
   if (plans.isFree) return null;
   if (plans.price < 1) return '售价须大于 0';
+  if (!Number.isInteger(plans.trialDays) || plans.trialDays > MAX_TRIAL_DAYS) {
+    return `试用天数须为 0 到 ${MAX_TRIAL_DAYS} 的整数`;
+  }
   return null;
 }
 
@@ -46,18 +60,20 @@ export function pricingFromAgent(agent: {
     monthlyPrice?: number;
     annualPrice?: number;
     buyoutPrice?: number;
+    trialDays?: number;
   } | null;
 }): PricingPlansPayload {
   const raw = agent.pricingPlans || {};
   const plans = normalizePricingPlans({
     ...raw,
     price: raw.price ?? raw.monthlyPrice ?? raw.buyoutPrice ?? raw.annualPrice ?? agent.price ?? 0,
-    isFree: Boolean(raw.isFree)
+    isFree: Boolean(raw.isFree),
+    trialDays: raw.trialDays
   });
   if (!raw.isFree && plans.price <= 0) {
     const fallback = toNonNegInt(agent.price);
-    if (fallback <= 0) return { isFree: true, price: 0 };
-    return { isFree: false, price: fallback };
+    if (fallback <= 0) return { isFree: true, price: 0, trialDays: 0 };
+    return { isFree: false, price: fallback, trialDays: plans.trialDays };
   }
   return plans;
 }

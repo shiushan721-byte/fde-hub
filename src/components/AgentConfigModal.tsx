@@ -88,6 +88,7 @@ export const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
   });
   const [pricingType, setPricingType] = useState<'free' | 'paid'>(initialPlans.isFree ? 'free' : 'paid');
   const [price, setPrice] = useState(initialPlans.price || 29);
+  const [trialDays, setTrialDays] = useState(initialPlans.trialDays || 0);
   const [fdeCustomEnabled, setFdeCustomEnabled] = useState(agent.fdeCustomEnabled ?? true);
 
   // 2. Prompt & SOP Workflow State
@@ -333,7 +334,8 @@ export const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
       price: pricingType === 'free' ? 0 : Number(price || 29),
       pricingPlans: {
         isFree: pricingType === 'free',
-        price: pricingType === 'free' ? 0 : Number(price || 29)
+        price: pricingType === 'free' ? 0 : Number(price || 29),
+        trialDays: pricingType === 'free' ? 0 : trialDays
       },
       fdeCustomEnabled,
       systemPrompt,
@@ -1082,8 +1084,10 @@ export const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
                     <AgentPricingFields
                       pricingModel={pricingType}
                       price={price}
+                      trialDays={trialDays}
                       onPricingModelChange={setPricingType}
                       onPriceChange={setPrice}
+                      onTrialDaysChange={setTrialDays}
                     />
                   </div>
 

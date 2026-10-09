@@ -5,8 +5,10 @@ type PricingModel = 'paid' | 'free';
 interface AgentPricingFieldsProps {
   pricingModel: PricingModel;
   price: number;
+  trialDays: number;
   onPricingModelChange: (model: PricingModel) => void;
   onPriceChange: (value: number) => void;
+  onTrialDaysChange: (value: number) => void;
   tokenRebateRate?: number;
 }
 
@@ -15,11 +17,19 @@ function parsePrice(raw: string) {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
+function parseTrialDays(raw: string) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(90, Math.round(n));
+}
+
 export const AgentPricingFields: React.FC<AgentPricingFieldsProps> = ({
   pricingModel,
   price,
+  trialDays,
   onPricingModelChange,
   onPriceChange,
+  onTrialDaysChange,
   tokenRebateRate = 20
 }) => {
   return (
@@ -66,6 +76,30 @@ export const AgentPricingFields: React.FC<AgentPricingFieldsProps> = ({
             className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-900 outline-none"
           />
           <p className="text-[11px] text-slate-500">购买后可长期使用，不按月或年续费。</p>
+        </div>
+      ) : null}
+
+      {pricingModel === 'paid' ? (
+        <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-1 shadow-2xs">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-slate-800">免费试用天数</span>
+            <span className="text-[10px] text-slate-400">0 表示不提供试用</span>
+          </div>
+          <input
+            type="number"
+            min={0}
+            max={90}
+            step={1}
+            value={trialDays}
+            onChange={(e) => onTrialDaysChange(parseTrialDays(e.target.value))}
+            className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-900 outline-none"
+          />
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            {trialDays > 0
+              ? `买家看到「免费试用 ${trialDays} 天」。计时从首次成功启动开始，到期后需一次购买。`
+              : '填 0 时不提供试用，买家直接购买。'}
+            一次付款，长期使用，不按月或年续费。
+          </p>
         </div>
       ) : (
         <p className="text-[11px] text-slate-500">

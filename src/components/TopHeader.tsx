@@ -20,7 +20,7 @@ import { CreatorTierLevel, RealNameVerifyStatus, FDECertStatus, UserIdentityRole
 import { isExpertRole } from '../utils/expertIdentity';
 
 interface TopHeaderProps {
-  currentRoute: MainNavRoute | 'author-profile' | 'agent-detail' | 'inspiration-detail' | 'messages';
+  currentRoute: MainNavRoute | 'author-profile' | 'agent-detail' | 'inspiration-detail' | 'messages' | 'rebate-campaign';
   onNavigate: (route: MainNavRoute) => void;
   onOpenRechargeModal: () => void;
   currentTier?: CreatorTierLevel;
@@ -191,6 +191,18 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               应用智能体交易平台 · 懂业务的 AI 专家
             </span>
           </div>
+        ) : currentRoute === 'rebate-campaign' ? (
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              onClick={() => onNavigate('hellome-home')}
+              className="text-slate-500 hover:text-slate-900 font-medium flex items-center gap-1 cursor-pointer"
+            >
+              <Home size={13} />
+              <span>首页</span>
+            </button>
+            <ChevronRight size={12} className="text-slate-400" />
+            <span className="text-slate-900 font-bold">智能体使用返点活动</span>
+          </div>
         ) : currentRoute === 'creator-center' ? (
           <div className="flex items-center gap-2 text-xs">
             <button
@@ -203,7 +215,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <ChevronRight size={12} className="text-slate-400" />
             <span className="text-blue-700 font-bold flex items-center gap-1.5">
               <Sparkles size={14} className="text-blue-600" />
-              <span>FDE 工作台 · 资产、交付与收益</span>
+              <span>AI 专家中心 · 资产、交付与收益</span>
             </span>
           </div>
         ) : currentRoute === 'fde-intro' ? (

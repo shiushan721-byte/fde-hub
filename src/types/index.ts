@@ -18,6 +18,8 @@ export interface AgentPricingPlans {
   monthlyPrice?: number;
   annualPrice?: number;
   buyoutPrice?: number;
+  /** 免费试用天数。0 或不填表示不提供试用。 */
+  trialDays?: number;
 }
 
 export interface FDEExpert {

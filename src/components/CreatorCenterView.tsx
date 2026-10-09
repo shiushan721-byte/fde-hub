@@ -67,6 +67,7 @@ import { AgentPricingModal } from './AgentPricingModal';
 import { mockCustomerAgentInstances } from '../data/agentInstanceMockData';
 import { isExpertRole } from '../utils/expertIdentity';
 import { AccountView } from './AccountView';
+import { RebateDeskPanel } from './RebateActivityPanel';
 import { FdeAgentWorkbenchPanel } from './FdeAgentWorkbenchPanel';
 import { CreatorConsultationsPanel, CreatorCustomOrdersPanel } from './CustomOrderPanels';
 import { api, ApiError } from '../lib/api';
@@ -89,6 +90,9 @@ export type CreatorCenterTab =
   | 'consultations'    // 咨询单管理
   | 'orders'           // 订单管理
   | 'account'          // 收益管理
+  | 'rebate-usage'     // 用户使用记录
+  | 'rebate-income'    // 使用返点收入
+  | 'rebate'           // 使用返点
   | 'custom-services'  // 兼容旧入口：映射到订单管理
   | 'customer-leads'   // 兼容旧入口：映射到咨询单
   | 'customer-instances' // 兼容旧入口：映射到智能体管理 · 已交付
@@ -110,6 +114,7 @@ interface CreatorCenterViewProps {
   onBack?: () => void;
   backLabel?: string;
   onOpenRecharge?: () => void;
+  onOpenRebateCampaign?: () => void;
   focusOrderId?: string;
   onFocusConsumed?: () => void;
 }
@@ -126,6 +131,7 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
   onBack,
   backLabel = '返回',
   onOpenRecharge,
+  onOpenRebateCampaign,
   focusOrderId,
   onFocusConsumed
 }) => {
@@ -133,13 +139,16 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
     if (initialTab === 'realname-verify') return 'my-agents';
     if (initialTab === 'customer-instances') return 'my-agents';
     if (initialTab === 'customer-leads') return 'consultations';
-    if (initialTab === 'custom-services') return 'orders';
+    if (initialTab === 'custom-services' || initialTab === 'rebate-income') return 'orders';
     return initialTab;
   });
   const [agentListTab, setAgentListTab] = useState<AgentListTab>(
     initialTab === 'customer-instances' ? 'delivered' : 'all'
   );
   const [localFocusOrderId, setLocalFocusOrderId] = useState(focusOrderId || '');
+  const [earningsPane, setEarningsPane] = useState<'orders' | 'rebate'>(
+    initialTab === 'rebate-income' ? 'rebate' : 'orders'
+  );
   const [showRealNameModal, setShowRealNameModal] = useState(initialTab === 'realname-verify');
 
   useEffect(() => {
@@ -157,8 +166,9 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
       setActiveTab('consultations');
       return;
     }
-    if (initialTab === 'custom-services') {
+    if (initialTab === 'custom-services' || initialTab === 'rebate-income') {
       setActiveTab('orders');
+      setEarningsPane(initialTab === 'rebate-income' ? 'rebate' : 'orders');
       return;
     }
     setActiveTab(initialTab);
@@ -473,74 +483,58 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
         </button>
       )}
 
-      {/* Top Header Banner */}
-      <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="relative shrink-0">
-            <img
-              src={profileData.avatar}
-              alt={profileData.name}
-              className="w-16 h-16 rounded-2xl object-cover ring-2 ring-blue-500 shadow-sm"
-            />
-            {verifyStatus === 'verified' && (
-              <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-600 rounded-full border-2 border-white flex items-center justify-center text-white" title="已实名认证">
-                <Check size={11} strokeWidth={3} />
-              </span>
-            )}
-          </div>
-          <div>
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-                FDE 工作台
-              </h1>
-              {verifyStatus === 'in_progress' || verifyStatus === 'manual_review' ? (
-                <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs font-bold border border-blue-200 flex items-center gap-1">
-                  <Clock size={13} />
-                  <span>实名审核中</span>
-                </span>
-              ) : verifyStatus !== 'verified' && !(isExpertRole(userRole)) ? (
-                <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200 flex items-center gap-1">
-                  <AlertCircle size={13} />
-                  <span>未实名认证 (受限模式)</span>
-                </span>
-              ) : null}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-4 min-w-0">
+          <img
+            src={profileData.avatar}
+            alt={profileData.name}
+            className="w-14 h-14 rounded-full object-cover shrink-0"
+          />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-lg font-bold text-slate-900 truncate">{profileData.name}</h1>
+              <button
+                type="button"
+                onClick={() => setShowRealNameModal(true)}
+                className="inline-flex items-center gap-1 h-5 px-1.5 rounded bg-blue-50 text-blue-600 text-[11px] font-semibold cursor-pointer"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                {verifyStatus === 'verified' ? 'FDE专家' : verifyStatus === 'in_progress' || verifyStatus === 'manual_review' ? '审核中' : '未认证'}
+              </button>
             </div>
-            {profileData.expertNo && (
-              <p className="text-xs font-mono text-slate-500 mt-1">
-                {profileData.name} · {profileData.expertNo}
-              </p>
-            )}
+            <p className="text-xs text-slate-400 mt-1">
+              智能体 {agentsList.length}
+              <span className="mx-2">·</span>
+              获赞 {agentsList.reduce((sum, agent) => sum + (agent.likesCount || 0), 0)}
+              <span className="mx-2">·</span>
+              收藏 {agentsList.reduce((sum, agent) => sum + (agent.favoritesCount || 0), 0)}
+            </p>
           </div>
         </div>
-
-        {/* Quick actions */}
-        <div className="flex items-center gap-2.5 w-full md:w-auto flex-wrap sm:flex-nowrap">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => setShowRealNameModal(true)}
-            className="px-3 py-2 rounded-xl bg-blue-50 text-blue-900 text-xs font-bold border border-blue-200 flex items-center gap-1.5 shrink-0 cursor-pointer hover:bg-blue-100 transition-colors"
-            title="查看实名认证详情"
+            onClick={() => onOpenRebateCampaign?.()}
+            className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-50"
           >
-            <Award size={13} className="text-blue-700" />
-            <span>
-              {verifyStatus === 'verified'
-                ? '已实名认证'
-                : verifyStatus === 'in_progress' || verifyStatus === 'manual_review'
-                  ? '实名认证审核中'
-                  : '实名认证'}
-            </span>
+            返点活动
           </button>
-
+          <button
+            type="button"
+            onClick={onNavigateToFDE}
+            className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-50"
+          >
+            查看主页
+          </button>
           <button
             type="button"
             onClick={() => setActiveTab('profile-editor')}
-            className="px-3 py-2 rounded-xl bg-white text-slate-700 text-xs font-bold border border-slate-200 flex items-center gap-1.5 shrink-0 cursor-pointer hover:bg-slate-50 transition-colors"
+            className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-50"
           >
-            <Edit3 size={13} />
-            <span>编辑公开主页</span>
+            编辑资料
           </button>
-
           <button
+            type="button"
             onClick={() => {
               if (verifyStatus !== 'verified') {
                 alert('⚠️ 无法发布：您尚未通过实名认证。请先完成实名认证。');
@@ -551,13 +545,17 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
               setInstanceForSkillReplacement(null);
               setShowPublishModal(true);
             }}
-            className="flex-1 md:flex-none px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+            className="h-9 px-3.5 rounded-lg bg-slate-900 text-white text-xs font-semibold cursor-pointer hover:bg-slate-800 inline-flex items-center gap-1"
           >
-            <Upload size={14} />
-            <span>发布智能体</span>
+            <Plus size={14} />
+            发布智能体
           </button>
         </div>
       </div>
+
+      {isExpertRole(userRole) && (
+        <AccountView userRole={userRole} embedded section="summary" />
+      )}
 
       {/* Verification Constraint Warning Alert (if not verified) */}
       {verifyStatus !== 'verified' && (
@@ -580,35 +578,29 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
         </div>
       )}
 
-      {/* 4-Module Navigation Tabs */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-2 shadow-2xs flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+      <div className="flex items-center gap-8 border-b border-slate-200 overflow-x-auto">
         {[
-          { key: 'my-agents', label: '智能体管理', icon: Bot, count: agentsList.length + instancesList.length },
-          { key: 'consultations', label: '咨询单管理', icon: MessageSquare, count: leadsList.filter((l) => l.status === 'new').length, badgeColor: 'bg-rose-500 text-white' },
-          { key: 'orders', label: '订单管理', icon: Package, count: null },
-          { key: 'account', label: '收益管理', icon: Wallet, count: null }
+          { key: 'my-agents', label: '智能体管理' },
+          { key: 'consultations', label: '咨询单管理' },
+          { key: 'orders', label: '收益管理' },
+          { key: 'account', label: '交易记录' },
+          { key: 'rebate-usage', label: '用户使用记录' }
         ].map((tab) => {
-          const Icon = tab.icon;
-          const isCurrent = activeTab === tab.key;
+          const isCurrent = tab.key === 'orders'
+            ? activeTab === 'orders' || activeTab === 'rebate-income'
+            : activeTab === tab.key;
           return (
             <button
               key={tab.key}
+              type="button"
               onClick={() => setActiveTab(tab.key as CreatorCenterTab)}
-              className={`flex-1 min-w-[130px] py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`pb-3 text-sm cursor-pointer border-b-2 -mb-px whitespace-nowrap shrink-0 ${
                 isCurrent
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  ? 'border-slate-900 font-semibold text-slate-900'
+                  : 'border-transparent font-medium text-slate-400 hover:text-slate-700'
               }`}
             >
-              <Icon size={14} />
-              <span>{tab.label}</span>
-              {tab.count !== null && (
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                  tab.badgeColor || (isCurrent ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700')
-                }`}>
-                  {tab.count}
-                </span>
-              )}
+              {tab.label}
             </button>
           );
         })}
@@ -919,20 +911,50 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
           sessionLeads={sessionLeads}
           onOpenOrder={(orderId) => {
             setLocalFocusOrderId(orderId);
+            setEarningsPane('orders');
             setActiveTab('orders');
           }}
         />
       )}
 
-      {activeTab === 'orders' && (
-        <CreatorCustomOrdersPanel
-          sessionLeads={sessionLeads}
-          focusOrderId={localFocusOrderId || focusOrderId}
-          onFocusConsumed={() => {
-            setLocalFocusOrderId('');
-            onFocusConsumed?.();
-          }}
-        />
+      {(activeTab === 'orders' || activeTab === 'rebate-income') && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-8 border-b border-slate-200">
+            {([
+              ['orders', '智能体订单'],
+              ['rebate', '返点收入']
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setEarningsPane(key)}
+                title={key === 'rebate' ? '只有按词元计费的模型才能返点，比例按模型分别配置' : undefined}
+                className={`pb-3 text-sm cursor-pointer border-b-2 -mb-px inline-flex items-center gap-1.5 ${
+                  earningsPane === key
+                    ? 'border-slate-900 font-semibold text-slate-900'
+                    : 'border-transparent font-medium text-slate-400 hover:text-slate-700'
+                }`}
+              >
+                {label}
+                {key === 'rebate' && (
+                  <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-current text-[10px] leading-none opacity-70">?</span>
+                )}
+              </button>
+            ))}
+          </div>
+          {earningsPane === 'orders' ? (
+            <CreatorCustomOrdersPanel
+              sessionLeads={sessionLeads}
+              focusOrderId={localFocusOrderId || focusOrderId}
+              onFocusConsumed={() => {
+                setLocalFocusOrderId('');
+                onFocusConsumed?.();
+              }}
+            />
+          ) : (
+            <RebateDeskPanel mode="income" />
+          )}
+        </div>
       )}
 
       {activeTab === 'account' && (
@@ -940,8 +962,11 @@ export const CreatorCenterView: React.FC<CreatorCenterViewProps> = ({
           onOpenRecharge={onOpenRecharge}
           userRole={userRole}
           embedded
+          section="ledger"
         />
       )}
+
+      {activeTab === 'rebate-usage' && <RebateDeskPanel mode="usage" />}
 
       {/* ========================================================= */}
       {/* 实名认证弹窗（由顶部「已认证 AI 专家」入口打开）            */}

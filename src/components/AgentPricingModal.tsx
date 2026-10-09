@@ -35,6 +35,7 @@ export const AgentPricingModal: React.FC<AgentPricingModalProps> = ({ agent, onC
   const [tab, setTab] = useState<PricingTab>('usage');
   const [pricingModel, setPricingModel] = useState<'paid' | 'free'>(initial.isFree ? 'free' : 'paid');
   const [price, setPrice] = useState(initial.price || 39);
+  const [trialDays, setTrialDays] = useState(initial.trialDays || 0);
   const [customEnabled, setCustomEnabled] = useState(agent.fdeCustomEnabled !== false);
   const [projects, setProjects] = useState<AgentCustomProject[]>(
     normalizeCustomProjects(agent.customProjects || [])
@@ -60,7 +61,7 @@ export const AgentPricingModal: React.FC<AgentPricingModalProps> = ({ agent, onC
 
   useEffect(() => {
     setError('');
-  }, [tab, pricingModel, price, customEnabled, projects, adapterPackages]);
+  }, [tab, pricingModel, price, trialDays, customEnabled, projects, adapterPackages]);
 
   const updateAdapter = (id: string, patch: Partial<AgentAdapterPackage>) => {
     setAdapterPackages((prev) => prev.map((pack) => (pack.id === id ? { ...pack, ...patch } : pack)));
@@ -69,7 +70,8 @@ export const AgentPricingModal: React.FC<AgentPricingModalProps> = ({ agent, onC
   const handleSave = async () => {
     const plans = normalizePricingPlans({
       isFree: pricingModel === 'free',
-      price
+      price,
+      trialDays
     });
     const invalidPlans = validatePaidPlans(plans);
     if (invalidPlans) {
@@ -181,8 +183,10 @@ export const AgentPricingModal: React.FC<AgentPricingModalProps> = ({ agent, onC
               <AgentPricingFields
                 pricingModel={pricingModel}
                 price={price}
+                trialDays={trialDays}
                 onPricingModelChange={setPricingModel}
                 onPriceChange={setPrice}
+                onTrialDaysChange={setTrialDays}
               />
               <p className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
                 {AGENT_PRICE_CHANGE_NOTICE} 此处只管理智能体使用/生成内容的一次性售价。

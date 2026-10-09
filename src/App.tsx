@@ -14,6 +14,7 @@ import { ConsultDealDrawer } from './components/ConsultDealDrawer';
 import { MessagesInboxView } from './components/MessagesInboxView';
 import { RechargeModal } from './components/RechargeModal';
 import { CreatorCenterView, CreatorCenterTab } from './components/CreatorCenterView';
+import { RebateCampaignPage } from './components/RebateActivityPanel';
 import { PersonalCenterView } from './components/PersonalCenterView';
 import { CreatorOnboardingModal } from './components/CreatorOnboardingModal';
 import { CreatorDebugPanelModal } from './components/CreatorDebugPanelModal';
@@ -62,7 +63,7 @@ export default function App() {
 
   // Global sidebar route: 'hellome-home' | 'author-profile' | 'creator-center' | 'workspace' | 'account' | 'apikey'
   const [currentRoute, setCurrentRoute] = useState<
-    MainNavRoute | 'author-profile' | 'agent-detail' | 'inspiration-detail'
+    MainNavRoute | 'author-profile' | 'agent-detail' | 'inspiration-detail' | 'rebate-campaign'
   >('hellome-home');
   const [creatorCenterTab, setCreatorCenterTab] = useState<CreatorCenterTab>('my-agents');
   const [navigationFocus, setNavigationFocus] = useState<NavigationFocus | null>(null);
@@ -846,7 +847,9 @@ export default function App() {
           currentRoute === 'agent-detail' ||
           currentRoute === 'inspiration-detail'
             ? 'hellome-home'
-            : currentRoute
+            : currentRoute === 'rebate-campaign'
+              ? 'creator-center'
+              : currentRoute
         }
         onNavigate={(route) => {
           if (route === 'account') {
@@ -1137,6 +1140,10 @@ export default function App() {
                 userRole={userRole}
                 sessionLeads={sessionConsultationLeads}
                 onOpenRecharge={() => setIsRechargeOpen(true)}
+                onOpenRebateCampaign={() => {
+                  setCurrentRoute('rebate-campaign');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
                 focusOrderId={navigationFocus?.orderId}
                 onFocusConsumed={clearNavigationFocus}
                 onBack={
@@ -1152,6 +1159,12 @@ export default function App() {
                   creatorCenterBackRoute === 'fde-experts' ? '返回 AI 专家库' : '返回'
                 }
               />
+            </div>
+          )}
+
+          {currentRoute === 'rebate-campaign' && isExpertRole(userRole) && (
+            <div className="p-4 sm:p-6 lg:p-10 max-w-3xl mx-auto">
+              <RebateCampaignPage onBack={() => setCurrentRoute('creator-center')} />
             </div>
           )}
 

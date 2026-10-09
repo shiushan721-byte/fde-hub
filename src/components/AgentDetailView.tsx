@@ -22,6 +22,7 @@ import {
 import { AgentShareModal } from './AgentShareModal';
 import { adapterDisplayName, adapterPackageIsFree, adapterPackagePriceYuan, adapterZipAbsoluteUrl, buildAdapterSkillPrompt } from '../../shared/adapterPackages';
 import { pricingFromAgent, pricingLabel } from '../../shared/pricingPlans';
+import type { AgentTrialView } from '../../shared/agentTrial';
 import { PaymentCheckoutDrawer } from './PaymentCheckoutDrawer';
 import { CreatorContactModal } from './CreatorContactModal';
 import { AgentShowcaseSection } from './AgentShowcaseSection';
@@ -30,6 +31,18 @@ import { showcaseToPublicInspiration, type PublicInspiration } from '../lib/insp
 import { yuanAmount } from '../lib/customOrderLabels';
 import { getMockComments } from '../data/agentSocialMock';
 import { activeCustomProjects } from '../../shared/customProjects';
+
+function formatTrialEnd(iso: string | null) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
 
 interface AgentDetailViewProps {
   agent: HellomeAgentItem;
@@ -106,6 +119,8 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   const [copiedPackId, setCopiedPackId] = useState('');
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const [license, setLicense] = useState<CatalogLicense | null>(null);
+  const [trial, setTrial] = useState<AgentTrialView | null>(null);
+  const [accessLoaded, setAccessLoaded] = useState(false);
   const [adapterEntitlements, setAdapterEntitlements] = useState<AdapterEntitlement[]>([]);
   const [checkout, setCheckout] = useState<CheckoutOrder | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
@@ -170,6 +185,25 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
       });
     } catch (err) {
       onToast?.(err instanceof Error ? err.message : '无法发起支付');
+    } finally {
+      setBuyBusy(false);
+    }
+  };
+
+  const startTrialUse = async () => {
+    if (!onUseAgent) return;
+    setBuyBusy(true);
+    try {
+      await ensureMarketplaceSession();
+      const row = await api<AgentTrialView>(`/api/me/agents/${agent.id}/trial/start`, { method: 'POST' });
+      setTrial(row);
+      if (row.status !== 'active') {
+        onToast?.('试用未能开始');
+        return;
+      }
+      onUseAgent(agent);
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : '无法开始试用');
     } finally {
       setBuyBusy(false);
     }
@@ -253,23 +287,29 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
   useEffect(() => {
     setShareUrl('');
     setCheckout(null);
+    setAccessLoaded(false);
     let cancelled = false;
     (async () => {
       try {
         await ensureMarketplaceSession();
-        const [item, adapters] = await Promise.all([
+        const [item, adapters, trialRow] = await Promise.all([
           api<CatalogLicense | null>(`/api/me/agents/${agent.id}/license`),
-          api<AdapterEntitlement[]>(`/api/me/agents/${agent.id}/adapter-licenses`).catch(() => [])
+          api<AdapterEntitlement[]>(`/api/me/agents/${agent.id}/adapter-licenses`).catch(() => []),
+          api<AgentTrialView>(`/api/me/agents/${agent.id}/trial`).catch(() => null)
         ]);
         if (!cancelled) {
           setLicense(item);
           setAdapterEntitlements(adapters);
+          setTrial(trialRow);
         }
       } catch {
         if (!cancelled) {
           setLicense(null);
           setAdapterEntitlements([]);
+          setTrial(null);
         }
+      } finally {
+        if (!cancelled) setAccessLoaded(true);
       }
     })();
     return () => {
@@ -577,18 +617,68 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
                     ￥{saleYuan}
                     <span className="text-[13px] font-medium text-slate-400"> 一次性</span>
                   </div>
-                  <p className="text-[12px] text-slate-400">购买后可长期使用</p>
                   {owned ? (
-                    <p className="text-[11px] text-emerald-700">已购买，可长期使用</p>
-                  ) : (
+                    <>
+                      <p className="text-[12px] text-emerald-700">已购买，可长期使用。</p>
+                      {onUseAgent ? (
+                        <button
+                          type="button"
+                          onClick={() => onUseAgent(agent)}
+                          className="w-full h-10 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[13px] font-semibold cursor-pointer"
+                        >
+                          立即使用
+                        </button>
+                      ) : null}
+                    </>
+                  ) : !accessLoaded ? (
                     <button
                       type="button"
-                      disabled={buyBusy || saleYuan < 1}
-                      onClick={() => void startCheckout()}
-                      className="w-full h-10 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[13px] font-semibold cursor-pointer disabled:opacity-60"
+                      disabled
+                      className="w-full h-10 rounded-lg bg-slate-900 text-white text-[13px] font-semibold opacity-60"
                     >
-                      {buyBusy ? '正在创建订单…' : `立即解锁 ${yuanAmount(saleYuan * 100)}`}
+                      正在确认权益…
                     </button>
+                  ) : trial?.status === 'active' ? (
+                    <>
+                      <p className="text-[12px] text-slate-500 leading-5">
+                        成功启动后开始计时。到期后需一次购买，购买后可长期使用。
+                        {trial.expiresAt ? ` 试用至 ${formatTrialEnd(trial.expiresAt)}。` : ''}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={buyBusy || !onUseAgent}
+                        onClick={() => onUseAgent?.(agent)}
+                        className="w-full h-10 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[13px] font-semibold cursor-pointer disabled:opacity-60"
+                      >
+                        继续使用｜剩余 {trial.remainingDays} 天
+                      </button>
+                    </>
+                  ) : pricing.trialDays > 0 && trial?.status !== 'expired' ? (
+                    <>
+                      <p className="text-[12px] text-slate-500 leading-5">
+                        成功启动后开始计时。到期后需一次购买，购买后可长期使用。
+                      </p>
+                      <button
+                        type="button"
+                        disabled={buyBusy || !onUseAgent}
+                        onClick={() => void startTrialUse()}
+                        className="w-full h-10 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[13px] font-semibold cursor-pointer disabled:opacity-60"
+                      >
+                        {buyBusy ? '正在开始试用…' : `免费试用 ${pricing.trialDays} 天`}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[12px] text-slate-500 leading-5">一次购买，长期使用，不按月续费。</p>
+                      <button
+                        type="button"
+                        disabled={buyBusy || saleYuan < 1}
+                        onClick={() => void startCheckout()}
+                        className="w-full h-10 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[13px] font-semibold cursor-pointer disabled:opacity-60"
+                      >
+                        {buyBusy ? '正在创建订单…' : `购买后使用 ${yuanAmount(saleYuan * 100)}`}
+                      </button>
+                    </>
                   )}
                 </div>
               )}
@@ -639,7 +729,7 @@ export const AgentDetailView: React.FC<AgentDetailViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2 py-4">
-              {onUseAgent && (pricing.isFree || owned) && (
+              {onUseAgent && pricing.isFree && (
                 <button
                   type="button"
                   onClick={() => onUseAgent(agent)}

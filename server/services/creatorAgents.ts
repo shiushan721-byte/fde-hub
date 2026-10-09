@@ -34,6 +34,7 @@ type UpsertAgentInput = {
   platformSupport?: 'mac' | 'windows' | 'both';
   isFree?: boolean;
   price?: number;
+  trialDays?: number;
   enableEnterpriseCustomization?: boolean;
   customProjects?: unknown;
   adapterPackages?: unknown;
@@ -319,9 +320,25 @@ export async function creatorUpsertAgent(userId: string, input: UpsertAgentInput
   if (!title) throw httpError('请填写智能体名称', 400);
   if (!desc) throw httpError('请填写功能描述', 400);
 
+  const existing = input.id
+    ? await prisma.agent.findFirst({
+        where: { id: input.id, authorId: expert.id, creatorDeletedAt: null }
+      })
+    : null;
+  if (input.id && !existing) {
+    throw httpError('智能体不存在或无权操作', 404);
+  }
+
+  const existingPlans = existing
+    ? pricingFromAgent({
+        price: existing.price,
+        pricingPlans: parseJson(existing.pricingPlans, {})
+      })
+    : null;
   const plans = normalizePricingPlans({
     isFree: Boolean(input.isFree),
-    price: input.price
+    price: input.price,
+    trialDays: input.trialDays ?? existingPlans?.trialDays ?? 0
   });
   if (input.visibility !== 'draft') {
     const invalidPlans = validatePaidPlans(plans);
@@ -332,15 +349,6 @@ export async function creatorUpsertAgent(userId: string, input: UpsertAgentInput
   for (const pack of packages) {
     const invalid = validateAdapterPackagePricing(pack);
     if (invalid) throw httpError(invalid, 400);
-  }
-
-  const existing = input.id
-    ? await prisma.agent.findFirst({
-        where: { id: input.id, authorId: expert.id, creatorDeletedAt: null }
-      })
-    : null;
-  if (input.id && !existing) {
-    throw httpError('智能体不存在或无权操作', 404);
   }
 
   const projects = normalizeCustomProjects(input.customProjects);

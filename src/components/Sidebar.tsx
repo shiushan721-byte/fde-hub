@@ -99,7 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   menuItems.push({
     key: 'creator-center',
-    label: isExpert ? 'FDE 工作台' : '个人中心',
+    label: isExpert ? '创作者空间' : '个人中心',
     icon: Crown
   });
 

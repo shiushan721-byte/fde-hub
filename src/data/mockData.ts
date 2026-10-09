@@ -77,7 +77,8 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-maya',
     price: 39,
     pricingPlans: {
-      price: 39
+      price: 39,
+      trialDays: 7
     },
     likesCount: '2.4k',
     favoritesCount: '1.8k',
@@ -141,7 +142,8 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-maya',
     price: 29,
     pricingPlans: {
-      price: 29
+      price: 29,
+      trialDays: 30
     },
     likesCount: '5.1k',
     favoritesCount: '3.6k',
@@ -176,7 +178,8 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-linran',
     price: 19,
     pricingPlans: {
-      price: 19
+      price: 19,
+      trialDays: 0
     },
     likesCount: '8.9k',
     favoritesCount: '6.4k',
@@ -211,7 +214,8 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-yunfan',
     price: 45,
     pricingPlans: {
-      price: 45
+      price: 45,
+      trialDays: 30
     },
     likesCount: '3.7k',
     favoritesCount: '2.9k',
@@ -246,7 +250,8 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-linran',
     price: 25,
     pricingPlans: {
-      price: 25
+      price: 25,
+      trialDays: 7
     },
     likesCount: '6.3k',
     favoritesCount: '4.8k',
@@ -325,7 +330,8 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-linran',
     price: 59,
     pricingPlans: {
-      price: 59
+      price: 59,
+      trialDays: 0
     },
     likesCount: '1.8k',
     favoritesCount: '1.2k',
@@ -360,7 +366,8 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-yunfan',
     price: 88,
     pricingPlans: {
-      price: 88
+      price: 88,
+      trialDays: 30
     },
     likesCount: '980',
     favoritesCount: '760',
@@ -395,7 +402,8 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-zhouchen',
     price: 32,
     pricingPlans: {
-      price: 32
+      price: 32,
+      trialDays: 7
     },
     likesCount: '4.2k',
     favoritesCount: '3.1k',
@@ -430,7 +438,8 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-zhangheng',
     price: 69,
     pricingPlans: {
-      price: 69
+      price: 69,
+      trialDays: 0
     },
     likesCount: '2.7k',
     favoritesCount: '2.1k',
@@ -465,7 +474,8 @@ export const mockHellomeHomeAgents: HellomeAgentItem[] = [
     authorId: 'fde-chenzimo',
     price: 35,
     pricingPlans: {
-      price: 35
+      price: 35,
+      trialDays: 30
     },
     likesCount: '7.6k',
     favoritesCount: '5.4k',

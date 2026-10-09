@@ -1,11 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Package,
-  FileText,
-  Handshake,
-  MessageSquare,
-  UploadCloud
-} from 'lucide-react';
 import { api } from '../lib/api';
 import { ensureMarketplaceSession } from '../lib/marketplaceAuth';
 import {
@@ -19,8 +12,6 @@ import {
   isPaidFulfillmentDeal,
   matchesConsultFilter,
   matchesFulfillmentFilter,
-  paymentStatusText,
-  yuan
 } from '../lib/customOrderLabels';
 import {
   DeliveryProposalModal,
@@ -129,85 +120,85 @@ export const CreatorConsultationsPanel: React.FC<{
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-            <MessageSquare size={15} className="text-blue-600" />
-            咨询单管理
-          </h3>
-          <p className="text-[11px] text-slate-500 mt-0.5">
-            用户提出需求、尚未付款。付款后自动生成订单，咨询单记录会保留并链接到订单。
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200">
-            {CONSULT_FILTERS.map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => setFilter(f.key)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
-                  filter === f.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <button type="button" onClick={() => void reload()} className="text-[11px] text-blue-600 font-bold cursor-pointer shrink-0">
-            刷新
+      <div className="flex flex-wrap items-center gap-2">
+        {CONSULT_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => setFilter(f.key)}
+            className={`h-8 px-3 rounded-lg text-xs cursor-pointer ${
+              filter === f.key ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            {f.label}
           </button>
-        </div>
+        ))}
       </div>
-      {filtered.length === 0 && <p className="text-xs text-slate-500">暂无咨询单。</p>}
-      {filtered.map((deal) => {
-        const consult = consultListStatus(deal);
-        const converted = consult.key === 'converted';
-        const orderId = deal.orderId || deal.order?.id || '';
-        return (
-          <div key={deal.dealId} className="p-3.5 rounded-2xl border border-slate-200 bg-white space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-xs font-bold text-slate-900">
-                  {deal.clientName}
-                  {deal.clientCompany ? ` · ${deal.clientCompany}` : ''}
-                </div>
-                <div className="text-[11px] text-slate-500 mt-0.5">
-                  {deal.agentTitle || deal.order?.baseAgentTitle || '未指定智能体'}
-                  {deal.consultedAt ? ` · ${formatOrderTime(deal.consultedAt)}` : ''}
-                </div>
-                <p className="text-[11px] text-slate-600 mt-1.5 line-clamp-2">{deal.requirement || '暂无需求描述'}</p>
-              </div>
-              <span
-                className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  converted ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                }`}
-              >
-                {consult.label}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setOpenDealId(deal.dealId)}
-                className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer inline-flex items-center gap-1.5"
-              >
-                <Handshake size={14} />
-                {consult.key === 'pending_accept' ? '接单处理' : '查看沟通'}
-              </button>
-              {converted && orderId && (
-                <button
-                  type="button"
-                  onClick={() => onOpenOrder?.(orderId)}
-                  className="px-3.5 py-2 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold cursor-pointer"
-                >
-                  查看对应订单
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-x-auto">
+        <table className="w-full min-w-[960px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 text-xs text-slate-400">
+              <th className="px-4 py-3 font-medium">定制用户</th>
+              <th className="px-4 py-3 font-medium">联系方式</th>
+              <th className="px-4 py-3 font-medium">时间</th>
+              <th className="px-4 py-3 font-medium">智能体</th>
+              <th className="px-4 py-3 font-medium">定制项目</th>
+              <th className="px-4 py-3 font-medium">状态</th>
+              <th className="px-4 py-3 font-medium text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-12 text-center text-xs text-slate-400">暂无咨询单。</td>
+              </tr>
+            )}
+            {filtered.map((deal) => {
+              const consult = consultListStatus(deal);
+              const converted = consult.key === 'converted';
+              const orderId = deal.orderId || deal.order?.id || '';
+              const lead = sessionLeads.find((item) => item.id === deal.leadId || item.id === deal.dealId);
+              return (
+                <tr key={deal.dealId} className="border-b border-slate-50 last:border-0">
+                  <td className="px-4 py-3.5">
+                    <div className="flex items-center gap-2">
+                      {deal.clientAvatar ? (
+                        <img src={deal.clientAvatar} alt="" className="w-7 h-7 rounded-full object-cover" />
+                      ) : (
+                        <span className="w-7 h-7 rounded-full bg-slate-200" />
+                      )}
+                      <span className="text-slate-800">{deal.clientName}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3.5 text-slate-500">{lead?.contactPhone || deal.clientCompany || '—'}</td>
+                  <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">{deal.consultedAt ? formatOrderTime(deal.consultedAt) : '—'}</td>
+                  <td className="px-4 py-3.5 text-slate-700">{deal.agentTitle || deal.order?.baseAgentTitle || '未指定智能体'}</td>
+                  <td className="px-4 py-3.5 text-slate-600 max-w-[220px] truncate">{deal.requirement || '暂无需求描述'}</td>
+                  <td className={`px-4 py-3.5 whitespace-nowrap ${converted ? 'text-slate-400' : 'text-slate-700'}`}>{consult.label}</td>
+                  <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => setOpenDealId(deal.dealId)}
+                      className="h-7 px-2.5 rounded-md bg-slate-900 text-white text-xs cursor-pointer mr-2"
+                    >
+                      {consult.key === 'pending_accept' ? '接单' : '沟通'}
+                    </button>
+                    {converted && orderId && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenOrder?.(orderId)}
+                        className="h-7 px-2.5 rounded-md border border-slate-200 text-xs cursor-pointer"
+                      >
+                        订单
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       {openDealId && (
         <ConsultDealDrawer
           dealId={openDealId}
@@ -301,144 +292,97 @@ export const CreatorCustomOrdersPanel: React.FC<{
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-            <Package size={15} className="text-blue-600" />
-            订单管理
-          </h3>
-          <p className="text-[11px] text-slate-500 mt-0.5">
-            仅处理已付款项目：直接购买的标准商品，以及由咨询单转化的定制订单。
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex flex-wrap gap-1 bg-white p-1 rounded-xl border border-slate-200">
-            {FULFILLMENT_FILTERS.map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => setFilter(f.key)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
-                  filter === f.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <button type="button" onClick={() => void reload()} className="text-[11px] text-blue-600 font-bold cursor-pointer shrink-0">
-            刷新
-          </button>
-        </div>
-      </div>
-      {filtered.length === 0 && (
-        <p className="text-xs text-slate-500">暂无已付款订单。咨询单付款后会自动出现在这里。</p>
-      )}
-      {filtered.map((deal) => {
-        const order = deal.order;
-        const hasPrice = (order?.priceCents || 0) > 0;
-        const proposal = order?.deliveryProposal as DeliveryProposal | undefined;
-        const fulfill = fulfillmentListStatus(order?.status);
-        const canViewProposal = hasViewableProposal(proposal);
-        const isFocused =
-          focusOrderId &&
-          (deal.orderId === focusOrderId ||
-            deal.order?.id === focusOrderId ||
-            deal.dealId === focusOrderId);
-        return (
-          <div
-            key={deal.dealId}
-            id={deal.order?.id ? `creator-order-${deal.order.id}` : undefined}
-            className={`p-3.5 rounded-2xl border bg-white space-y-3 ${
-              isFocused ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'
+      <div className="flex flex-wrap items-center gap-2">
+        {FULFILLMENT_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => setFilter(f.key)}
+            className={`h-8 px-3 rounded-lg text-xs cursor-pointer ${
+              filter === f.key ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-500 hover:bg-slate-50'
             }`}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold text-slate-900">
-                  {deal.clientName || order?.buyer?.name || '购买用户'}
-                  {deal.clientCompany ? ` · ${deal.clientCompany}` : ''}
-                </div>
-                <div className="text-[11px] text-slate-500 mt-0.5">
-                  {order?.orderNo || '订单'} · {deal.agentTitle || order?.baseAgentTitle || '未指定智能体'}
-                  {order?.baseAgentVersion ? ` ${order.baseAgentVersion}` : ''}
-                </div>
-                {selectedProjectsFromOrder(order).length > 0 && (
-                  <div className="text-[11px] text-slate-600 mt-1">
-                    商品 / 定制项目：
-                    {selectedProjectsFromOrder(order)
-                      .map((item) => `${item.title}${item.price ? ` ¥${item.price}` : ''}`)
-                      .join('、')}
-                  </div>
-                )}
-                <div className="text-[11px] text-slate-500 mt-1 space-y-0.5">
-                  {order?.createdAt && <div>下单时间 · {formatOrderTime(order.createdAt)}</div>}
-                  {order?.paidAt && <div>付款时间 · {formatOrderTime(order.paidAt)}</div>}
-                  {order?.acceptanceDeadlineAt && (
-                    <div>验收截止 · {formatOrderTime(order.acceptanceDeadlineAt)}</div>
-                  )}
-                  {order?.deliveryDays ? <div>交付期限 · {order.deliveryDays} 天</div> : null}
-                </div>
-              </div>
-              <div className="text-right shrink-0 space-y-1.5">
-                <span className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
-                  {fulfill.label}
-                </span>
-                <div>
-                  <div className="text-[10px] font-bold text-slate-400 tracking-wide">已支付金额</div>
-                  <div
-                    className={`text-lg font-black tabular-nums leading-tight ${
-                      hasPrice ? 'text-amber-600' : 'text-slate-300'
-                    }`}
-                  >
-                    {hasPrice ? yuan(order?.priceCents) : '—'}
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">
-                    托管 {paymentStatusText[order?.paymentStatus || ''] || paymentStatusText.none}
-                  </div>
-                </div>
-              </div>
-            </div>
-            {(order?.serviceScope || order?.quoteNote) && (
-              <p className="text-[11px] text-slate-600 leading-relaxed">
-                服务方案：{order.serviceScope || order.quoteNote}
-              </p>
+            {f.label}
+          </button>
+        ))}
+      </div>
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-x-auto">
+        <table className="w-full min-w-[1100px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 text-xs text-slate-400">
+              <th className="px-4 py-3 font-medium">定制用户</th>
+              <th className="px-4 py-3 font-medium">联系方式</th>
+              <th className="px-4 py-3 font-medium">时间</th>
+              <th className="px-4 py-3 font-medium">交易单号</th>
+              <th className="px-4 py-3 font-medium">智能体</th>
+              <th className="px-4 py-3 font-medium">定制类型</th>
+              <th className="px-4 py-3 font-medium">需求详情</th>
+              <th className="px-4 py-3 font-medium text-right">价格</th>
+              <th className="px-4 py-3 font-medium">状态</th>
+              <th className="px-4 py-3 font-medium text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={10} className="px-4 py-12 text-center text-xs text-slate-400">暂无已付款订单。咨询单付款后会自动出现在这里。</td>
+              </tr>
             )}
-            {order?.instance && (
-              <p className="text-[11px] text-slate-600">
-                当前交付版本：{order.instance.title}
-                {order.instance.currentVersion ? ` · ${order.instance.currentVersion}` : ''}
-              </p>
-            )}
-            {order?.deliveries?.[0]?.rejectReason && (
-              <p className="text-[11px] text-rose-600">驳回：{order.deliveries[0].rejectReason}</p>
-            )}
-            <div className="flex flex-wrap gap-2 pt-0.5">
-              {canViewProposal && (
-                <button
-                  type="button"
-                  onClick={() => setViewProposalDeal(deal)}
-                  className="px-3.5 py-2 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 text-xs font-bold cursor-pointer flex items-center gap-1.5 hover:bg-violet-100"
+            {filtered.map((deal) => {
+              const order = deal.order;
+              const hasPrice = (order?.priceCents || 0) > 0;
+              const proposal = order?.deliveryProposal as DeliveryProposal | undefined;
+              const fulfill = fulfillmentListStatus(order?.status);
+              const canViewProposal = hasViewableProposal(proposal);
+              const projects = selectedProjectsFromOrder(order);
+              const lead = sessionLeads.find((item) => item.id === deal.leadId || item.id === deal.dealId);
+              const rejected = Boolean(order?.deliveries?.[0]?.rejectReason);
+              return (
+                <tr
+                  key={deal.dealId}
+                  id={deal.order?.id ? `creator-order-${deal.order.id}` : undefined}
+                  className="border-b border-slate-50 last:border-0"
                 >
-                  <FileText size={14} />
-                  查看方案
-                </button>
-              )}
-              {order && canUploadSkill(order.status) && (
-                <button
-                  type="button"
-                  disabled={busyId === order.id}
-                  onClick={() => setDeliveryDeal(deal)}
-                  className="px-3.5 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold cursor-pointer flex items-center gap-1.5 disabled:opacity-60 shadow-sm shadow-indigo-600/20"
-                >
-                  <UploadCloud size={14} />
-                  上传交付版本
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })}
+                  <td className="px-4 py-3.5 text-slate-800">{deal.clientName || order?.buyer?.name || '购买用户'}</td>
+                  <td className="px-4 py-3.5 text-slate-500">{lead?.contactPhone || deal.clientCompany || '—'}</td>
+                  <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">{order?.createdAt ? formatOrderTime(order.createdAt) : '—'}</td>
+                  <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">{order?.orderNo || '—'}</td>
+                  <td className="px-4 py-3.5 text-slate-700">{deal.agentTitle || order?.baseAgentTitle || '未指定智能体'}</td>
+                  <td className="px-4 py-3.5 text-slate-600">{projects.length > 0 || deal.requirement ? '自定义' : '标准'}</td>
+                  <td className="px-4 py-3.5 text-blue-600 max-w-[180px] truncate">
+                    {projects.map((item) => item.title).join('、') || deal.requirement || order?.serviceScope || '查看'}
+                  </td>
+                  <td className="px-4 py-3.5 text-right tabular-nums text-slate-800">{hasPrice ? ((order?.priceCents || 0) / 100).toFixed(2) : '—'}</td>
+                  <td className={`px-4 py-3.5 whitespace-nowrap ${rejected ? 'text-rose-500' : 'text-slate-600'}`}>
+                    {rejected ? '被驳回' : fulfill.label}
+                  </td>
+                  <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                    {canViewProposal && (
+                      <button
+                        type="button"
+                        onClick={() => setViewProposalDeal(deal)}
+                        className="h-7 px-2.5 rounded-md bg-slate-900 text-white text-xs cursor-pointer mr-2"
+                      >
+                        查看方案
+                      </button>
+                    )}
+                    {order && canUploadSkill(order.status) && (
+                      <button
+                        type="button"
+                        disabled={busyId === order.id}
+                        onClick={() => setDeliveryDeal(deal)}
+                        className="h-7 px-2.5 rounded-md bg-slate-900 text-white text-xs cursor-pointer disabled:opacity-60"
+                      >
+                        上传Skill
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
 
       {viewProposalDeal?.order && hasViewableProposal(viewProposalDeal.order.deliveryProposal) && (
         <DeliveryProposalModal

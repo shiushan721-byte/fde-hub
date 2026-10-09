@@ -357,6 +357,9 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       agentToUpdate?.price ||
       39
   );
+  const [trialDays, setTrialDays] = useState<number>(
+    agentToUpdate ? agentToUpdate.pricingPlans?.trialDays || 0 : 7
+  );
   const [enableEnterpriseCustomization, setEnableEnterpriseCustomization] = useState(
     agentToUpdate?.fdeCustomEnabled ?? true
   );
@@ -429,6 +432,7 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
           agentToUpdate.price ||
           39
       );
+      setTrialDays(agentToUpdate.pricingPlans?.trialDays || 0);
     }
     const preset = mockSkillPresets.find((p) => p.id === selectedPresetId) || mockSkillPresets[0];
     if (!agentToUpdate && !agentTitle) {
@@ -695,7 +699,8 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
     price: pricingModel === 'free' ? 0 : Number(price),
     pricingPlans: {
       price: Number(price),
-      isFree: pricingModel === 'free'
+      isFree: pricingModel === 'free',
+      trialDays: pricingModel === 'free' ? 0 : trialDays
     },
     tokenRebateEnabled: true,
     fdeCustomEnabled: enableEnterpriseCustomization,
@@ -741,6 +746,7 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
       platformSupport,
       isFree: pricingModel === 'free',
       price: Number(price),
+      trialDays: pricingModel === 'free' ? 0 : trialDays,
       enableEnterpriseCustomization,
       customProjects,
       adapterPackages,
@@ -808,7 +814,8 @@ export const AgentPublishWizardModal: React.FC<AgentPublishWizardModalProps> = (
     if (mode !== 'custom_delivery') {
       const plans = normalizePricingPlans({
         isFree: pricingModel === 'free',
-        price
+        price,
+        trialDays
       });
       const invalid = validatePaidPlans(plans);
       if (invalid) {
@@ -1939,8 +1946,10 @@ your-skill-v1.0.0/
                 <AgentPricingFields
                   pricingModel={pricingModel}
                   price={price}
+                  trialDays={trialDays}
                   onPricingModelChange={setPricingModel}
                   onPriceChange={setPrice}
+                  onTrialDaysChange={setTrialDays}
                   tokenRebateRate={tokenRebateRate}
                 />
 
